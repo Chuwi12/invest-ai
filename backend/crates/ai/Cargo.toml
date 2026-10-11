@@ -7,3 +7,18 @@ publish.workspace = true
 
 [dependencies]
 domain.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+# Flujos con `stream!`: al soltar el stream se sueltan también las peticiones HTTP en vuelo.
+async-stream = "0.3"
+
+[dev-dependencies]
+# Servidor Ollama simulado para los tests (puerto efímero, sin red real).
+axum = "0.8"
