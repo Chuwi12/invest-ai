@@ -1,0 +1,814 @@
+//! Tipos y contratos compartidos por todos los crates del backend.
+//!
+//! Es la fuente de verdad del contrato con el frontend: todo lo que viaja en JSON sale de aquí
+//! (structs en camelCase, enums en snake_case). `frontend/src/api/types.ts` lo refleja 1:1;
+//! si cambias algo aquí, cámbialo también allí y en `docs/API.md`.
+
+use std::{collections::BTreeMap, fmt, str::FromStr, sync::Arc};
+
+use async_trait::async_trait;
+use chrono::{DateTime, NaiveDate, Utc};
+use futures::stream::BoxStream;
+use serde::{Deserialize, Serialize};
+
+// ---------------------------------------------------------------------------------------------
+// Errores
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Debug, thiserror::Error)]
+pub enum DomainError {
+    #[error("no encontrado: {0}")]
+    NotFound(String),
+    #[error("entrada no válida: {0}")]
+    InvalidInput(String),
+    #[error("error del proveedor {provider}: {message}")]
+    Upstream { provider: String, message: String },
+    #[error("límite de peticiones del proveedor {provider}")]
+    RateLimited { provider: String },
+    #[error("servicio no disponible: {0}")]
+    Unavailable(String),
+    #[error("error interno: {0}")]
+    Internal(String),
+}
+
+pub type Result<T, E = DomainError> = std::result::Result<T, E>;
+
+// ---------------------------------------------------------------------------------------------
+// Activos
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetClass {
+    Stock,
+    Etf,
+    Fund,
+    Index,
+    Crypto,
+    Forex,
+    Commodity,
+    Bond,
+    Future,
+    Option,
+    Other,
+}
+
+impl AssetClass {
+    pub const ALL: [AssetClass; 11] = [
+        Self::Stock,
+        Self::Etf,
+        Self::Fund,
+        Self::Index,
+        Self::Crypto,
+        Self::Forex,
+        Self::Commodity,
+        Self::Bond,
+        Self::Future,
+        Self::Option,
+        Self::Other,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stock => "stock",
+            Self::Etf => "etf",
+            Self::Fund => "fund",
+            Self::Index => "index",
+            Self::Crypto => "crypto",
+            Self::Forex => "forex",
+            Self::Commodity => "commodity",
+            Self::Bond => "bond",
+            Self::Future => "future",
+            Self::Option => "option",
+            Self::Other => "other",
+        }
+    }
+}
+
+impl FromStr for AssetClass {
+    type Err = DomainError;
+    fn from_str(s: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|c| c.as_str().eq_ignore_ascii_case(s))
+            .ok_or_else(|| DomainError::InvalidInput(format!("clase de activo desconocida: {s}")))
+    }
+}
+
+/// Identificador canónico de un activo: `"<clase>:<símbolo>"`.
+///
+/// Convención de símbolos (la usan todos los proveedores para enrutar):
+/// - stock / etf / fund / index / future / commodity / forex / option: símbolo de Yahoo Finance
+///   (`AAPL`, `SAN.MC`, `SPY`, `^GSPC`, `ES=F`, `GC=F`, `EURUSD=X`, `AAPL261218C00200000`).
+/// - crypto: ticker base en mayúsculas (`BTC`, `ETH`, `SOL`); el proveedor resuelve el par
+///   (Binance `BTCUSDT`, CoinGecko `bitcoin`).
+/// - bond: serie de FRED (`DGS10`, `DGS2`) o símbolo de Yahoo (`^TNX`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AssetId {
+    pub class: AssetClass,
+    pub symbol: String,
+}
+
+impl AssetId {
+    pub fn new(class: AssetClass, symbol: impl Into<String>) -> Self {
+        Self { class, symbol: symbol.into() }
+    }
+}
+
+impl fmt::Display for AssetId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.class.as_str(), self.symbol)
+    }
+}
+
+impl FromStr for AssetId {
+    type Err = DomainError;
+    fn from_str(s: &str) -> Result<Self> {
+        let (class, symbol) = s
+            .split_once(':')
+            .ok_or_else(|| DomainError::InvalidInput(format!("id de activo sin clase: {s}")))?;
+        let symbol = symbol.trim();
+        if symbol.is_empty() || symbol.len() > 64 {
+            return Err(DomainError::InvalidInput(format!("símbolo no válido: {s}")));
+        }
+        Ok(Self { class: class.parse()?, symbol: symbol.to_string() })
+    }
+}
+
+impl Serialize for AssetId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for AssetId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetSummary {
+    pub id: AssetId,
+    pub symbol: String,
+    pub name: String,
+    pub class: AssetClass,
+    pub exchange: Option<String>,
+    pub currency: Option<String>,
+    pub country: Option<String>,
+    /// Proveedor que devolvió el resultado (yahoo, coingecko, ...).
+    pub source: String,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Precios
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketState {
+    Pre,
+    Regular,
+    Post,
+    Closed,
+    /// Mercados 24/7 (cripto).
+    Continuous,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Quote {
+    pub id: AssetId,
+    pub price: f64,
+    pub change: Option<f64>,
+    pub change_pct: Option<f64>,
+    pub open: Option<f64>,
+    pub high: Option<f64>,
+    pub low: Option<f64>,
+    pub prev_close: Option<f64>,
+    pub volume: Option<f64>,
+    pub market_cap: Option<f64>,
+    pub currency: Option<String>,
+    pub market_state: MarketState,
+    pub timestamp: DateTime<Utc>,
+    pub source: String,
+    /// Retraso del dato respecto al mercado en segundos (0 = tiempo real). None = desconocido.
+    pub delay_secs: Option<u32>,
+}
+
+/// Actualización de precio en tiempo real (WebSocket).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PriceTick {
+    pub id: AssetId,
+    pub price: f64,
+    pub change_pct: Option<f64>,
+    pub volume: Option<f64>,
+    pub ts: DateTime<Utc>,
+    pub source: String,
+}
+
+/// Vela OHLCV con claves cortas: es el payload más voluminoso de la API.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Candle {
+    /// Unix timestamp en segundos (inicio de la vela, UTC).
+    pub t: i64,
+    pub o: f64,
+    pub h: f64,
+    pub l: f64,
+    pub c: f64,
+    pub v: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Range {
+    #[serde(rename = "1d")]
+    D1,
+    #[serde(rename = "5d")]
+    D5,
+    #[serde(rename = "1mo")]
+    M1,
+    #[serde(rename = "3mo")]
+    M3,
+    #[serde(rename = "6mo")]
+    M6,
+    #[serde(rename = "ytd")]
+    Ytd,
+    #[serde(rename = "1y")]
+    Y1,
+    #[serde(rename = "2y")]
+    Y2,
+    #[serde(rename = "5y")]
+    Y5,
+    #[serde(rename = "10y")]
+    Y10,
+    #[serde(rename = "max")]
+    Max,
+}
+
+impl Range {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::D1 => "1d",
+            Self::D5 => "5d",
+            Self::M1 => "1mo",
+            Self::M3 => "3mo",
+            Self::M6 => "6mo",
+            Self::Ytd => "ytd",
+            Self::Y1 => "1y",
+            Self::Y2 => "2y",
+            Self::Y5 => "5y",
+            Self::Y10 => "10y",
+            Self::Max => "max",
+        }
+    }
+
+    /// Intervalo razonable por defecto para un rango (≈ 100–2000 velas).
+    pub fn default_interval(self) -> Interval {
+        match self {
+            Self::D1 => Interval::M5,
+            Self::D5 => Interval::M15,
+            Self::M1 => Interval::H1,
+            Self::M3 | Self::M6 | Self::Ytd | Self::Y1 | Self::Y2 => Interval::D1,
+            Self::Y5 | Self::Y10 => Interval::W1,
+            Self::Max => Interval::Mo1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Interval {
+    #[serde(rename = "1m")]
+    M1,
+    #[serde(rename = "5m")]
+    M5,
+    #[serde(rename = "15m")]
+    M15,
+    #[serde(rename = "30m")]
+    M30,
+    #[serde(rename = "1h")]
+    H1,
+    #[serde(rename = "1d")]
+    D1,
+    #[serde(rename = "1wk")]
+    W1,
+    #[serde(rename = "1mo")]
+    Mo1,
+}
+
+impl Interval {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::M1 => "1m",
+            Self::M5 => "5m",
+            Self::M15 => "15m",
+            Self::M30 => "30m",
+            Self::H1 => "1h",
+            Self::D1 => "1d",
+            Self::W1 => "1wk",
+            Self::Mo1 => "1mo",
+        }
+    }
+
+    pub fn seconds(self) -> i64 {
+        match self {
+            Self::M1 => 60,
+            Self::M5 => 300,
+            Self::M15 => 900,
+            Self::M30 => 1800,
+            Self::H1 => 3600,
+            Self::D1 => 86_400,
+            Self::W1 => 604_800,
+            Self::Mo1 => 2_592_000,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Fundamentales e indicadores
+// ---------------------------------------------------------------------------------------------
+
+/// Datos fundamentales. Todo es opcional: cada clase de activo rellena lo que tenga sentido.
+/// Ratios y márgenes como fracción (0.25 = 25 %), no como porcentaje.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Fundamentals {
+    pub description: Option<String>,
+    pub sector: Option<String>,
+    pub industry: Option<String>,
+    pub website: Option<String>,
+    pub employees: Option<u64>,
+    pub country: Option<String>,
+
+    // Valoración
+    pub market_cap: Option<f64>,
+    pub enterprise_value: Option<f64>,
+    pub pe_trailing: Option<f64>,
+    pub pe_forward: Option<f64>,
+    pub peg: Option<f64>,
+    pub price_to_book: Option<f64>,
+    pub price_to_sales: Option<f64>,
+    pub ev_to_ebitda: Option<f64>,
+
+    // Resultados
+    pub eps_trailing: Option<f64>,
+    pub eps_forward: Option<f64>,
+    pub revenue_ttm: Option<f64>,
+    pub revenue_growth_yoy: Option<f64>,
+    pub earnings_growth_yoy: Option<f64>,
+    pub gross_margin: Option<f64>,
+    pub operating_margin: Option<f64>,
+    pub profit_margin: Option<f64>,
+    pub roe: Option<f64>,
+    pub roa: Option<f64>,
+    pub free_cash_flow: Option<f64>,
+    pub total_cash: Option<f64>,
+    pub total_debt: Option<f64>,
+    pub debt_to_equity: Option<f64>,
+    pub current_ratio: Option<f64>,
+
+    // Accionista
+    pub dividend_yield: Option<f64>,
+    pub payout_ratio: Option<f64>,
+    pub beta: Option<f64>,
+    pub shares_outstanding: Option<f64>,
+    pub short_pct_float: Option<f64>,
+    pub insider_pct: Option<f64>,
+    pub institutional_pct: Option<f64>,
+
+    // Consenso de analistas
+    pub analyst_target_mean: Option<f64>,
+    pub analyst_target_high: Option<f64>,
+    pub analyst_target_low: Option<f64>,
+    /// 1 = compra fuerte … 5 = venta (escala de Yahoo).
+    pub analyst_rating_mean: Option<f64>,
+    pub analyst_count: Option<u32>,
+    pub next_earnings_date: Option<NaiveDate>,
+
+    // Cripto
+    pub circulating_supply: Option<f64>,
+    pub total_supply: Option<f64>,
+    pub max_supply: Option<f64>,
+    pub fully_diluted_valuation: Option<f64>,
+    pub all_time_high: Option<f64>,
+    pub all_time_high_date: Option<NaiveDate>,
+
+    // ETF / fondos
+    pub expense_ratio: Option<f64>,
+    pub total_assets: Option<f64>,
+    pub top_holdings: Vec<Holding>,
+
+    // Bonos
+    pub yield_to_maturity: Option<f64>,
+    pub coupon: Option<f64>,
+    pub maturity_date: Option<NaiveDate>,
+
+    /// Campos adicionales que no encajan arriba (se muestran tal cual en el frontend).
+    pub extra: BTreeMap<String, serde_json::Value>,
+    pub sources: Vec<String>,
+    pub as_of: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Holding {
+    pub symbol: Option<String>,
+    pub name: String,
+    pub weight: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Trend {
+    StrongUp,
+    Up,
+    Sideways,
+    Down,
+    StrongDown,
+}
+
+/// Indicadores técnicos calculados sobre velas diarias. Rendimientos y distancias como fracción.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Indicators {
+    pub as_of: Option<DateTime<Utc>>,
+    pub last_close: Option<f64>,
+    pub sma20: Option<f64>,
+    pub sma50: Option<f64>,
+    pub sma200: Option<f64>,
+    pub ema12: Option<f64>,
+    pub ema26: Option<f64>,
+    pub rsi14: Option<f64>,
+    pub macd: Option<f64>,
+    pub macd_signal: Option<f64>,
+    pub macd_hist: Option<f64>,
+    pub bb_upper: Option<f64>,
+    pub bb_middle: Option<f64>,
+    pub bb_lower: Option<f64>,
+    pub atr14: Option<f64>,
+    pub volatility30d: Option<f64>,
+    pub max_drawdown1y: Option<f64>,
+    pub return1w: Option<f64>,
+    pub return1m: Option<f64>,
+    pub return3m: Option<f64>,
+    pub return_ytd: Option<f64>,
+    pub return1y: Option<f64>,
+    pub high52w: Option<f64>,
+    pub low52w: Option<f64>,
+    pub dist_from_high52w: Option<f64>,
+    pub volume_avg20: Option<f64>,
+    pub relative_volume: Option<f64>,
+    pub trend: Option<Trend>,
+    pub supports: Vec<f64>,
+    pub resistances: Vec<f64>,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Noticias y macro
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Sentiment {
+    /// -1 (muy negativo) … 1 (muy positivo).
+    pub score: f32,
+    pub label: SentimentLabel,
+    /// Quién lo calculó: "llm", "lexicon", "provider:<nombre>".
+    pub method: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SentimentLabel {
+    VeryNegative,
+    Negative,
+    Neutral,
+    Positive,
+    VeryPositive,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewsItem {
+    /// Hash estable de la URL canónica (deduplicación entre proveedores).
+    pub id: String,
+    pub title: String,
+    pub summary: Option<String>,
+    pub url: String,
+    pub publisher: Option<String>,
+    pub published_at: DateTime<Utc>,
+    pub image_url: Option<String>,
+    pub tickers: Vec<String>,
+    pub sentiment: Option<Sentiment>,
+    /// Proveedor de la API (gdelt, finnhub, yahoo_rss, google_news, ...).
+    pub provider: String,
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MacroIndicator {
+    /// Clave estable: fed_funds, us10y, us2y, curve_10y2y, cpi_yoy, unemployment, vix, dxy,
+    /// eurusd, gold, wti, ecb_rate, ...
+    pub key: String,
+    pub name: String,
+    pub value: f64,
+    pub change: Option<f64>,
+    pub unit: String,
+    pub as_of: DateTime<Utc>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MacroContext {
+    pub indicators: Vec<MacroIndicator>,
+    pub as_of: Option<DateTime<Utc>>,
+}
+
+/// Todo lo que se sabe de un activo en un instante: es el contexto que recibe el LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetSnapshot {
+    pub summary: AssetSummary,
+    pub quote: Option<Quote>,
+    pub fundamentals: Option<Fundamentals>,
+    pub indicators: Option<Indicators>,
+    pub news: Vec<NewsItem>,
+    pub macro_context: Option<MacroContext>,
+    /// Datos que no se pudieron obtener (p. ej. "fundamentals: yahoo 429"). El LLM debe decirlo.
+    pub missing: Vec<String>,
+    pub generated_at: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Análisis de IA
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Verdict {
+    /// Buen momento para comprar.
+    Buy,
+    /// Comprar de forma escalonada (DCA).
+    Accumulate,
+    /// Mantener si ya se tiene; no añadir.
+    Hold,
+    /// Esperar un mejor punto de entrada o un catalizador.
+    Wait,
+    /// Reducir posición.
+    Reduce,
+    /// Evitar / vender.
+    Avoid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Horizon {
+    /// Días a semanas.
+    Short,
+    /// Meses.
+    Medium,
+    /// Años.
+    Long,
+}
+
+/// Puntuaciones 0–100 (más alto = más favorable para invertir; en `risk`, más alto = más riesgo).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScoreBreakdown {
+    pub overall: f32,
+    pub technical: Option<f32>,
+    pub momentum: Option<f32>,
+    pub fundamental: Option<f32>,
+    pub valuation: Option<f32>,
+    pub sentiment: Option<f32>,
+    pub macro_score: Option<f32>,
+    pub risk: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Catalyst {
+    pub date: Option<NaiveDate>,
+    pub description: String,
+    /// Impacto esperado: -1 … 1.
+    pub impact: Option<f32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyLevels {
+    pub supports: Vec<f64>,
+    pub resistances: Vec<f64>,
+    pub entry_zone: Option<(f64, f64)>,
+    pub stop_loss: Option<f64>,
+    pub targets: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceRef {
+    pub title: String,
+    pub url: Option<String>,
+    pub provider: String,
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Analysis {
+    pub id: String,
+    pub asset: AssetId,
+    pub verdict: Verdict,
+    /// 0–1.
+    pub confidence: f32,
+    pub horizon: Horizon,
+    pub scores: ScoreBreakdown,
+    /// Resumen de 2–4 frases.
+    pub summary: String,
+    pub thesis: String,
+    pub bull_case: Vec<String>,
+    pub bear_case: Vec<String>,
+    pub risks: Vec<String>,
+    pub catalysts: Vec<Catalyst>,
+    pub key_levels: KeyLevels,
+    /// Cómo entrar si se decide invertir (tramos, tamaño de posición, condiciones).
+    pub strategy: Option<String>,
+    /// Avisos sobre datos ausentes o poco fiables.
+    pub data_warnings: Vec<String>,
+    pub sources: Vec<SourceRef>,
+    pub price_at_analysis: Option<f64>,
+    pub model: String,
+    pub generated_at: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallRecord {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    /// Resumen corto del resultado para mostrar en la UI.
+    pub result_summary: Option<String>,
+    pub ok: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: Role,
+    pub content: String,
+    pub tool_calls: Vec<ToolCallRecord>,
+    /// Si el asistente emitió un veredicto estructurado en este mensaje.
+    pub analysis: Option<Analysis>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Conversation {
+    pub id: String,
+    pub title: String,
+    pub asset_ids: Vec<AssetId>,
+    pub pinned: bool,
+    pub message_count: u32,
+    pub last_message_preview: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Evento del stream de chat (SSE, campo `data` en JSON, discriminado por `type`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+pub enum ChatEvent {
+    Start { message_id: String },
+    /// Razonamiento del modelo (si el modelo lo expone). La UI lo muestra plegado.
+    Thinking { text: String },
+    Token { text: String },
+    ToolCall { id: String, name: String, arguments: serde_json::Value },
+    ToolResult { id: String, name: String, ok: bool, summary: String },
+    Analysis { analysis: Analysis },
+    Done { message_id: String, model: String, prompt_tokens: Option<u32>, completion_tokens: Option<u32> },
+    Error { message: String },
+}
+
+pub struct ChatRequest {
+    pub conversation_id: String,
+    /// Mensajes anteriores (sin el nuevo), en orden cronológico.
+    pub history: Vec<ChatMessage>,
+    pub user_message: String,
+    /// Activos sobre los que gira la conversación (se precargan en el contexto).
+    pub focus: Vec<AssetId>,
+    /// Acceso a datos en vivo para el tool calling del modelo.
+    pub market: Arc<dyn MarketData>,
+    /// Idioma de respuesta (BCP-47), p. ej. "es".
+    pub language: String,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Estado de servicios
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderStatus {
+    pub name: String,
+    pub enabled: bool,
+    pub requires_key: bool,
+    pub has_key: bool,
+    /// Qué cubre: search, quote, realtime, history, fundamentals, news, macro, options.
+    pub capabilities: Vec<String>,
+    pub asset_classes: Vec<AssetClass>,
+    pub last_error: Option<String>,
+    pub last_ok: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmStatus {
+    pub available: bool,
+    pub base_url: String,
+    pub model: String,
+    pub installed_models: Vec<String>,
+    pub supports_tools: bool,
+    pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Contratos entre crates
+// ---------------------------------------------------------------------------------------------
+
+/// Acceso unificado a datos de mercado. Lo implementa `market` (agregando proveedores con
+/// fallback y caché) y lo consumen `server` (rutas HTTP/WS) y `ai` (tool calling).
+#[async_trait]
+pub trait MarketData: Send + Sync + 'static {
+    async fn search(&self, query: &str, limit: usize) -> Result<Vec<AssetSummary>>;
+    async fn quote(&self, id: &AssetId) -> Result<Quote>;
+    /// Cotizaciones en lote (una sola petición al proveedor cuando sea posible).
+    /// Los activos que fallen se omiten.
+    async fn quotes(&self, ids: &[AssetId]) -> Result<Vec<Quote>>;
+    async fn history(&self, id: &AssetId, range: Range, interval: Interval) -> Result<Vec<Candle>>;
+    async fn fundamentals(&self, id: &AssetId) -> Result<Option<Fundamentals>>;
+    async fn indicators(&self, id: &AssetId) -> Result<Indicators>;
+    /// `None` = noticias generales de mercado.
+    async fn news(&self, id: Option<&AssetId>, limit: usize) -> Result<Vec<NewsItem>>;
+    async fn macro_context(&self) -> Result<MacroContext>;
+    /// Agrega quote + fundamentales + indicadores + noticias + macro en paralelo. Tolera fallos
+    /// parciales y los anota en `missing`; solo falla si el activo no existe.
+    async fn snapshot(&self, id: &AssetId) -> Result<AssetSnapshot>;
+    /// Stream de precios en tiempo real. Se cancela al soltarlo.
+    fn subscribe(&self, ids: &[AssetId]) -> BoxStream<'static, PriceTick>;
+    fn providers_status(&self) -> Vec<ProviderStatus>;
+}
+
+/// Analista de IA sobre un LLM local. Lo implementa `ai`.
+#[async_trait]
+pub trait Analyst: Send + Sync + 'static {
+    /// Veredicto estructurado basado solo en los datos del snapshot.
+    async fn analyze(&self, snapshot: &AssetSnapshot) -> Result<Analysis>;
+    /// Respuesta de chat en streaming, con tool calling sobre `req.market`.
+    fn chat(&self, req: ChatRequest) -> BoxStream<'static, ChatEvent>;
+    async fn status(&self) -> LlmStatus;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asset_id_roundtrip() {
+        let id: AssetId = "crypto:BTC".parse().unwrap();
+        assert_eq!(id, AssetId::new(AssetClass::Crypto, "BTC"));
+        assert_eq!(id.to_string(), "crypto:BTC");
+        assert_eq!(serde_json::to_string(&id).unwrap(), "\"crypto:BTC\"");
+        let yahoo: AssetId = "stock:BRK-B".parse().unwrap();
+        assert_eq!(yahoo.symbol, "BRK-B");
+        assert!("BTC".parse::<AssetId>().is_err());
+        assert!("planet:X".parse::<AssetId>().is_err());
+    }
+
+    #[test]
+    fn chat_event_is_tagged() {
+        let json = serde_json::to_string(&ChatEvent::Token { text: "hola".into() }).unwrap();
+        assert_eq!(json, r#"{"type":"token","text":"hola"}"#);
+    }
+}
