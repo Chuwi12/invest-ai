@@ -290,6 +290,7 @@ fn raw_score(text: &str) -> f32 {
 }
 
 /// Polaridad -1…1 de un texto suelto.
+#[allow(dead_code)] // polaridad de texto suelto: la usan los tests y futuras herramientas
 pub fn score_text(text: &str) -> f32 {
     (raw_score(text) / 2.5).tanh()
 }

@@ -1,25 +1,10 @@
-use std::{collections::HashMap, sync::Mutex, time::Duration};
+use std::time::Duration;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use serde_json::json;
 
 use super::*;
-use crate::testutil::MockOllama;
-
-#[derive(Default)]
-pub struct MemSettings(pub Mutex<HashMap<String, String>>);
-
-#[async_trait]
-impl SettingsStore for MemSettings {
-    async fn get(&self, key: &str) -> Result<Option<String>> {
-        Ok(self.0.lock().unwrap().get(key).cloned())
-    }
-    async fn set(&self, key: &str, value: &str) -> Result<()> {
-        self.0.lock().unwrap().insert(key.into(), value.into());
-        Ok(())
-    }
-}
+use crate::testutil::{MemSettings, MockOllama};
 
 fn manager(m: &MockOllama, store: Arc<MemSettings>) -> ModelManager {
     let cfg = AiConfig { base_url: m.url.clone(), model: "qwen2.5:7b".into(), ..AiConfig::default() };

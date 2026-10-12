@@ -9,6 +9,8 @@ use std::{
     time::Duration,
 };
 
+use async_trait::async_trait;
+use domain::{Result as DResult, SettingsStore};
 use axum::{
     Json, Router,
     body::Body,
@@ -145,3 +147,18 @@ async fn del(State(s): State<Arc<MockState>>, Json(body): Json<Value>) -> Respon
     s.deleted.lock().unwrap().push(name);
     StatusCode::OK.into_response()
 }
+
+#[derive(Default)]
+pub struct MemSettings(pub Mutex<std::collections::HashMap<String, String>>);
+
+#[async_trait]
+impl SettingsStore for MemSettings {
+    async fn get(&self, key: &str) -> DResult<Option<String>> {
+        Ok(self.0.lock().unwrap().get(key).cloned())
+    }
+    async fn set(&self, key: &str, value: &str) -> DResult<()> {
+        self.0.lock().unwrap().insert(key.into(), value.into());
+        Ok(())
+    }
+}
+

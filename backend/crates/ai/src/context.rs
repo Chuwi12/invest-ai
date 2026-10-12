@@ -756,6 +756,45 @@ fn render_macro(out: &mut String, m: &domain::MacroContext, l: Lang, lv: &Level)
     }
 }
 
+/// Parte suelta del contexto, para los resultados de las herramientas del chat.
+#[derive(Debug, Clone, Copy)]
+pub enum Part {
+    Quote,
+    Indicators,
+    Fundamentals,
+    Macro,
+}
+
+/// Renderiza una sola sección (misma tabla y misma cabecera con fuente y hora que en el análisis).
+/// `snap` solo necesita lo que usa la sección pedida.
+pub fn render_part(snap: &AssetSnapshot, part: Part, lang: Lang) -> String {
+    let lv = &LEVELS[0];
+    let mut out = String::new();
+    match part {
+        Part::Quote => {
+            if let Some(q) = &snap.quote {
+                render_quote(&mut out, q, snap.generated_at, lang);
+            }
+        }
+        Part::Indicators => {
+            if let Some(i) = &snap.indicators {
+                render_indicators(&mut out, i, snap.quote.as_ref().map(|q| q.price), lang, lv);
+            }
+        }
+        Part::Fundamentals => {
+            if let Some(f) = &snap.fundamentals {
+                render_fundamentals(&mut out, f, snap, lang, lv);
+            }
+        }
+        Part::Macro => {
+            if let Some(m) = &snap.macro_context {
+                render_macro(&mut out, m, lang, lv);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
