@@ -104,7 +104,8 @@ impl JudgeOut {
             .map(|p| p.trim())
             .filter(|p| !p.is_empty())
             .collect();
-        if parts.is_empty() { self.thesis.trim().to_string() } else { parts.join("\n\n") }
+        let joined = if parts.is_empty() { self.thesis.trim().to_string() } else { parts.join("\n\n") };
+        super::lint::dedupe_sentences(&joined)
     }
 }
 

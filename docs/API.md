@@ -110,6 +110,7 @@ navegador.
 |--------|------|-----------|
 | GET  | `/assets/{id}/analysis` | `Analysis \| null`: el último guardado (se cachea en BD) |
 | POST | `/assets/{id}/analysis` | `Analysis`: genera uno nuevo con snapshot en vivo (puede tardar 10–60 s) |
+| POST | `/assets/{id}/analysis/stream` | SSE (`data: <json>\n\n`) de `AnalysisEvent` mientras se genera (ver «Análisis en streaming»). Mismo trabajo único por activo que el POST; guarda en BD; sigue si el cliente se va |
 | GET  | `/assets/{id}/analyses` | `Analysis[]`: histórico de análisis del activo (máx. 20, más reciente primero) |
 | GET  | `/assets/{id}/snapshot` | `AssetSnapshot`: el contexto exacto que ve el LLM (transparencia) |
 
@@ -158,3 +159,43 @@ type Dashboard = {
 
 Para registrar qué activo eligió el usuario tras una búsqueda:
 `POST /history/searches { query: string, selected: AssetId }` → 204.
+
+
+## Análisis en streaming y campos nuevos de `Analysis`
+
+`POST /assets/{id}/analysis/stream?depth=quick|standard|deep` responde `text/event-stream`; cada evento es JSON:
+
+```ts
+type AnalysisEvent =
+  | { type: "stage"; stage: string; label: string; index: number; total: number }  // index desde 1
+  | { type: "done"; analysis: Analysis }
+  | { type: "error"; code: string; message: string };   // code = el de la tabla de errores (p. ej. "rate_limited")
+```
+
+`stage` es un id estable: `snapshot`, `technical`, `fundamental`, `sentiment`, `macro_risk`, `debate` (solo deep),
+`judge`, `verify`. En `quick` la etapa `technical` es el análisis combinado (su `label` lo dice). `total` = 4 (quick),
+7 (standard), 8 (deep). Dos clientes del mismo activo comparten un único análisis (el tardío recibe la etapa en curso y
+el final). Con demasiados análisis simultáneos: `429` en el POST y evento `error` con `code: "rate_limited"` en el SSE.
+
+Campos añadidos a `Analysis` (todos opcionales, `null`/ausentes en análisis antiguos):
+
+```ts
+type Analysis = { /* ...los de siempre... */
+  levelsNote?: string | null;          // por qué faltan (o cómo se calcularon) entrada, stop y objetivos
+  scenarios?: Scenario[] | null;       // solo deep; las probabilidades suman 100
+  expectedReturnPct?: number | null;   // Σ prob × returnPct de los escenarios
+  wouldChangeIf?: string[] | null;     // qué haría cambiar el veredicto
+  horizonNote?: string | null;         // por qué ese horizonte
+  positionSizing?: PositionSizing | null;
+  method?: string | null;              // modelo, profundidad, llamadas, tokens, tiempo, aviso de no asesoramiento
+  qualityNotes?: string[] | null;      // descartes, cifras sin verificar, reintentos, redacción dudosa
+};
+type Scenario = { kind: "bullish" | "base" | "bearish"; probability: number; description: string;
+  targetPrice: number | null; targetBasis: string | null; returnPct: number | null };
+type PositionSizing = { maxPortfolioPct: number; riskPerTradePct: number | null; stopDistancePct: number | null;
+  atrPct: number | null; volatility30d: number | null; rationale: string };
+```
+
+Cambios de significado: `keyLevels.entryZone/stopLoss/targets` los **calcula el backend** (stop = soporte − 1×ATR14,
+objetivos = resistencias y niveles de los datos), no el modelo; `null` = sin base en los datos (ver `levelsNote`).
+`dataWarnings` contiene solo carencias reales de los datos; la nota de método ya no va ahí sino en `method`.

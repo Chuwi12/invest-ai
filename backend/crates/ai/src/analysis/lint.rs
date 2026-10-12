@@ -118,6 +118,27 @@ const BOILERPLATE: &[&str] = &[
     "solid fundamentals",
 ];
 
+/// Quita las frases repetidas (en cualquier párrafo): los modelos pequeños copian el mismo párrafo
+/// en los tres campos de la tesis. Los párrafos que quedan vacíos desaparecen.
+pub fn dedupe_sentences(text: &str) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    let mut paras = Vec::new();
+    for para in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
+        let mut kept = Vec::new();
+        for sent in para.split_inclusive(". ").map(str::trim).filter(|x| !x.is_empty()) {
+            let key: String = sent.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+            if !seen.contains(&key) {
+                seen.push(key);
+                kept.push(sent);
+            }
+        }
+        if !kept.is_empty() {
+            paras.push(kept.join(" "));
+        }
+    }
+    paras.join("\n\n")
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Specificity {
     /// Cifras de datos (no triviales) distintas citadas en todo el texto.
@@ -185,6 +206,12 @@ mod tests {
         assert!(spanish_issues("El mercado está en sobrecompra con el RSI14 en 78.2.").is_empty());
         assert!(spanish_issues("Se mantiene el trading con stop y momentum").is_empty());
         assert!(spanish_issues("sube de de forma fuerte").iter().any(|x| x.what.contains("repetida")));
+    }
+
+    #[test]
+    fn repeated_sentences_are_removed_across_paragraphs() {
+        let t = "A sube 1.5. B baja 2.5.\n\nA sube 1.5. B baja 2.5.\n\nA sube 1.5. C neutro 3.5.";
+        assert_eq!(dedupe_sentences(t), "A sube 1.5. B baja 2.5.\n\nC neutro 3.5.");
     }
 
     #[test]
