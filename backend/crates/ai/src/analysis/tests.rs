@@ -177,7 +177,8 @@ async fn deep_pipeline_runs_all_stages_and_verifies_figures() {
     // Niveles: calculados en Rust a partir de los datos.
     let ind = snap.indicators.as_ref().unwrap();
     let stop = a.key_levels.stop_loss.expect("stop calculado");
-    assert!(ind.supports.iter().any(|s| (s - ind.atr14.unwrap() - stop).abs() < 1e-6), "stop = soporte − ATR");
+    let known: Vec<f64> = ind.supports.iter().copied().chain([ind.sma20, ind.sma50, ind.sma200, ind.bb_lower, ind.low52w].into_iter().flatten()).collect();
+    assert!(known.iter().any(|s| (s - ind.atr14.unwrap() - stop).abs() < 1e-6), "stop = nivel de los datos − ATR");
     assert!(a.key_levels.entry_zone.is_some() && !a.key_levels.targets.is_empty());
     assert!(a.key_levels.targets.iter().all(|t| ind.resistances.contains(t) || [ind.high52w, ind.bb_upper].contains(&Some(*t)) || snap.fundamentals.as_ref().is_some_and(|f| [f.analyst_target_mean, f.analyst_target_high, f.all_time_high].contains(&Some(*t)))));
     assert!(a.levels_note.as_deref().unwrap().contains("Stop:"));

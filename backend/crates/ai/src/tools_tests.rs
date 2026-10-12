@@ -154,6 +154,7 @@ async fn analyze_asset_returns_a_structured_analysis() {
         "missing_data": [], "would_change_if": [], "uncertainty": ""}).to_string();
     mock.push_chat(crate::testutil::reply(&stage));
     mock.push_chat(crate::testutil::reply(&judge));
+    mock.push_chat(crate::testutil::reply(&judge)); // reintento por tesis genérica
     let out = r.run("analyze_asset", &json!({"id": "stock:AAPL"})).await.unwrap();
     let a = out.analysis.expect("análisis estructurado");
     assert_eq!(a.verdict, domain::Verdict::Hold);

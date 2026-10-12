@@ -157,6 +157,7 @@ async fn analyze_asset_emits_the_structured_analysis_event() {
     e.mock.push_chat(vec![tool_call_line("analyze_asset", json!({"id": "stock:AAPL"})), done_line()]);
     e.mock.push_chat(reply(&stage));
     e.mock.push_chat(reply(&judge));
+    e.mock.push_chat(reply(&judge)); // reintento por tesis genérica
     e.mock.push_chat(reply("Mi recomendación: esperar."));
     let ev = collect(&e, request(&e, "¿invierto en Apple?", &["stock:AAPL"])).await;
     let a = ev.iter().find_map(|x| if let ChatEvent::Analysis { analysis } = x { Some(analysis) } else { None }).expect("evento Analysis");
