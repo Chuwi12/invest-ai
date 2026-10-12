@@ -90,6 +90,12 @@ impl<'a> Verifier<'a> {
                 }
             }
         }
+        // Las cifras de la puntuación repiten las de cotización/indicadores/fundamentales: se cita
+        // la fuente primaria, y como mucho dos, para que la cita sea legible.
+        if segs.iter().any(|s| !matches!(s, Segment::Scores)) {
+            segs.retain(|s| !matches!(s, Segment::Scores));
+        }
+        segs.truncate(2);
         let suffix = self.cite(&segs, &text);
         Some(Checked { text: format!("{text}{suffix}"), plain: text, area: c.area.clone() })
     }

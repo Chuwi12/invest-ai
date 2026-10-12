@@ -493,11 +493,10 @@ fn render_fundamentals(
     } else {
         section(out, &format!("{head} [{src}{asof}]"));
     }
-    if lv.extras {
-        if let Some(d) = &f.description {
+    if lv.extras
+        && let Some(d) = &f.description {
             let _ = writeln!(out, "{}", truncate_chars(d, 240));
         }
-    }
     let mut t = Table::default();
     t.row(
         l.t("Valoración", "Valuation"),
@@ -685,7 +684,7 @@ fn render_news(
         return;
     }
     let mut sorted: Vec<&NewsItem> = news.iter().collect();
-    sorted.sort_by(|a, b| b.published_at.cmp(&a.published_at));
+    sorted.sort_by_key(|a| std::cmp::Reverse(a.published_at));
     section(
         out,
         l.t(
@@ -715,11 +714,10 @@ pub fn news_line(tag: &str, item: &NewsItem, summary_chars: usize) -> String {
         sent.method,
         item.title.trim()
     );
-    if summary_chars > 0 {
-        if let Some(sm) = item.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if summary_chars > 0
+        && let Some(sm) = item.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             let _ = write!(line, " — {}", truncate_chars(sm, summary_chars));
         }
-    }
     line
 }
 
@@ -902,7 +900,7 @@ mod tests {
         );
         // Más presupuesto nunca da menos contenido.
         let mid = build(&snap, full.tokens - 1);
-        assert!(mid.tokens <= full.tokens - 1);
+        assert!(mid.tokens < full.tokens);
         assert!(mid.tokens >= small.tokens);
     }
 

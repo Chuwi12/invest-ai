@@ -261,7 +261,7 @@ impl ToolRunner {
         };
         let mut items = self.market.news(id.as_ref(), limit).await?;
         items.truncate(limit);
-        items.sort_by(|a, b| b.published_at.cmp(&a.published_at));
+        items.sort_by_key(|a| std::cmp::Reverse(a.published_at));
         let mut text = format!(
             "{} {} [{}]\n",
             l.t("Noticias de", "News for"),

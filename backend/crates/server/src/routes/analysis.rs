@@ -3,12 +3,13 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::{Json, extract::State};
-use domain::{Analysis, AssetId, AssetSnapshot, DomainError};
+use serde::Deserialize;
+use domain::{Analysis, AnalysisDepth, AssetId, AssetSnapshot, DomainError};
 
 use crate::{
     db::new_id,
     error::ApiResult,
-    extract::AssetPath,
+    extract::{AppQuery, AssetPath},
     repo,
     resolve::cache_summaries,
     state::AppState,
@@ -16,7 +17,13 @@ use crate::{
 
 const HISTORY_LIMIT: i64 = 20;
 /// Tope de seguridad: el cliente HTTP del analista ya tiene su propio timeout (`LLM_TIMEOUT_SECS`).
-const ANALYZE_TIMEOUT: Duration = Duration::from_secs(300);
+const ANALYZE_TIMEOUT: Duration = Duration::from_secs(900);
+
+/// `?depth=quick|standard|deep` (opcional: por defecto según el modelo activo).
+#[derive(Deserialize, Default)]
+pub struct GenerateQuery {
+    pub depth: Option<String>,
+}
 
 pub async fn latest(
     State(state): State<AppState>,
@@ -42,12 +49,17 @@ pub async fn snapshot(
 }
 
 /// Genera un análisis nuevo. Single-flight por activo: si ya hay uno en curso, espera a ese.
-pub async fn generate(State(state): State<AppState>, AssetPath(id): AssetPath) -> ApiResult<Json<Analysis>> {
+pub async fn generate(
+    State(state): State<AppState>,
+    AssetPath(id): AssetPath,
+    AppQuery(q): AppQuery<GenerateQuery>,
+) -> ApiResult<Json<Analysis>> {
+    let depth: Option<AnalysisDepth> = q.depth.as_deref().map(str::parse).transpose()?;
     let job_state = state.clone();
     let job_id = id.clone();
     let (result, leader) = state
         .analysis_flights
-        .run(id.clone(), move || async move { run_analysis(job_state, job_id).await.map(Arc::new) })
+        .run(id.clone(), move || async move { run_analysis(job_state, job_id, depth).await.map(Arc::new) })
         .await;
     if !leader {
         tracing::debug!(%id, "análisis ya en curso: se comparte el resultado");
@@ -56,11 +68,11 @@ pub async fn generate(State(state): State<AppState>, AssetPath(id): AssetPath) -
     Ok(Json(Analysis::clone(&analysis)))
 }
 
-async fn run_analysis(state: AppState, id: AssetId) -> Result<Analysis, DomainError> {
+async fn run_analysis(state: AppState, id: AssetId, depth: Option<AnalysisDepth>) -> Result<Analysis, DomainError> {
     let snapshot = state.market.snapshot(&id).await?;
     cache_summaries(&state, std::slice::from_ref(&snapshot.summary)).await;
 
-    let mut analysis = tokio::time::timeout(ANALYZE_TIMEOUT, state.analyst.analyze(&snapshot))
+    let mut analysis = tokio::time::timeout(ANALYZE_TIMEOUT, state.analyst.analyze_with(&snapshot, depth))
         .await
         .map_err(|_| DomainError::Unavailable("el análisis tardó demasiado".into()))??;
     if analysis.id.is_empty() {

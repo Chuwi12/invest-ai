@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use domain::{Analysis, Analyst, AssetId, MarketData, NewsItem};
+use domain::{Analysis, Analyst, AssetId, MarketData, ModelService, NewsItem};
 use sqlx::SqlitePool;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
@@ -28,6 +28,9 @@ pub struct AppState {
     pub market: Arc<dyn MarketData>,
     pub analyst: Arc<dyn Analyst>,
     pub db: SqlitePool,
+    /// Gestión de modelos de IA (`/models`). Por defecto una versión simulada en memoria:
+    /// el cableado real debe llamar a `with_models(analyst.models())`.
+    pub models: Arc<dyn ModelService>,
     pub settings: Arc<Settings>,
     /// Añade el sentimiento a las noticias de las respuestas (`ai::annotate_sentiment`).
     pub annotate_news: fn(&mut [NewsItem]),
@@ -46,12 +49,18 @@ impl AppState {
             market,
             analyst,
             db,
+            models: Arc::new(crate::routes::models::FakeModelService::default()),
             settings: Arc::new(settings),
             annotate_news: |_| {},
             analysis_flights: Arc::new(SingleFlight::new(tasks.clone())),
             tasks,
             shutdown: CancellationToken::new(),
         }
+    }
+
+    pub fn with_models(mut self, models: Arc<dyn ModelService>) -> Self {
+        self.models = models;
+        self
     }
 
     pub fn with_news_annotator(mut self, f: fn(&mut [NewsItem])) -> Self {

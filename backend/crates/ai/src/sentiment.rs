@@ -263,8 +263,8 @@ fn raw_score(text: &str) -> f32 {
                 Some(w) => (Some(w), 2),
                 None => (lookup(t), 1),
             };
-            if let Some(mut w) = w {
-                if w != 0.0 {
+            if let Some(mut w) = w
+                && w != 0.0 {
                     if i < boost_until {
                         w *= boost;
                     }
@@ -282,7 +282,6 @@ fn raw_score(text: &str) -> f32 {
                     }
                     total += w;
                 }
-            }
             i += consumed;
         }
     }

@@ -43,6 +43,12 @@ Past performance does not predict future returns.\n\
     )
 }
 
+/// Recordatorio de idioma al final de la tarea (los modelos pequeños lo obedecen mucho mejor ahí
+/// que solo en el system prompt).
+pub fn with_language(task: String, language: &str) -> String {
+    format!("{task}\n\nIMPORTANT: write every text value of the JSON in {}.", language_name(language))
+}
+
 /// Envuelve el contexto en el delimitador y lo deja listo para añadir la tarea detrás.
 pub fn data_block(context: &str) -> String {
     format!("<market_data>\n{context}\n</market_data>\n\n")

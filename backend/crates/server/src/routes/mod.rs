@@ -8,7 +8,7 @@ use axum::{
     http::{HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use domain::DomainError;
 use serde_json::json;
@@ -28,6 +28,7 @@ pub mod dashboard;
 pub mod favorites;
 pub mod history;
 pub mod market;
+pub mod models;
 pub mod static_files;
 pub mod system;
 pub mod ws;
@@ -80,6 +81,9 @@ fn api(state: AppState) -> Router {
         .route("/history/searches", get(history::searches).post(history::record_selection).delete(history::clear_searches))
         .route("/history/views", get(history::views))
         .route("/dashboard", get(dashboard::dashboard))
+        .route("/models", get(models::list))
+        .route("/models/active", put(models::set_active))
+        .route("/models/{id}", axum::routing::delete(models::delete))
         .layer(middleware::from_fn(rest_timeout))
         .layer(CompressionLayer::new());
 
@@ -91,6 +95,7 @@ fn api(state: AppState) -> Router {
     // SSE y WebSocket, sin timeout ni compresión (comprimir rompería el streaming y el handshake 101).
     let streaming = Router::new()
         .route("/conversations/{cid}/messages", post(chat::send_message))
+        .route("/models/{id}/pull", post(models::pull))
         .route("/ws", get(ws::handler));
 
     Router::new()

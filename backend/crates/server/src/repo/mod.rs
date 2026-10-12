@@ -5,3 +5,4 @@ pub mod assets;
 pub mod conversations;
 pub mod favorites;
 pub mod history;
+pub mod settings;

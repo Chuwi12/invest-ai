@@ -102,6 +102,11 @@ async fn detect_gpus() -> Vec<GpuInfo> {
     {
         gpus.extend(parse_nvidia_csv(&out));
     }
+    // nvidia-smi puede fallar con el driver a medio actualizar («Driver/library version mismatch»)
+    // aunque la GPU funcione: se lee al menos el nombre de /proc y la VRAM queda como 0 (desconocida).
+    if !gpus.iter().any(|g| g.vendor == "NVIDIA") {
+        gpus.extend(nvidia_proc_gpus(Path::new("/proc/driver/nvidia/gpus")).await);
+    }
     if let Some(out) = run("rocm-smi", &["--showproductname", "--showmeminfo", "vram", "--json"]).await {
         gpus.extend(parse_rocm_json(&out));
     }
@@ -109,6 +114,26 @@ async fn detect_gpus() -> Vec<GpuInfo> {
     let have_amd = gpus.iter().any(|g| g.vendor == "AMD");
     gpus.extend(sysfs_gpus(have_amd).await);
     gpus
+}
+
+/// GPUs NVIDIA según `/proc/driver/nvidia/gpus/*/information` (línea `Model:`). Sin VRAM: se
+/// informa `vram_total_gb = 0` (desconocida) y `vram_free_gb = None`.
+pub(crate) async fn nvidia_proc_gpus(dir: &Path) -> Vec<GpuInfo> {
+    let mut out = Vec::new();
+    let Ok(mut rd) = tokio::fs::read_dir(dir).await else { return out };
+    let mut names = Vec::new();
+    while let Ok(Some(e)) = rd.next_entry().await {
+        if let Ok(info) = tokio::fs::read_to_string(e.path().join("information")).await
+            && let Some(m) = info.lines().find_map(|l| l.strip_prefix("Model:"))
+        {
+            names.push(m.trim().to_string());
+        }
+    }
+    names.sort();
+    for name in names {
+        out.push(GpuInfo { name, vendor: "NVIDIA".into(), vram_total_gb: 0.0, vram_free_gb: None });
+    }
+    out
 }
 
 async fn sysfs_gpus(skip_amd: bool) -> Vec<GpuInfo> {
@@ -261,6 +286,23 @@ mod tests {
         assert_eq!(g[0].name, "Radeon RX 7900 XTX");
         assert!((g[0].vram_total_gb - 23.98).abs() < 0.01);
         assert!(parse_rocm_json("no json").is_empty());
+    }
+
+    #[tokio::test]
+    async fn nvidia_without_smi_falls_back_to_proc_name_with_unknown_vram() {
+        let dir = std::env::temp_dir().join(format!("ai-hw-{}", std::process::id()));
+        let gpu = dir.join("0000:01:00.0");
+        std::fs::create_dir_all(&gpu).unwrap();
+        std::fs::write(gpu.join("information"), "Model: \t\t NVIDIA GeForce RTX 4070 Laptop GPU\nIRQ:   \t\t 185\n").unwrap();
+        let g = nvidia_proc_gpus(&dir).await;
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].name, "NVIDIA GeForce RTX 4070 Laptop GPU");
+        assert_eq!((g[0].vram_total_gb, g[0].vram_free_gb), (0.0, None));
+        // Directorio inexistente (sin driver NVIDIA): lista vacía, sin error.
+        assert!(nvidia_proc_gpus(Path::new("/no/existe")).await.is_empty());
+        // Salida de error de nvidia-smi: no produce GPUs fantasma.
+        assert!(parse_nvidia_csv("Failed to initialize NVML: Driver/library version mismatch\n").is_empty());
     }
 
     #[test]

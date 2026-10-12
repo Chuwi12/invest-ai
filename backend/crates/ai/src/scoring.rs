@@ -479,8 +479,8 @@ fn valuation(c: &Ctx) -> Option<Out> {
     let f = c.fun;
 
     if c.class == AssetClass::Crypto {
-        if let (Some(px), Some(ath)) = (c.price, f.and_then(|f| fin(f.all_time_high))) {
-            if ath > 0.0 {
+        if let (Some(px), Some(ath)) = (c.price, f.and_then(|f| fin(f.all_time_high)))
+            && ath > 0.0 {
                 let x = px / ath;
                 let pts = tables::ATH_RATIO;
                 p.add(
@@ -495,7 +495,6 @@ fn valuation(c: &Ctx) -> Option<Out> {
                     ),
                 );
             }
-        }
         if let Some(f) = f {
             let mcap = fin(f.market_cap).or(c.market_cap).filter(|v| *v > 0.0);
             let ratio = match (fin(f.fully_diluted_valuation), mcap) {
@@ -569,15 +568,14 @@ fn valuation(c: &Ctx) -> Option<Out> {
         let pts = tables::PEG;
         p.add(1.5, piecewise(peg, pts), tr!(l, "PEG = {}", "PEG = {}", fmt::num(peg)));
     }
-    if !prof.financial {
-        if let Some(ps) = fin(f.price_to_sales).filter(|v| *v > 0.0) {
+    if !prof.financial
+        && let Some(ps) = fin(f.price_to_sales).filter(|v| *v > 0.0) {
             p.add(
                 1.0,
                 multiple_score(prof.ps, ps),
                 tr!(l, "P/S = {} ({})", "P/S = {} ({})", fmt::num(ps), zone_label(l, prof.ps, ps)),
             );
         }
-    }
     if let (Some(th), Some(ev)) = (prof.ev_ebitda, fin(f.ev_to_ebitda)) {
         if ev <= 0.0 {
             p.add(
@@ -614,8 +612,7 @@ fn valuation(c: &Ctx) -> Option<Out> {
     // Rentabilidad por caja libre sobre capitalización.
     if let (Some(fcf), Some(m)) =
         (fin(f.free_cash_flow), fin(f.market_cap).or(c.market_cap).filter(|v| *v > 0.0))
-    {
-        if !prof.financial {
+        && !prof.financial {
             let y = fcf / m;
             let pts = tables::FCF_YIELD;
             p.add(
@@ -624,10 +621,9 @@ fn valuation(c: &Ctx) -> Option<Out> {
                 tr!(l, "Rentabilidad por FCF = {}", "FCF yield = {}", fmt::pct(y)),
             );
         }
-    }
     // Coste de un ETF/fondo (el ratio de gastos es una «valoración» en sentido amplio).
-    if matches!(c.class, AssetClass::Etf | AssetClass::Fund) {
-        if let Some(mut er) = fin(f.expense_ratio).filter(|v| *v >= 0.0) {
+    if matches!(c.class, AssetClass::Etf | AssetClass::Fund)
+        && let Some(mut er) = fin(f.expense_ratio).filter(|v| *v >= 0.0) {
             if er > 0.03 {
                 er /= 100.0; // algunos proveedores lo dan en %
             }
@@ -638,7 +634,6 @@ fn valuation(c: &Ctx) -> Option<Out> {
                 tr!(l, "Coste anual (TER) = {}", "Expense ratio = {}", fmt::pct(er)),
             );
         }
-    }
     p.finish()
 }
 
@@ -709,8 +704,8 @@ fn fundamental(c: &Ctx) -> Option<Out> {
                 tr!(l, "Deuda/capital = {:.2}x", "Debt/equity = {:.2}x", de),
             );
         }
-        if let (Some(cash), Some(debt)) = (fin(f.total_cash), fin(f.total_debt)) {
-            if debt > 0.0 && cash > debt {
+        if let (Some(cash), Some(debt)) = (fin(f.total_cash), fin(f.total_debt))
+            && debt > 0.0 && cash > debt {
                 p.add(
                     0.8,
                     85.0,
@@ -723,7 +718,6 @@ fn fundamental(c: &Ctx) -> Option<Out> {
                     ),
                 );
             }
-        }
         if let Some(cr) = fin(f.current_ratio).filter(|v| *v > 0.0) {
             let pts = tables::CURRENT_RATIO;
             p.add(
@@ -836,8 +830,8 @@ fn sentiment_score(c: &Ctx) -> Option<Out> {
                 ),
             );
         }
-        if let (Some(t), Some(px)) = (fin(f.analyst_target_mean).filter(|v| *v > 0.0), c.price) {
-            if n_an == 0 || n_an >= 3 {
+        if let (Some(t), Some(px)) = (fin(f.analyst_target_mean).filter(|v| *v > 0.0), c.price)
+            && (n_an == 0 || n_an >= 3) {
                 let up = t / px - 1.0;
                 let pts = tables::TARGET_UPSIDE;
                 p.add(
@@ -852,7 +846,6 @@ fn sentiment_score(c: &Ctx) -> Option<Out> {
                     ),
                 );
             }
-        }
         if let Some(s) = fin(f.short_pct_float).filter(|v| *v >= 0.0) {
             let pts = tables::SHORT_INTEREST;
             p.add(

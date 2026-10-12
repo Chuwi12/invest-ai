@@ -21,5 +21,6 @@ async-stream = "0.3"
 bytes = "1"
 
 [dev-dependencies]
+anyhow.workspace = true
 # Servidor Ollama simulado para los tests (puerto efímero, sin red real).
 axum = "0.8"

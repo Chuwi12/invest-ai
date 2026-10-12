@@ -177,7 +177,8 @@ impl AnalysisEngine {
         // (resumen) y la respuesta.
         let max_tokens = (self.cfg.num_ctx as usize * 40 / 100).clamp(1200, 16_000);
         let built = build_context(&snap, &card, &ContextOptions { max_tokens, lang }, &mut registry);
-        let system = system_prompt(&self.cfg.lang_code());
+        let lang_code = self.cfg.lang_code();
+        let system = system_prompt(&lang_code);
         let prefix = data_block(&built.text);
         let mut v = Verifier::new(&built.text, &snap, &built.news, lang);
         let usage = Usage::default();
@@ -190,7 +191,7 @@ impl AnalysisEngine {
             .iter()
             .enumerate()
             .map(|(i, st)| {
-                let user = format!("{prefix}{}", st.task());
+                let user = format!("{prefix}{}", prompts::with_language(st.task(), &lang_code));
                 let schema = stage_schema(st.combined(), if st.combined() { 8 } else { 5 });
                 let (system, caps, usage) = (&system, &caps, &usage);
                 async move { (i, self.structured::<StageReport>(caps, system, user, &schema, 900, usage).await) }.boxed()
@@ -232,7 +233,7 @@ impl AnalysisEngine {
                 .iter()
                 .enumerate()
                 .map(|(i, (_, task))| {
-                    let user = format!("{prefix}{task}");
+                    let user = format!("{prefix}{}", prompts::with_language(task.clone(), &lang_code));
                     let (system, caps, usage) = (&system, &caps, &usage);
                     async move { (i, self.structured::<DebateReport>(caps, system, user, &debate_schema(), 800, usage).await) }.boxed()
                 })
@@ -271,7 +272,7 @@ impl AnalysisEngine {
         }
 
         // --- Juez ---
-        let judge_user = format!("{prefix}{}", prompts::judge_task(lang, &digest, card.verdict, debated));
+        let judge_user = format!("{prefix}{}", prompts::with_language(prompts::judge_task(lang, &digest, card.verdict, debated), &lang_code));
         let judge_max = self.cfg.max_output_tokens.unwrap_or(2048).max(1500);
         let judged = self.structured::<JudgeOut>(&caps, &system, judge_user, &judge_schema(), judge_max, &usage).await;
 
