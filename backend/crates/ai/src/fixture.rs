@@ -54,7 +54,13 @@ pub fn candles(seed: u64, n: usize, end_price: f64, daily_vol: f64) -> Vec<Candl
         .collect()
 }
 
-fn summary(class: AssetClass, symbol: &str, name: &str, exchange: &str, currency: &str) -> AssetSummary {
+fn summary(
+    class: AssetClass,
+    symbol: &str,
+    name: &str,
+    exchange: &str,
+    currency: &str,
+) -> AssetSummary {
     AssetSummary {
         id: AssetId::new(class, symbol),
         symbol: symbol.into(),
@@ -67,7 +73,14 @@ fn summary(class: AssetClass, symbol: &str, name: &str, exchange: &str, currency
     }
 }
 
-fn quote(id: &AssetId, price: f64, change_pct: f64, currency: &str, market_cap: Option<f64>, state: MarketState) -> Quote {
+fn quote(
+    id: &AssetId,
+    price: f64,
+    change_pct: f64,
+    currency: &str,
+    market_cap: Option<f64>,
+    state: MarketState,
+) -> Quote {
     Quote {
         id: id.clone(),
         price,
@@ -87,7 +100,14 @@ fn quote(id: &AssetId, price: f64, change_pct: f64, currency: &str, market_cap: 
     }
 }
 
-fn news(id: &str, hours_ago: i64, title: &str, summary: &str, publisher: &str, tickers: &[&str]) -> NewsItem {
+fn news(
+    id: &str,
+    hours_ago: i64,
+    title: &str,
+    summary: &str,
+    publisher: &str,
+    tickers: &[&str],
+) -> NewsItem {
     NewsItem {
         id: id.into(),
         title: title.into(),
@@ -135,7 +155,9 @@ pub fn stock_snapshot() -> AssetSnapshot {
     AssetSnapshot {
         quote: Some(quote(&id, 228.40, 0.008, "USD", Some(3.45e12), MarketState::Regular)),
         fundamentals: Some(Fundamentals {
-            description: Some("Diseña y vende smartphones, ordenadores, wearables y servicios digitales.".into()),
+            description: Some(
+                "Diseña y vende smartphones, ordenadores, wearables y servicios digitales.".into(),
+            ),
             sector: Some("Technology".into()),
             industry: Some("Consumer Electronics".into()),
             country: Some("US".into()),
@@ -211,12 +233,54 @@ pub fn stock_snapshot() -> AssetSnapshot {
             resistances: vec![232.0, 237.2],
         }),
         news: vec![
-            news("n1", 3, "Apple shares rise as analysts upgrade iPhone demand outlook", "Two brokers raised their targets citing strong early orders.", "Reuters", &["AAPL"]),
-            news("n2", 20, "Apple faces antitrust probe over App Store fees in the EU", "Regulators opened a formal investigation that could lead to fines.", "Financial Times", &["AAPL"]),
-            news("n3", 30, "Apple announces record services revenue ahead of earnings", "Services segment grew double digits for the fourth straight quarter.", "Bloomberg", &["AAPL"]),
-            news("n4", 55, "Supply chain concerns weigh on hardware makers", "Component shortages could delay some product launches.", "WSJ", &["AAPL", "MSFT"]),
-            news("n5", 90, "Tech sector rallies as Fed signals patience on rate cuts", "Equities advanced after the minutes pointed to a gradual path.", "CNBC", &[]),
-            news("n6", 140, "Apple plans new AI features for the next iOS release", "The company will expand on-device models, according to people familiar.", "The Verge", &["AAPL"]),
+            news(
+                "n1",
+                3,
+                "Apple shares rise as analysts upgrade iPhone demand outlook",
+                "Two brokers raised their targets citing strong early orders.",
+                "Reuters",
+                &["AAPL"],
+            ),
+            news(
+                "n2",
+                20,
+                "Apple faces antitrust probe over App Store fees in the EU",
+                "Regulators opened a formal investigation that could lead to fines.",
+                "Financial Times",
+                &["AAPL"],
+            ),
+            news(
+                "n3",
+                30,
+                "Apple announces record services revenue ahead of earnings",
+                "Services segment grew double digits for the fourth straight quarter.",
+                "Bloomberg",
+                &["AAPL"],
+            ),
+            news(
+                "n4",
+                55,
+                "Supply chain concerns weigh on hardware makers",
+                "Component shortages could delay some product launches.",
+                "WSJ",
+                &["AAPL", "MSFT"],
+            ),
+            news(
+                "n5",
+                90,
+                "Tech sector rallies as Fed signals patience on rate cuts",
+                "Equities advanced after the minutes pointed to a gradual path.",
+                "CNBC",
+                &[],
+            ),
+            news(
+                "n6",
+                140,
+                "Apple plans new AI features for the next iOS release",
+                "The company will expand on-device models, according to people familiar.",
+                "The Verge",
+                &["AAPL"],
+            ),
         ],
         macro_context: Some(macro_context()),
         missing: vec![],
@@ -270,8 +334,22 @@ pub fn crypto_snapshot() -> AssetSnapshot {
             ..Default::default()
         }),
         news: vec![
-            news("c1", 5, "Bitcoin climbs as spot ETF inflows hit a monthly high", "Net inflows reached their strongest level since January.", "CoinDesk", &["BTC"]),
-            news("c2", 26, "Exchange hack raises fears over custody risks", "A mid-size exchange suspended withdrawals after a security breach.", "The Block", &["BTC"]),
+            news(
+                "c1",
+                5,
+                "Bitcoin climbs as spot ETF inflows hit a monthly high",
+                "Net inflows reached their strongest level since January.",
+                "CoinDesk",
+                &["BTC"],
+            ),
+            news(
+                "c2",
+                26,
+                "Exchange hack raises fears over custody risks",
+                "A mid-size exchange suspended withdrawals after a security breach.",
+                "The Block",
+                &["BTC"],
+            ),
         ],
         macro_context: Some(macro_context()),
         missing: vec![],
@@ -290,14 +368,26 @@ pub fn sparse_snapshot() -> AssetSnapshot {
         indicators: None,
         news: vec![],
         macro_context: None,
-        missing: vec!["fundamentals: proveedor sin datos".into(), "indicators: historial insuficiente".into(), "news: sin resultados".into()],
+        missing: vec![
+            "fundamentals: proveedor sin datos".into(),
+            "indicators: historial insuficiente".into(),
+            "news: sin resultados".into(),
+        ],
         generated_at: now(),
         summary: s,
     }
 }
 
 /// Acción genérica derivada del fixture principal con otro precio y valoración.
-fn derived_stock(symbol: &str, name: &str, exchange: &str, price: f64, pe: f64, trend: Trend, ret3m: f64) -> AssetSnapshot {
+fn derived_stock(
+    symbol: &str,
+    name: &str,
+    exchange: &str,
+    price: f64,
+    pe: f64,
+    trend: Trend,
+    ret3m: f64,
+) -> AssetSnapshot {
     let mut s = stock_snapshot();
     let ratio = price / 228.40;
     s.summary = summary(AssetClass::Stock, symbol, name, exchange, "USD");
@@ -311,7 +401,10 @@ fn derived_stock(symbol: &str, name: &str, exchange: &str, price: f64, pe: f64, 
     }
     if let Some(i) = s.indicators.as_mut() {
         i.last_close = Some(price * 0.997);
-        for v in [&mut i.sma20, &mut i.sma50, &mut i.sma200, &mut i.bb_upper, &mut i.bb_middle, &mut i.bb_lower, &mut i.atr14, &mut i.high52w, &mut i.low52w] {
+        for v in [
+            &mut i.sma20, &mut i.sma50, &mut i.sma200, &mut i.bb_upper, &mut i.bb_middle,
+            &mut i.bb_lower, &mut i.atr14, &mut i.high52w, &mut i.low52w,
+        ] {
             *v = v.map(|x| x * ratio);
         }
         i.supports = i.supports.iter().map(|x| x * ratio).collect();
@@ -348,7 +441,15 @@ impl FakeMarket {
             stock_snapshot(),
             crypto_snapshot(),
             derived_stock("MSFT", "Microsoft Corporation", "NASDAQ", 441.2, 31.5, Trend::Up, 0.05),
-            derived_stock("NVDA", "NVIDIA Corporation", "NASDAQ", 182.7, 36.0, Trend::StrongUp, 0.22),
+            derived_stock(
+                "NVDA",
+                "NVIDIA Corporation",
+                "NASDAQ",
+                182.7,
+                36.0,
+                Trend::StrongUp,
+                0.22,
+            ),
             derived_stock("TSLA", "Tesla, Inc.", "NASDAQ", 251.3, 78.0, Trend::Sideways, -0.04),
             sparse_snapshot(),
         ] {
@@ -377,7 +478,10 @@ impl FakeMarket {
 
     fn get(&self, id: &AssetId) -> Result<&AssetSnapshot> {
         if self.failing.lock().unwrap().contains(id) {
-            return Err(DomainError::Upstream { provider: "fixture".into(), message: format!("fallo simulado para {id}") });
+            return Err(DomainError::Upstream {
+                provider: "fixture".into(),
+                message: format!("fallo simulado para {id}"),
+            });
         }
         self.snapshots.get(id).ok_or_else(|| DomainError::NotFound(id.to_string()))
     }
@@ -397,7 +501,15 @@ impl MarketData for FakeMarket {
             .filter_map(|s| {
                 let sym = s.summary.symbol.to_lowercase();
                 let name = s.summary.name.to_lowercase();
-                let rank = if sym == q { 0 } else if name.starts_with(&q) { 1 } else if name.contains(&q) || sym.contains(&q) { 2 } else { return None };
+                let rank = if sym == q {
+                    0
+                } else if name.starts_with(&q) {
+                    1
+                } else if name.contains(&q) || sym.contains(&q) {
+                    2
+                } else {
+                    return None;
+                };
                 Some((rank, s.summary.clone()))
             })
             .collect();
@@ -407,11 +519,17 @@ impl MarketData for FakeMarket {
 
     async fn quote(&self, id: &AssetId) -> Result<Quote> {
         self.log(format!("quote {id}"));
-        self.get(id)?.quote.clone().ok_or_else(|| DomainError::NotFound(format!("sin cotización para {id}")))
+        self.get(id)?
+            .quote
+            .clone()
+            .ok_or_else(|| DomainError::NotFound(format!("sin cotización para {id}")))
     }
 
     async fn quotes(&self, ids: &[AssetId]) -> Result<Vec<Quote>> {
-        self.log(format!("quotes {}", ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")));
+        self.log(format!(
+            "quotes {}",
+            ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+        ));
         Ok(ids.iter().filter_map(|id| self.get(id).ok().and_then(|s| s.quote.clone())).collect())
     }
 
@@ -441,7 +559,10 @@ impl MarketData for FakeMarket {
 
     async fn indicators(&self, id: &AssetId) -> Result<Indicators> {
         self.log(format!("indicators {id}"));
-        self.get(id)?.indicators.clone().ok_or_else(|| DomainError::NotFound(format!("sin indicadores para {id}")))
+        self.get(id)?
+            .indicators
+            .clone()
+            .ok_or_else(|| DomainError::NotFound(format!("sin indicadores para {id}")))
     }
 
     async fn news(&self, id: Option<&AssetId>, limit: usize) -> Result<Vec<NewsItem>> {

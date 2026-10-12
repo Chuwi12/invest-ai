@@ -52,7 +52,8 @@ pub async fn generate(State(state): State<AppState>, AssetPath(id): AssetPath) -
     if !leader {
         tracing::debug!(%id, "análisis ya en curso: se comparte el resultado");
     }
-    Ok(Json(Analysis::clone(&result?)))
+    let analysis = result?;
+    Ok(Json(Analysis::clone(&analysis)))
 }
 
 async fn run_analysis(state: AppState, id: AssetId) -> Result<Analysis, DomainError> {

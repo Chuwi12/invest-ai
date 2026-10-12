@@ -61,6 +61,49 @@ type Out = (f32, Vec<String>);
 // Utilidades
 // ---------------------------------------------------------------------------------------------
 
+/// Tablas de umbrales: pares `(valor observado, puntuación 0–100)` ordenados por valor, que
+/// `piecewise` interpola. Están aparte (y fuera de rustfmt) para leerlas y afinarlas de un vistazo.
+#[rustfmt::skip]
+mod tables {
+    type T = &'static [(f64, f64)];
+    pub const SMA200_DIST: T = &[(-0.30, 8.0), (-0.15, 22.0), (-0.05, 36.0), (0.0, 50.0), (0.05, 64.0), (0.15, 74.0), (0.30, 62.0), (0.60, 40.0)];
+    pub const SMA50_DIST: T = &[(-0.15, 12.0), (-0.05, 30.0), (0.0, 48.0), (0.05, 66.0), (0.12, 72.0), (0.25, 50.0), (0.45, 30.0)];
+    pub const SMA_CROSS: T = &[(-0.12, 12.0), (-0.03, 30.0), (0.0, 48.0), (0.03, 64.0), (0.12, 78.0)];
+    pub const RSI: T = &[(10.0, 45.0), (20.0, 60.0), (30.0, 68.0), (45.0, 58.0), (55.0, 58.0), (65.0, 50.0), (70.0, 40.0), (80.0, 25.0), (90.0, 15.0)];
+    pub const MACD_HIST_PCT: T = &[(-1.5, 18.0), (-0.4, 36.0), (0.0, 50.0), (0.4, 64.0), (1.5, 82.0)];
+    pub const REWARD_RISK: T = &[(0.3, 25.0), (0.7, 38.0), (1.0, 50.0), (1.5, 64.0), (2.5, 78.0)];
+    pub const MOM_1M: T = &[(-0.20, 10.0), (-0.08, 30.0), (0.0, 48.0), (0.05, 65.0), (0.15, 80.0), (0.30, 68.0)];
+    pub const MOM_3M: T = &[(-0.30, 10.0), (-0.10, 30.0), (0.0, 48.0), (0.10, 68.0), (0.30, 85.0), (0.80, 70.0)];
+    pub const MOM_1Y: T = &[(-0.40, 8.0), (-0.15, 28.0), (0.0, 45.0), (0.15, 65.0), (0.40, 82.0), (1.0, 72.0)];
+    pub const HIGH52_DIST: T = &[(0.02, 72.0), (0.08, 66.0), (0.20, 50.0), (0.40, 34.0), (0.60, 20.0)];
+    pub const ATH_RATIO: T = &[(0.03, 50.0), (0.10, 60.0), (0.25, 72.0), (0.50, 62.0), (0.80, 48.0), (0.95, 38.0), (1.0, 35.0)];
+    pub const FDV_RATIO: T = &[(1.0, 85.0), (1.2, 70.0), (1.5, 55.0), (2.0, 38.0), (4.0, 15.0), (10.0, 5.0)];
+    pub const PEG: T = &[(0.4, 88.0), (0.8, 78.0), (1.0, 66.0), (1.5, 45.0), (2.0, 30.0), (3.0, 12.0)];
+    pub const FCF_YIELD: T = &[(-0.02, 10.0), (0.0, 25.0), (0.02, 48.0), (0.04, 62.0), (0.07, 78.0), (0.10, 86.0)];
+    pub const EXPENSE_RATIO: T = &[(0.0003, 88.0), (0.001, 82.0), (0.003, 68.0), (0.006, 50.0), (0.01, 30.0), (0.02, 12.0)];
+    pub const OP_MARGIN: T = &[(-0.10, 5.0), (0.0, 20.0), (0.08, 45.0), (0.15, 62.0), (0.25, 80.0), (0.40, 90.0)];
+    pub const NET_MARGIN: T = &[(-0.10, 5.0), (0.0, 20.0), (0.05, 45.0), (0.12, 65.0), (0.25, 85.0)];
+    pub const ROE: T = &[(-0.05, 5.0), (0.0, 20.0), (0.08, 45.0), (0.15, 65.0), (0.25, 82.0), (0.50, 85.0)];
+    pub const REV_GROWTH: T = &[(-0.15, 5.0), (-0.03, 25.0), (0.03, 45.0), (0.10, 65.0), (0.25, 85.0), (0.50, 92.0)];
+    pub const EPS_GROWTH: T = &[(-0.30, 8.0), (0.0, 35.0), (0.10, 55.0), (0.25, 75.0), (0.50, 88.0)];
+    pub const DEBT_EQUITY: T = &[(0.0, 85.0), (0.3, 78.0), (0.8, 62.0), (1.5, 42.0), (3.0, 20.0), (6.0, 8.0)];
+    pub const CURRENT_RATIO: T = &[(0.5, 15.0), (1.0, 40.0), (1.5, 65.0), (2.5, 80.0)];
+    pub const FCF_MARGIN: T = &[(-0.10, 5.0), (0.0, 25.0), (0.05, 50.0), (0.12, 72.0), (0.25, 90.0)];
+    pub const ANALYST_RATING: T = &[(1.0, 92.0), (2.0, 74.0), (3.0, 50.0), (4.0, 28.0), (5.0, 10.0)];
+    pub const TARGET_UPSIDE: T = &[(-0.20, 18.0), (-0.05, 36.0), (0.05, 52.0), (0.15, 66.0), (0.30, 80.0), (0.60, 88.0)];
+    pub const SHORT_INTEREST: T = &[(0.02, 60.0), (0.05, 50.0), (0.15, 30.0), (0.30, 15.0)];
+    pub const CURVE: T = &[(-1.0, 25.0), (-0.3, 38.0), (0.0, 48.0), (0.5, 58.0), (1.5, 68.0)];
+    pub const VIX: T = &[(12.0, 72.0), (16.0, 66.0), (20.0, 55.0), (25.0, 40.0), (30.0, 28.0), (40.0, 12.0)];
+    pub const RATE_CHANGE: T = &[(-0.30, 66.0), (-0.10, 57.0), (0.0, 50.0), (0.10, 43.0), (0.30, 34.0)];
+    pub const CPI: T = &[(1.5, 55.0), (2.5, 62.0), (3.5, 48.0), (5.0, 32.0), (8.0, 15.0)];
+    pub const VOLATILITY: T = &[(0.10, 10.0), (0.20, 30.0), (0.30, 45.0), (0.50, 65.0), (0.80, 85.0), (1.20, 95.0)];
+    pub const DRAWDOWN: T = &[(0.05, 10.0), (0.15, 30.0), (0.30, 55.0), (0.50, 78.0), (0.75, 92.0)];
+    pub const ATR_PCT: T = &[(0.005, 10.0), (0.015, 30.0), (0.03, 55.0), (0.06, 80.0)];
+    pub const BETA: T = &[(0.4, 15.0), (0.8, 30.0), (1.0, 42.0), (1.3, 58.0), (1.8, 78.0), (2.5, 92.0)];
+    pub const MCAP_CRYPTO: T = &[(8.0, 88.0), (9.0, 70.0), (10.0, 50.0), (11.0, 32.0), (12.0, 22.0)];
+    pub const MCAP_STOCK: T = &[(8.5, 80.0), (9.3, 62.0), (10.0, 48.0), (10.7, 35.0), (11.3, 22.0), (12.0, 15.0)];
+}
+
 /// Interpolación lineal por tramos; fuera del rango extremo se queda en el valor del extremo.
 /// `pts` debe estar ordenado por `x` creciente.
 fn piecewise(x: f64, pts: &[(f64, f64)]) -> f64 {
@@ -143,8 +186,8 @@ fn trend_score(t: Trend) -> f64 {
 fn derive_trend(price: Option<f64>, sma50: Option<f64>, sma200: Option<f64>) -> Option<Trend> {
     let p = price?;
     match (sma50, sma200) {
-        (Some(a), Some(b)) if p > a && a > b => Some(Trend::Up),
-        (Some(a), Some(b)) if p < a && a < b => Some(Trend::Down),
+        (Some(a), Some(b)) if p > a && p > b => Some(Trend::Up),
+        (Some(a), Some(b)) if p < a && p < b => Some(Trend::Down),
         (Some(_), Some(_)) => Some(Trend::Sideways),
         (Some(a), None) => Some(if p > a { Trend::Up } else { Trend::Down }),
         (None, Some(b)) => Some(if p > b { Trend::Up } else { Trend::Down }),
@@ -168,63 +211,106 @@ fn technical(c: &Ctx) -> Option<Out> {
     }
     if let (Some(px), Some(s)) = (c.price, sma200) {
         let d = px / s - 1.0;
-        let pts = [(-0.30, 8.0), (-0.15, 22.0), (-0.05, 36.0), (0.0, 50.0), (0.05, 64.0), (0.15, 74.0), (0.30, 62.0), (0.60, 40.0)];
+        let pts = tables::SMA200_DIST;
         p.add(
             1.5,
-            piecewise(d, &pts),
-            tr!(l, "Precio {} respecto a la SMA200 ({})", "Price {} vs SMA200 ({})", fmt::pct_signed(d), fmt::price(s)),
+            piecewise(d, pts),
+            tr!(
+                l,
+                "Precio {} respecto a la SMA200 ({})",
+                "Price {} vs SMA200 ({})",
+                fmt::pct_signed(d),
+                fmt::price(s)
+            ),
         );
     }
     if let (Some(px), Some(s)) = (c.price, sma50) {
         let d = px / s - 1.0;
-        let pts = [(-0.15, 12.0), (-0.05, 30.0), (0.0, 48.0), (0.05, 66.0), (0.12, 72.0), (0.25, 50.0), (0.45, 30.0)];
+        let pts = tables::SMA50_DIST;
         let note = if d > 0.20 { l.t(", muy extendido", ", overextended") } else { "" };
         p.add(
             1.0,
-            piecewise(d, &pts),
-            tr!(l, "Precio {} respecto a la SMA50 ({}){}", "Price {} vs SMA50 ({}){}", fmt::pct_signed(d), fmt::price(s), note),
+            piecewise(d, pts),
+            tr!(
+                l,
+                "Precio {} respecto a la SMA50 ({}){}",
+                "Price {} vs SMA50 ({}){}",
+                fmt::pct_signed(d),
+                fmt::price(s),
+                note
+            ),
         );
     }
     if let (Some(a), Some(b)) = (sma50, sma200) {
         let r = a / b - 1.0;
-        let pts = [(-0.12, 12.0), (-0.03, 30.0), (0.0, 48.0), (0.03, 64.0), (0.12, 78.0)];
-        let what = if r >= 0.0 { l.t("cruz dorada", "golden cross") } else { l.t("cruz de la muerte", "death cross") };
+        let pts = tables::SMA_CROSS;
+        let what = if r >= 0.0 {
+            l.t("cruz dorada", "golden cross")
+        } else {
+            l.t("cruz de la muerte", "death cross")
+        };
         p.add(
             1.0,
-            piecewise(r, &pts),
-            tr!(l, "SMA50 {} la SMA200 ({}): {}", "SMA50 {} SMA200 ({}): {}", if r >= 0.0 { l.t("sobre", "above") } else { l.t("bajo", "below") }, fmt::pct_signed(r), what),
+            piecewise(r, pts),
+            tr!(
+                l,
+                "SMA50 {} la SMA200 ({}): {}",
+                "SMA50 {} SMA200 ({}): {}",
+                if r >= 0.0 { l.t("sobre", "above") } else { l.t("bajo", "below") },
+                fmt::pct_signed(r),
+                what
+            ),
         );
     }
     if let Some(rsi) = fin(ind.rsi14) {
-        let pts = [(10.0, 45.0), (20.0, 60.0), (30.0, 68.0), (45.0, 58.0), (55.0, 58.0), (65.0, 50.0), (70.0, 40.0), (80.0, 25.0), (90.0, 15.0)];
+        let pts = tables::RSI;
         let zone = match rsi {
             r if r >= 70.0 => l.t("sobrecompra", "overbought"),
             r if r <= 30.0 => l.t("sobreventa", "oversold"),
             _ => l.t("zona neutra", "neutral zone"),
         };
-        p.add(1.0, piecewise(rsi, &pts), tr!(l, "RSI14 = {:.1} ({})", "RSI14 = {:.1} ({})", rsi, zone));
+        p.add(
+            1.0,
+            piecewise(rsi, pts),
+            tr!(l, "RSI14 = {:.1} ({})", "RSI14 = {:.1} ({})", rsi, zone),
+        );
     }
-    let hist = fin(ind.macd_hist).or_else(|| fin(ind.macd).zip(fin(ind.macd_signal)).map(|(m, s)| m - s));
+    let hist =
+        fin(ind.macd_hist).or_else(|| fin(ind.macd).zip(fin(ind.macd_signal)).map(|(m, s)| m - s));
     if let Some(h) = hist {
         // Histograma normalizado por el precio para que sea comparable entre activos.
         let base = c.price.or(fin(ind.last_close)).filter(|v| *v > 0.0);
         let norm = base.map(|b| h / b * 100.0).unwrap_or(h.signum() * 0.3);
-        let pts = [(-1.5, 18.0), (-0.4, 36.0), (0.0, 50.0), (0.4, 64.0), (1.5, 82.0)];
+        let pts = tables::MACD_HIST_PCT;
         let what = if h >= 0.0 { l.t("alcista", "bullish") } else { l.t("bajista", "bearish") };
-        p.add(1.0, piecewise(norm, &pts), tr!(l, "MACD histograma {} ({})", "MACD histogram {} ({})", fmt::num(h), what));
+        p.add(
+            1.0,
+            piecewise(norm, pts),
+            tr!(l, "MACD histograma {} ({})", "MACD histogram {} ({})", fmt::num(h), what),
+        );
     }
     // Recompensa/riesgo entre el soporte y la resistencia más cercanos.
     if let Some(px) = c.price {
-        let sup = ind.supports.iter().copied().filter(|s| s.is_finite() && *s > 0.0 && *s < px).fold(None, |a: Option<f64>, s| Some(a.map_or(s, |m| m.max(s))));
-        let res = ind.resistances.iter().copied().filter(|r| r.is_finite() && *r > px).fold(None, |a: Option<f64>, r| Some(a.map_or(r, |m| m.min(r))));
+        let sup = ind
+            .supports
+            .iter()
+            .copied()
+            .filter(|s| s.is_finite() && *s > 0.0 && *s < px)
+            .fold(None, |a: Option<f64>, s| Some(a.map_or(s, |m| m.max(s))));
+        let res = ind
+            .resistances
+            .iter()
+            .copied()
+            .filter(|r| r.is_finite() && *r > px)
+            .fold(None, |a: Option<f64>, r| Some(a.map_or(r, |m| m.min(r))));
         if let (Some(s), Some(r)) = (sup, res) {
             let (down, up) = ((px - s) / px, (r - px) / px);
             if down > 0.0005 {
                 let rr = up / down;
-                let pts = [(0.3, 25.0), (0.7, 38.0), (1.0, 50.0), (1.5, 64.0), (2.5, 78.0)];
+                let pts = tables::REWARD_RISK;
                 p.add(
                     1.0,
-                    piecewise(rr, &pts),
+                    piecewise(rr, pts),
                     tr!(
                         l,
                         "Soporte {} ({}) y resistencia {} ({}): recompensa/riesgo {:.1}",
@@ -268,22 +354,30 @@ fn momentum(c: &Ctx) -> Option<Out> {
     let mut p = Parts::default();
     // Tablas en unidades «de la clase»: rendimiento / escala. Las subidas parabólicas puntúan
     // algo menos que las sostenidas (riesgo de agotamiento).
-    let m1 = [(-0.20, 10.0), (-0.08, 30.0), (0.0, 48.0), (0.05, 65.0), (0.15, 80.0), (0.30, 68.0)];
-    let m3 = [(-0.30, 10.0), (-0.10, 30.0), (0.0, 48.0), (0.10, 68.0), (0.30, 85.0), (0.80, 70.0)];
-    let y1 = [(-0.40, 8.0), (-0.15, 28.0), (0.0, 45.0), (0.15, 65.0), (0.40, 82.0), (1.0, 72.0)];
+    let m1 = tables::MOM_1M;
+    let m3 = tables::MOM_3M;
+    let y1 = tables::MOM_1Y;
     for (w, v, name, pts) in [
-        (1.0, fin(ind.return1m), l.t("1 mes", "1 month"), &m1[..]),
-        (1.5, fin(ind.return3m), l.t("3 meses", "3 months"), &m3[..]),
-        (1.5, fin(ind.return1y), l.t("1 año", "1 year"), &y1[..]),
+        (1.0, fin(ind.return1m), l.t("1 mes", "1 month"), m1),
+        (1.5, fin(ind.return3m), l.t("3 meses", "3 months"), m3),
+        (1.5, fin(ind.return1y), l.t("1 año", "1 year"), y1),
     ] {
         if let Some(r) = v {
-            p.add(w, piecewise(r / k, pts), tr!(l, "Rendimiento a {}: {}", "Return over {}: {}", name, fmt::pct_signed(r)));
+            p.add(
+                w,
+                piecewise(r / k, pts),
+                tr!(l, "Rendimiento a {}: {}", "Return over {}: {}", name, fmt::pct_signed(r)),
+            );
         }
     }
     if let Some(d) = fin(ind.dist_from_high52w).map(f64::abs) {
         // Cerca del máximo anual = fuerza relativa; muy lejos = castigo.
-        let pts = [(0.02, 72.0), (0.08, 66.0), (0.20, 50.0), (0.40, 34.0), (0.60, 20.0)];
-        p.add(0.6, piecewise(d / k, &pts), tr!(l, "A {} del máximo de 52 semanas", "{} below the 52-week high", fmt::pct(d)));
+        let pts = tables::HIGH52_DIST;
+        p.add(
+            0.6,
+            piecewise(d / k, pts),
+            tr!(l, "A {} del máximo de 52 semanas", "{} below the 52-week high", fmt::pct(d)),
+        );
     }
     p.finish()
 }
@@ -303,7 +397,13 @@ struct Profile {
 
 fn profile(sector: Option<&str>, class: AssetClass) -> Profile {
     if matches!(class, AssetClass::Etf | AssetClass::Fund | AssetClass::Index) {
-        return Profile { pe: (13.0, 19.0, 27.0), ps: (1.0, 2.5, 4.5), ev_ebitda: None, pb: None, financial: false };
+        return Profile {
+            pe: (13.0, 19.0, 27.0),
+            ps: (1.0, 2.5, 4.5),
+            ev_ebitda: None,
+            pb: None,
+            financial: false,
+        };
     }
     let s = sector.unwrap_or("").to_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|n| s.contains(n));
@@ -315,7 +415,13 @@ fn profile(sector: Option<&str>, class: AssetClass) -> Profile {
     } else if has(&["health"]) {
         p((13.0, 21.0, 32.0), (1.5, 4.0, 8.0), (9.0, 14.0, 22.0))
     } else if has(&["financ", "bank", "insur"]) {
-        Profile { pe: (7.0, 12.0, 18.0), ps: (1.5, 3.0, 5.0), ev_ebitda: None, pb: Some((0.8, 1.4, 2.4)), financial: true }
+        Profile {
+            pe: (7.0, 12.0, 18.0),
+            ps: (1.5, 3.0, 5.0),
+            ev_ebitda: None,
+            pb: Some((0.8, 1.4, 2.4)),
+            financial: true,
+        }
     } else if has(&["cyclical", "discretionary"]) {
         p((11.0, 19.0, 30.0), (0.5, 1.5, 3.5), (7.0, 12.0, 20.0))
     } else if has(&["defensive", "staples"]) {
@@ -327,7 +433,13 @@ fn profile(sector: Option<&str>, class: AssetClass) -> Profile {
     } else if has(&["utilit"]) {
         p((11.0, 17.0, 23.0), (1.0, 2.0, 3.5), (7.0, 10.0, 14.0))
     } else if has(&["real estate", "reit"]) {
-        Profile { pe: (14.0, 28.0, 48.0), ps: (4.0, 7.0, 12.0), ev_ebitda: Some((12.0, 18.0, 26.0)), pb: Some((0.7, 1.5, 2.5)), financial: false }
+        Profile {
+            pe: (14.0, 28.0, 48.0),
+            ps: (4.0, 7.0, 12.0),
+            ev_ebitda: Some((12.0, 18.0, 26.0)),
+            pb: Some((0.7, 1.5, 2.5)),
+            financial: false,
+        }
     } else if has(&["material", "mining", "chemical"]) {
         p((9.0, 15.0, 23.0), (0.8, 1.8, 3.5), (5.0, 9.0, 14.0))
     } else {
@@ -337,7 +449,16 @@ fn profile(sector: Option<&str>, class: AssetClass) -> Profile {
 
 /// Puntúa un múltiplo con umbrales (barato, razonable, caro): más bajo = más favorable.
 fn multiple_score((cheap, fair, expensive): (f64, f64, f64), x: f64) -> f64 {
-    piecewise(x, &[(cheap * 0.4, 82.0), (cheap, 76.0), (fair, 55.0), (expensive, 30.0), (expensive * 2.0, 8.0)])
+    piecewise(
+        x,
+        &[
+            (cheap * 0.4, 82.0),
+            (cheap, 76.0),
+            (fair, 55.0),
+            (expensive, 30.0),
+            (expensive * 2.0, 8.0),
+        ],
+    )
 }
 
 fn zone_label(l: Lang, (cheap, fair, expensive): (f64, f64, f64), x: f64) -> &'static str {
@@ -361,11 +482,17 @@ fn valuation(c: &Ctx) -> Option<Out> {
         if let (Some(px), Some(ath)) = (c.price, f.and_then(|f| fin(f.all_time_high))) {
             if ath > 0.0 {
                 let x = px / ath;
-                let pts = [(0.03, 50.0), (0.10, 60.0), (0.25, 72.0), (0.50, 62.0), (0.80, 48.0), (0.95, 38.0), (1.0, 35.0)];
+                let pts = tables::ATH_RATIO;
                 p.add(
                     1.5,
-                    piecewise(x, &pts),
-                    tr!(l, "Precio al {} de su máximo histórico ({})", "Price at {} of its all-time high ({})", fmt::pct(x), fmt::price(ath)),
+                    piecewise(x, pts),
+                    tr!(
+                        l,
+                        "Precio al {} de su máximo histórico ({})",
+                        "Price at {} of its all-time high ({})",
+                        fmt::pct(x),
+                        fmt::price(ath)
+                    ),
                 );
             }
         }
@@ -379,9 +506,23 @@ fn valuation(c: &Ctx) -> Option<Out> {
                 },
             };
             if let Some((r, from_supply)) = ratio {
-                let pts = [(1.0, 85.0), (1.2, 70.0), (1.5, 55.0), (2.0, 38.0), (4.0, 15.0), (10.0, 5.0)];
-                let src = if from_supply { l.t("oferta máx./circulante", "max/circulating supply") } else { "FDV / market cap" };
-                p.add(1.5, piecewise(r, &pts), tr!(l, "{} = {:.2}x (dilución futura)", "{} = {:.2}x (future dilution)", src, r));
+                let pts = tables::FDV_RATIO;
+                let src = if from_supply {
+                    l.t("oferta máx./circulante", "max/circulating supply")
+                } else {
+                    "FDV / market cap"
+                };
+                p.add(
+                    1.5,
+                    piecewise(r, pts),
+                    tr!(
+                        l,
+                        "{} = {:.2}x (dilución futura)",
+                        "{} = {:.2}x (future dilution)",
+                        src,
+                        r
+                    ),
+                );
             }
         }
         return p.finish();
@@ -392,43 +533,96 @@ fn valuation(c: &Ctx) -> Option<Out> {
     let sector = f.sector.as_deref().unwrap_or(l.t("general", "general"));
 
     // PER: preferimos el forward (descuenta lo ya conocido) si es positivo.
-    let pe = fin(f.pe_forward).filter(|v| *v > 0.0).map(|v| (v, "forward")).or_else(|| fin(f.pe_trailing).map(|v| (v, "trailing")));
+    let pe = fin(f.pe_forward)
+        .filter(|v| *v > 0.0)
+        .map(|v| (v, "forward"))
+        .or_else(|| fin(f.pe_trailing).map(|v| (v, "trailing")));
     if let Some((v, kind)) = pe {
         if v <= 0.0 {
-            p.add(2.0, 12.0, tr!(l, "PER {} no positivo: beneficios negativos", "{} P/E not positive: negative earnings", kind));
+            p.add(
+                2.0,
+                12.0,
+                tr!(
+                    l,
+                    "PER {} no positivo: beneficios negativos",
+                    "{} P/E not positive: negative earnings",
+                    kind
+                ),
+            );
         } else {
             p.add(
                 2.0,
                 multiple_score(prof.pe, v),
-                tr!(l, "PER {} = {} ({}; sector {})", "{} P/E = {} ({}; sector {})", kind, fmt::num(v), zone_label(l, prof.pe, v), sector),
+                tr!(
+                    l,
+                    "PER {} = {} ({}; sector {})",
+                    "{} P/E = {} ({}; sector {})",
+                    kind,
+                    fmt::num(v),
+                    zone_label(l, prof.pe, v),
+                    sector
+                ),
             );
         }
     }
     if let Some(peg) = fin(f.peg).filter(|v| *v > 0.0) {
-        let pts = [(0.4, 88.0), (0.8, 78.0), (1.0, 66.0), (1.5, 45.0), (2.0, 30.0), (3.0, 12.0)];
-        p.add(1.5, piecewise(peg, &pts), tr!(l, "PEG = {}", "PEG = {}", fmt::num(peg)));
+        let pts = tables::PEG;
+        p.add(1.5, piecewise(peg, pts), tr!(l, "PEG = {}", "PEG = {}", fmt::num(peg)));
     }
     if !prof.financial {
         if let Some(ps) = fin(f.price_to_sales).filter(|v| *v > 0.0) {
-            p.add(1.0, multiple_score(prof.ps, ps), tr!(l, "P/S = {} ({})", "P/S = {} ({})", fmt::num(ps), zone_label(l, prof.ps, ps)));
+            p.add(
+                1.0,
+                multiple_score(prof.ps, ps),
+                tr!(l, "P/S = {} ({})", "P/S = {} ({})", fmt::num(ps), zone_label(l, prof.ps, ps)),
+            );
         }
     }
     if let (Some(th), Some(ev)) = (prof.ev_ebitda, fin(f.ev_to_ebitda)) {
         if ev <= 0.0 {
-            p.add(1.5, 10.0, tr!(l, "EV/EBITDA = {}: EBITDA negativo", "EV/EBITDA = {}: negative EBITDA", fmt::num(ev)));
+            p.add(
+                1.5,
+                10.0,
+                tr!(
+                    l,
+                    "EV/EBITDA = {}: EBITDA negativo",
+                    "EV/EBITDA = {}: negative EBITDA",
+                    fmt::num(ev)
+                ),
+            );
         } else {
-            p.add(1.5, multiple_score(th, ev), tr!(l, "EV/EBITDA = {} ({})", "EV/EBITDA = {} ({})", fmt::num(ev), zone_label(l, th, ev)));
+            p.add(
+                1.5,
+                multiple_score(th, ev),
+                tr!(
+                    l,
+                    "EV/EBITDA = {} ({})",
+                    "EV/EBITDA = {} ({})",
+                    fmt::num(ev),
+                    zone_label(l, th, ev)
+                ),
+            );
         }
     }
     if let (Some(th), Some(pb)) = (prof.pb, fin(f.price_to_book).filter(|v| *v > 0.0)) {
-        p.add(1.0, multiple_score(th, pb), tr!(l, "P/B = {} ({})", "P/B = {} ({})", fmt::num(pb), zone_label(l, th, pb)));
+        p.add(
+            1.0,
+            multiple_score(th, pb),
+            tr!(l, "P/B = {} ({})", "P/B = {} ({})", fmt::num(pb), zone_label(l, th, pb)),
+        );
     }
     // Rentabilidad por caja libre sobre capitalización.
-    if let (Some(fcf), Some(m)) = (fin(f.free_cash_flow), fin(f.market_cap).or(c.market_cap).filter(|v| *v > 0.0)) {
+    if let (Some(fcf), Some(m)) =
+        (fin(f.free_cash_flow), fin(f.market_cap).or(c.market_cap).filter(|v| *v > 0.0))
+    {
         if !prof.financial {
             let y = fcf / m;
-            let pts = [(-0.02, 10.0), (0.0, 25.0), (0.02, 48.0), (0.04, 62.0), (0.07, 78.0), (0.10, 86.0)];
-            p.add(1.2, piecewise(y, &pts), tr!(l, "Rentabilidad por FCF = {}", "FCF yield = {}", fmt::pct(y)));
+            let pts = tables::FCF_YIELD;
+            p.add(
+                1.2,
+                piecewise(y, pts),
+                tr!(l, "Rentabilidad por FCF = {}", "FCF yield = {}", fmt::pct(y)),
+            );
         }
     }
     // Coste de un ETF/fondo (el ratio de gastos es una «valoración» en sentido amplio).
@@ -437,8 +631,12 @@ fn valuation(c: &Ctx) -> Option<Out> {
             if er > 0.03 {
                 er /= 100.0; // algunos proveedores lo dan en %
             }
-            let pts = [(0.0003, 88.0), (0.001, 82.0), (0.003, 68.0), (0.006, 50.0), (0.01, 30.0), (0.02, 12.0)];
-            p.add(0.8, piecewise(er, &pts), tr!(l, "Coste anual (TER) = {}", "Expense ratio = {}", fmt::pct(er)));
+            let pts = tables::EXPENSE_RATIO;
+            p.add(
+                0.8,
+                piecewise(er, pts),
+                tr!(l, "Coste anual (TER) = {}", "Expense ratio = {}", fmt::pct(er)),
+            );
         }
     }
     p.finish()
@@ -455,7 +653,10 @@ fn debt_equity_ratio(v: f64) -> f64 {
 }
 
 fn fundamental(c: &Ctx) -> Option<Out> {
-    if matches!(c.class, AssetClass::Crypto | AssetClass::Forex | AssetClass::Commodity | AssetClass::Index) {
+    if matches!(
+        c.class,
+        AssetClass::Crypto | AssetClass::Forex | AssetClass::Commodity | AssetClass::Index
+    ) {
         return None;
     }
     let f = c.fun?;
@@ -464,49 +665,101 @@ fn fundamental(c: &Ctx) -> Option<Out> {
     let mut p = Parts::default();
 
     if let Some(m) = fin(f.operating_margin) {
-        let pts = [(-0.10, 5.0), (0.0, 20.0), (0.08, 45.0), (0.15, 62.0), (0.25, 80.0), (0.40, 90.0)];
-        p.add(1.0, piecewise(m, &pts), tr!(l, "Margen operativo = {}", "Operating margin = {}", fmt::pct(m)));
+        let pts = tables::OP_MARGIN;
+        p.add(
+            1.0,
+            piecewise(m, pts),
+            tr!(l, "Margen operativo = {}", "Operating margin = {}", fmt::pct(m)),
+        );
     }
     if let Some(m) = fin(f.profit_margin) {
-        let pts = [(-0.10, 5.0), (0.0, 20.0), (0.05, 45.0), (0.12, 65.0), (0.25, 85.0)];
-        p.add(1.0, piecewise(m, &pts), tr!(l, "Margen neto = {}", "Net margin = {}", fmt::pct(m)));
+        let pts = tables::NET_MARGIN;
+        p.add(1.0, piecewise(m, pts), tr!(l, "Margen neto = {}", "Net margin = {}", fmt::pct(m)));
     }
     if let Some(roe) = fin(f.roe) {
-        let pts = [(-0.05, 5.0), (0.0, 20.0), (0.08, 45.0), (0.15, 65.0), (0.25, 82.0), (0.50, 85.0)];
-        p.add(if prof.financial { 1.5 } else { 1.0 }, piecewise(roe, &pts), tr!(l, "ROE = {}", "ROE = {}", fmt::pct(roe)));
+        let pts = tables::ROE;
+        p.add(
+            if prof.financial { 1.5 } else { 1.0 },
+            piecewise(roe, pts),
+            tr!(l, "ROE = {}", "ROE = {}", fmt::pct(roe)),
+        );
     }
     if let Some(g) = fin(f.revenue_growth_yoy) {
-        let pts = [(-0.15, 5.0), (-0.03, 25.0), (0.03, 45.0), (0.10, 65.0), (0.25, 85.0), (0.50, 92.0)];
-        p.add(1.5, piecewise(g, &pts), tr!(l, "Crecimiento de ingresos = {}", "Revenue growth = {}", fmt::pct_signed(g)));
+        let pts = tables::REV_GROWTH;
+        p.add(
+            1.5,
+            piecewise(g, pts),
+            tr!(l, "Crecimiento de ingresos = {}", "Revenue growth = {}", fmt::pct_signed(g)),
+        );
     }
     if let Some(g) = fin(f.earnings_growth_yoy) {
-        let pts = [(-0.30, 8.0), (0.0, 35.0), (0.10, 55.0), (0.25, 75.0), (0.50, 88.0)];
-        p.add(1.0, piecewise(g, &pts), tr!(l, "Crecimiento de beneficios = {}", "Earnings growth = {}", fmt::pct_signed(g)));
+        let pts = tables::EPS_GROWTH;
+        p.add(
+            1.0,
+            piecewise(g, pts),
+            tr!(l, "Crecimiento de beneficios = {}", "Earnings growth = {}", fmt::pct_signed(g)),
+        );
     }
     if !prof.financial {
         if let Some(de) = fin(f.debt_to_equity).filter(|v| *v >= 0.0).map(debt_equity_ratio) {
-            let pts = [(0.0, 85.0), (0.3, 78.0), (0.8, 62.0), (1.5, 42.0), (3.0, 20.0), (6.0, 8.0)];
-            p.add(1.0, piecewise(de, &pts), tr!(l, "Deuda/capital = {:.2}x", "Debt/equity = {:.2}x", de));
+            let pts = tables::DEBT_EQUITY;
+            p.add(
+                1.0,
+                piecewise(de, pts),
+                tr!(l, "Deuda/capital = {:.2}x", "Debt/equity = {:.2}x", de),
+            );
         }
         if let (Some(cash), Some(debt)) = (fin(f.total_cash), fin(f.total_debt)) {
             if debt > 0.0 && cash > debt {
-                p.add(0.8, 85.0, tr!(l, "Caja neta: caja {} > deuda {}", "Net cash: cash {} > debt {}", fmt::big(cash), fmt::big(debt)));
+                p.add(
+                    0.8,
+                    85.0,
+                    tr!(
+                        l,
+                        "Caja neta: caja {} > deuda {}",
+                        "Net cash: cash {} > debt {}",
+                        fmt::big(cash),
+                        fmt::big(debt)
+                    ),
+                );
             }
         }
         if let Some(cr) = fin(f.current_ratio).filter(|v| *v > 0.0) {
-            let pts = [(0.5, 15.0), (1.0, 40.0), (1.5, 65.0), (2.5, 80.0)];
-            p.add(0.5, piecewise(cr, &pts), tr!(l, "Ratio de liquidez corriente = {}", "Current ratio = {}", fmt::num(cr)));
+            let pts = tables::CURRENT_RATIO;
+            p.add(
+                0.5,
+                piecewise(cr, pts),
+                tr!(l, "Ratio de liquidez corriente = {}", "Current ratio = {}", fmt::num(cr)),
+            );
         }
         if let Some(fcf) = fin(f.free_cash_flow) {
             match fin(f.revenue_ttm).filter(|v| *v > 0.0) {
                 Some(rev) => {
                     let m = fcf / rev;
-                    let pts = [(-0.10, 5.0), (0.0, 25.0), (0.05, 50.0), (0.12, 72.0), (0.25, 90.0)];
-                    p.add(1.5, piecewise(m, &pts), tr!(l, "Margen de FCF = {}", "FCF margin = {}", fmt::pct(m)));
+                    let pts = tables::FCF_MARGIN;
+                    p.add(
+                        1.5,
+                        piecewise(m, pts),
+                        tr!(l, "Margen de FCF = {}", "FCF margin = {}", fmt::pct(m)),
+                    );
                 }
                 None => {
-                    let (s, what) = if fcf > 0.0 { (60.0, l.t("positivo", "positive")) } else { (20.0, l.t("negativo", "negative")) };
-                    p.add(1.0, s, tr!(l, "Flujo de caja libre {} ({})", "Free cash flow {} ({})", what, fmt::big(fcf)));
+                    let (s, what) = if fcf > 0.0 {
+                        (60.0, l.t("positivo", "positive"))
+                    } else {
+                        (20.0, l.t("negativo", "negative"))
+                    };
+                    p.add(
+                        1.0,
+                        s,
+                        tr!(
+                            l,
+                            "Flujo de caja libre {} ({})",
+                            "Free cash flow {} ({})",
+                            what,
+                            fmt::big(fcf)
+                        ),
+                    );
                 }
             }
         }
@@ -557,8 +810,8 @@ fn sentiment_score(c: &Ctx) -> Option<Out> {
             score,
             tr!(
                 l,
-                "{} noticias recientes, sentimiento medio ponderado {:+.2} ({} positivas, {} negativas)",
-                "{} recent news items, recency-weighted mean sentiment {:+.2} ({} positive, {} negative)",
+                "{} noticias recientes, sentimiento medio ponderado {:+.2} (positivas: {}, negativas: {})",
+                "{} recent news items, recency-weighted mean sentiment {:+.2} (positive: {}, negative: {})",
                 n,
                 mean,
                 pos,
@@ -569,20 +822,49 @@ fn sentiment_score(c: &Ctx) -> Option<Out> {
     if let Some(f) = c.fun {
         let n_an = f.analyst_count.unwrap_or(0);
         if let Some(r) = fin(f.analyst_rating_mean).filter(|v| (1.0..=5.0).contains(v)) {
-            let pts = [(1.0, 92.0), (2.0, 74.0), (3.0, 50.0), (4.0, 28.0), (5.0, 10.0)];
+            let pts = tables::ANALYST_RATING;
             let w = if n_an >= 5 { 1.5 } else { 0.8 };
-            p.add(w, piecewise(r, &pts), tr!(l, "Consenso de analistas {:.1}/5 ({} analistas; 1 = compra)", "Analyst consensus {:.1}/5 ({} analysts; 1 = buy)", r, n_an));
+            p.add(
+                w,
+                piecewise(r, pts),
+                tr!(
+                    l,
+                    "Consenso de analistas {:.1}/5 ({} analistas; 1 = compra)",
+                    "Analyst consensus {:.1}/5 ({} analysts; 1 = buy)",
+                    r,
+                    n_an
+                ),
+            );
         }
         if let (Some(t), Some(px)) = (fin(f.analyst_target_mean).filter(|v| *v > 0.0), c.price) {
             if n_an == 0 || n_an >= 3 {
                 let up = t / px - 1.0;
-                let pts = [(-0.20, 18.0), (-0.05, 36.0), (0.05, 52.0), (0.15, 66.0), (0.30, 80.0), (0.60, 88.0)];
-                p.add(1.0, piecewise(up, &pts), tr!(l, "Precio objetivo medio {} ({} potencial)", "Mean price target {} ({} upside)", fmt::price(t), fmt::pct_signed(up)));
+                let pts = tables::TARGET_UPSIDE;
+                p.add(
+                    1.0,
+                    piecewise(up, pts),
+                    tr!(
+                        l,
+                        "Precio objetivo medio {} ({} potencial)",
+                        "Mean price target {} ({} upside)",
+                        fmt::price(t),
+                        fmt::pct_signed(up)
+                    ),
+                );
             }
         }
         if let Some(s) = fin(f.short_pct_float).filter(|v| *v >= 0.0) {
-            let pts = [(0.02, 60.0), (0.05, 50.0), (0.15, 30.0), (0.30, 15.0)];
-            p.add(0.5, piecewise(s, &pts), tr!(l, "Interés corto = {} del free float", "Short interest = {} of float", fmt::pct(s)));
+            let pts = tables::SHORT_INTEREST;
+            p.add(
+                0.5,
+                piecewise(s, pts),
+                tr!(
+                    l,
+                    "Interés corto = {} del free float",
+                    "Short interest = {} of float",
+                    fmt::pct(s)
+                ),
+            );
         }
     }
     p.finish()
@@ -607,29 +889,55 @@ fn macro_score(c: &Ctx) -> Option<Out> {
         .map(|i| to_pp(i.value, &i.unit))
         .or_else(|| find("us10y").zip(find("us2y")).map(|(a, b)| a.value - b.value));
     if let Some(v) = curve {
-        let pts = [(-1.0, 25.0), (-0.3, 38.0), (0.0, 48.0), (0.5, 58.0), (1.5, 68.0)];
-        let what = if v < 0.0 { l.t("invertida: señal de recesión", "inverted: recession signal") } else { l.t("normal", "normal") };
-        p.add(1.0, piecewise(v, &pts), tr!(l, "Curva 10a-2a = {:+.2} pp ({})", "10y-2y curve = {:+.2} pp ({})", v, what));
+        let pts = tables::CURVE;
+        let what = if v < 0.0 {
+            l.t("invertida: señal de recesión", "inverted: recession signal")
+        } else {
+            l.t("normal", "normal")
+        };
+        p.add(
+            1.0,
+            piecewise(v, pts),
+            tr!(l, "Curva 10a-2a = {:+.2} pp ({})", "10y-2y curve = {:+.2} pp ({})", v, what),
+        );
     }
     if let Some(i) = find("vix") {
-        let pts = [(12.0, 72.0), (16.0, 66.0), (20.0, 55.0), (25.0, 40.0), (30.0, 28.0), (40.0, 12.0)];
+        let pts = tables::VIX;
         let what = match i.value {
             v if v < 16.0 => l.t("calma", "calm"),
             v if v < 25.0 => l.t("normal", "normal"),
             v if v < 30.0 => l.t("tensión", "stress"),
             _ => l.t("miedo", "fear"),
         };
-        p.add(1.5, piecewise(i.value, &pts), tr!(l, "VIX = {:.1} ({})", "VIX = {:.1} ({})", i.value, what));
+        p.add(
+            1.5,
+            piecewise(i.value, pts),
+            tr!(l, "VIX = {:.1} ({})", "VIX = {:.1} ({})", i.value, what),
+        );
     }
     let rates = find("us10y").or_else(|| find("fed_funds"));
     if let Some((i, ch)) = rates.and_then(|i| fin(i.change).map(|ch| (i, to_pp(ch, &i.unit)))) {
-        let pts = [(-0.30, 66.0), (-0.10, 57.0), (0.0, 50.0), (0.10, 43.0), (0.30, 34.0)];
-        let dir = if ch > 0.0 { l.t("al alza", "rising") } else if ch < 0.0 { l.t("a la baja", "falling") } else { l.t("estables", "flat") };
-        p.add(1.0, piecewise(ch, &pts), tr!(l, "Tipos ({}) {}: {:+.2} pp", "Rates ({}) {}: {:+.2} pp", i.name, dir, ch));
+        let pts = tables::RATE_CHANGE;
+        let dir = if ch > 0.0 {
+            l.t("al alza", "rising")
+        } else if ch < 0.0 {
+            l.t("a la baja", "falling")
+        } else {
+            l.t("estables", "flat")
+        };
+        p.add(
+            1.0,
+            piecewise(ch, pts),
+            tr!(l, "Tipos ({}) {}: {:+.2} pp", "Rates ({}) {}: {:+.2} pp", i.name, dir, ch),
+        );
     }
     if let Some(i) = find("cpi_yoy") {
-        let pts = [(1.5, 55.0), (2.5, 62.0), (3.5, 48.0), (5.0, 32.0), (8.0, 15.0)];
-        p.add(0.7, piecewise(i.value, &pts), tr!(l, "Inflación interanual = {:.1}%", "Inflation (YoY) = {:.1}%", i.value));
+        let pts = tables::CPI;
+        p.add(
+            0.7,
+            piecewise(i.value, pts),
+            tr!(l, "Inflación interanual = {:.1}%", "Inflation (YoY) = {:.1}%", i.value),
+        );
     }
     p.finish()
 }
@@ -643,32 +951,52 @@ fn risk(c: &Ctx) -> Option<Out> {
     let mut p = Parts::default();
     if let Some(ind) = c.ind {
         if let Some(v) = fin(ind.volatility30d).filter(|v| *v >= 0.0) {
-            let pts = [(0.10, 10.0), (0.20, 30.0), (0.30, 45.0), (0.50, 65.0), (0.80, 85.0), (1.20, 95.0)];
-            p.add(2.0, piecewise(v, &pts), tr!(l, "Volatilidad 30d anualizada = {}", "30d annualised volatility = {}", fmt::pct(v)));
+            let pts = tables::VOLATILITY;
+            p.add(
+                2.0,
+                piecewise(v, pts),
+                tr!(
+                    l,
+                    "Volatilidad 30d anualizada = {}",
+                    "30d annualised volatility = {}",
+                    fmt::pct(v)
+                ),
+            );
         }
         if let Some(dd) = fin(ind.max_drawdown1y).map(f64::abs) {
-            let pts = [(0.05, 10.0), (0.15, 30.0), (0.30, 55.0), (0.50, 78.0), (0.75, 92.0)];
-            p.add(1.5, piecewise(dd, &pts), tr!(l, "Caída máxima a 1 año = {}", "1-year max drawdown = {}", fmt::pct(dd)));
+            let pts = tables::DRAWDOWN;
+            p.add(
+                1.5,
+                piecewise(dd, pts),
+                tr!(l, "Caída máxima a 1 año = {}", "1-year max drawdown = {}", fmt::pct(dd)),
+            );
         }
         if let (Some(atr), Some(px)) = (fin(ind.atr14), c.price.filter(|v| *v > 0.0)) {
             let a = atr / px;
-            let pts = [(0.005, 10.0), (0.015, 30.0), (0.03, 55.0), (0.06, 80.0)];
-            p.add(0.6, piecewise(a, &pts), tr!(l, "ATR14 = {} del precio (rango diario típico)", "ATR14 = {} of price (typical daily range)", fmt::pct(a)));
+            let pts = tables::ATR_PCT;
+            p.add(
+                0.6,
+                piecewise(a, pts),
+                tr!(
+                    l,
+                    "ATR14 = {} del precio (rango diario típico)",
+                    "ATR14 = {} of price (typical daily range)",
+                    fmt::pct(a)
+                ),
+            );
         }
     }
     if let Some(beta) = c.fun.and_then(|f| fin(f.beta)).filter(|b| *b > -5.0 && *b < 10.0) {
-        let pts = [(0.4, 15.0), (0.8, 30.0), (1.0, 42.0), (1.3, 58.0), (1.8, 78.0), (2.5, 92.0)];
-        p.add(1.0, piecewise(beta, &pts), tr!(l, "Beta = {}", "Beta = {}", fmt::num(beta)));
+        let pts = tables::BETA;
+        p.add(1.0, piecewise(beta, pts), tr!(l, "Beta = {}", "Beta = {}", fmt::num(beta)));
     }
     // Tamaño: capitalización pequeña = más frágil. En cripto la escala es otra.
     if let Some(m) = c.market_cap.filter(|v| *v > 0.0) {
         let x = m.log10();
-        let (pts, w): (&[(f64, f64)], f64) = if c.class == AssetClass::Crypto {
-            (&[(8.0, 88.0), (9.0, 70.0), (10.0, 50.0), (11.0, 32.0), (12.0, 22.0)], 1.0)
-        } else if c.class == AssetClass::Stock {
-            (&[(8.5, 80.0), (9.3, 62.0), (10.0, 48.0), (10.7, 35.0), (11.3, 22.0), (12.0, 15.0)], 0.8)
-        } else {
-            (&[], 0.0)
+        let (pts, w): (&[(f64, f64)], f64) = match c.class {
+            AssetClass::Crypto => (tables::MCAP_CRYPTO, 1.0),
+            AssetClass::Stock => (tables::MCAP_STOCK, 0.8),
+            _ => (&[], 0.0),
         };
         if w > 0.0 {
             p.add(w, piecewise(x, pts), tr!(l, "Capitalización {}", "Market cap {}", fmt::big(m)));
@@ -686,7 +1014,9 @@ fn risk(c: &Ctx) -> Option<Out> {
 fn weights(class: AssetClass) -> [f64; 7] {
     match class {
         AssetClass::Stock => [0.17, 0.13, 0.20, 0.22, 0.08, 0.08, 0.12],
-        AssetClass::Etf | AssetClass::Fund | AssetClass::Index => [0.24, 0.18, 0.16, 0.10, 0.08, 0.12, 0.12],
+        AssetClass::Etf | AssetClass::Fund | AssetClass::Index => {
+            [0.24, 0.18, 0.16, 0.10, 0.08, 0.12, 0.12]
+        }
         AssetClass::Crypto => [0.24, 0.20, 0.14, 0.0, 0.12, 0.10, 0.20],
         _ => [0.28, 0.22, 0.05, 0.0, 0.08, 0.20, 0.17],
     }
@@ -696,7 +1026,9 @@ fn weights(class: AssetClass) -> [f64; 7] {
 fn expected(class: AssetClass) -> [bool; 7] {
     match class {
         AssetClass::Stock => [true, true, true, true, true, true, true],
-        AssetClass::Etf | AssetClass::Fund | AssetClass::Index => [true, true, false, false, true, true, true],
+        AssetClass::Etf | AssetClass::Fund | AssetClass::Index => {
+            [true, true, false, false, true, true, true]
+        }
         AssetClass::Crypto => [true, true, true, false, true, true, true],
         _ => [true, true, false, false, false, true, true],
     }
@@ -717,9 +1049,9 @@ fn component_names(l: Lang) -> [&'static str; 7] {
 /// Puntúa un snapshot. Pura y barata (microsegundos).
 pub fn score(snapshot: &AssetSnapshot, lang: Lang) -> Scorecard {
     let class = snapshot.summary.class;
-    let price = fin(snapshot.quote.as_ref().map(|q| q.price))
-        .filter(|p| *p > 0.0)
-        .or_else(|| snapshot.indicators.as_ref().and_then(|i| fin(i.last_close)).filter(|p| *p > 0.0));
+    let price = fin(snapshot.quote.as_ref().map(|q| q.price)).filter(|p| *p > 0.0).or_else(|| {
+        snapshot.indicators.as_ref().and_then(|i| fin(i.last_close)).filter(|p| *p > 0.0)
+    });
     let market_cap = fin(snapshot.fundamentals.as_ref().and_then(|f| f.market_cap))
         .or_else(|| fin(snapshot.quote.as_ref().and_then(|q| q.market_cap)));
     let ctx = Ctx {
@@ -765,7 +1097,12 @@ pub fn score(snapshot: &AssetSnapshot, lang: Lang) -> Scorecard {
     let exp = expected(class);
     for i in 0..7 {
         if exp[i] && outs[i].is_none() {
-            gaps.push(tr!(lang, "{}: sin datos suficientes para puntuar", "{}: not enough data to score", names[i]));
+            gaps.push(tr!(
+                lang,
+                "{}: sin datos suficientes para puntuar",
+                "{}: not enough data to score",
+                names[i]
+            ));
         }
     }
 
@@ -792,7 +1129,15 @@ pub fn score(snapshot: &AssetSnapshot, lang: Lang) -> Scorecard {
 
     let (verdict, verdict_reasons) = quantitative_verdict(&scores, &ctx, coverage);
     let confidence = confidence(overall, coverage, &favorable, snapshot);
-    Scorecard { scores, reasons, verdict, verdict_reasons, confidence, coverage: round1(coverage * 100.0) / 100.0, gaps }
+    Scorecard {
+        scores,
+        reasons,
+        verdict,
+        verdict_reasons,
+        confidence,
+        coverage: round1(coverage * 100.0) / 100.0,
+        gaps,
+    }
 }
 
 /// Veredicto provisional: umbrales sobre `overall` y ajustes de prudencia (entrada, riesgo, datos).
@@ -800,7 +1145,11 @@ fn quantitative_verdict(s: &ScoreBreakdown, c: &Ctx, coverage: f64) -> (Verdict,
     let l = c.l;
     let mut why = Vec::new();
     if coverage <= 0.0 {
-        why.push(tr!(l, "Sin datos para puntuar: no hay base para una recomendación", "No data to score: no basis for a recommendation"));
+        why.push(tr!(
+            l,
+            "Sin datos para puntuar: no hay base para una recomendación",
+            "No data to score: no basis for a recommendation"
+        ));
         return (Verdict::Wait, why);
     }
     let o = s.overall as f64;
@@ -812,11 +1161,22 @@ fn quantitative_verdict(s: &ScoreBreakdown, c: &Ctx, coverage: f64) -> (Verdict,
         x if x >= 32.0 => Verdict::Reduce,
         _ => Verdict::Avoid,
     };
-    why.push(tr!(l, "Puntuación global {:.1}/100 → {}", "Overall score {:.1}/100 → {}", o, verdict_name(l, v)));
+    why.push(tr!(
+        l,
+        "Puntuación global {:.1}/100 → {}",
+        "Overall score {:.1}/100 → {}",
+        o,
+        verdict_name(l, v)
+    ));
 
     if v == Verdict::Hold && s.technical.is_some_and(|t| t < 40.0) {
         v = Verdict::Wait;
-        why.push(tr!(l, "Señal técnica débil ({:.0}): mejor esperar un mejor punto de entrada", "Weak technical signal ({:.0}): better to wait for a better entry", s.technical.unwrap_or(0.0)));
+        why.push(tr!(
+            l,
+            "Señal técnica débil ({:.0}): mejor esperar un mejor punto de entrada",
+            "Weak technical signal ({:.0}): better to wait for a better entry",
+            s.technical.unwrap_or(0.0)
+        ));
     }
     let overextended = c.ind.is_some_and(|i| {
         fin(i.rsi14).is_some_and(|r| r >= 75.0)
@@ -824,12 +1184,23 @@ fn quantitative_verdict(s: &ScoreBreakdown, c: &Ctx, coverage: f64) -> (Verdict,
     });
     if overextended && matches!(v, Verdict::Buy | Verdict::Accumulate) {
         let down = if v == Verdict::Buy { Verdict::Accumulate } else { Verdict::Wait };
-        why.push(tr!(l, "Precio sobreextendido (RSI ≥ 75 o > 20 % sobre la SMA50): {} en vez de {}", "Overextended price (RSI ≥ 75 or > 20% above SMA50): {} instead of {}", verdict_name(l, down), verdict_name(l, v)));
+        why.push(tr!(
+            l,
+            "Precio sobreextendido (RSI ≥ 75 o > 20 % sobre la SMA50): {} en vez de {}",
+            "Overextended price (RSI ≥ 75 or > 20% above SMA50): {} instead of {}",
+            verdict_name(l, down),
+            verdict_name(l, v)
+        ));
         v = down;
     }
     if v == Verdict::Buy && s.risk.is_some_and(|r| r >= 75.0) {
         v = Verdict::Accumulate;
-        why.push(tr!(l, "Riesgo muy alto ({:.0}/100): entrada escalonada en vez de compra de golpe", "Very high risk ({:.0}/100): staged entry instead of a lump-sum buy", s.risk.unwrap_or(0.0)));
+        why.push(tr!(
+            l,
+            "Riesgo muy alto ({:.0}/100): entrada escalonada en vez de compra de golpe",
+            "Very high risk ({:.0}/100): staged entry instead of a lump-sum buy",
+            s.risk.unwrap_or(0.0)
+        ));
     }
     if coverage < 0.4 {
         let capped = match v {
@@ -838,7 +1209,13 @@ fn quantitative_verdict(s: &ScoreBreakdown, c: &Ctx, coverage: f64) -> (Verdict,
             other => other,
         };
         if capped != v {
-            why.push(tr!(l, "Cobertura de datos baja ({:.0} %): veredicto limitado a {}", "Low data coverage ({:.0}%): verdict capped at {}", coverage * 100.0, verdict_name(l, capped)));
+            why.push(tr!(
+                l,
+                "Cobertura de datos baja ({:.0} %): veredicto limitado a {}",
+                "Low data coverage ({:.0}%): verdict capped at {}",
+                coverage * 100.0,
+                verdict_name(l, capped)
+            ));
             v = capped;
         }
     }
@@ -877,7 +1254,8 @@ fn confidence(overall: f64, coverage: f64, favorable: &[f64], snap: &AssetSnapsh
     let mean = favorable.iter().sum::<f64>() / favorable.len() as f64;
     let var = favorable.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / favorable.len() as f64;
     let dispersion = (var.sqrt() / 30.0).clamp(0.0, 1.0);
-    let mut c = 0.30 + 0.45 * coverage + 0.15 * ((overall - 50.0).abs() / 30.0).clamp(0.0, 1.0) - 0.20 * dispersion;
+    let mut c = 0.30 + 0.45 * coverage + 0.15 * ((overall - 50.0).abs() / 30.0).clamp(0.0, 1.0)
+        - 0.20 * dispersion;
     if let Some(q) = &snap.quote {
         let stale = (snap.generated_at - q.timestamp).num_hours() >= 24
             && !matches!(q.market_state, domain::MarketState::Closed);
@@ -891,13 +1269,5 @@ fn confidence(overall: f64, coverage: f64, favorable: &[f64], snap: &AssetSnapsh
 }
 
 #[cfg(test)]
-mod dump {
-    use super::*;
-    #[test]
-    fn dump() {
-        for s in [crate::fixture::stock_snapshot(), crate::fixture::crypto_snapshot(), crate::fixture::sparse_snapshot()] {
-            let c = score(&s, Lang::Es);
-            println!("{}", serde_json::to_string_pretty(&c).unwrap());
-        }
-    }
-}
+#[path = "scoring_tests.rs"]
+mod tests;

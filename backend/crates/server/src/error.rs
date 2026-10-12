@@ -119,7 +119,7 @@ impl From<serde_json::Error> for ApiError {
 
 /// Convierte el status de un rechazo de extractor de axum a la tabla de errores del contrato:
 /// 400/422 → `invalid_input`; el resto conserva su status.
-fn from_rejection(status: StatusCode, message: String) -> ApiError {
+pub fn from_rejection(status: StatusCode, message: String) -> ApiError {
     match status {
         StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => ApiError::invalid(message),
         StatusCode::PAYLOAD_TOO_LARGE => {

@@ -7,6 +7,9 @@ Estado: **en curso**. Se actualiza al terminar cada parte.
 - `indicators.rs`: SMA, EMA, RSI de Wilder, MACD, Bollinger, ATR, volatilidad 30d, drawdown 1a, rendimientos por calendario, 52 semanas, volumen relativo, tendencia, soportes/resistencias. Tests con valores contrastados con una implementación independiente en Python.
 - Fixtures reales en `crates/market/tests/fixtures/` (Yahoo, Binance, CoinGecko, Google News, SEC).
 
+- **Compila** (`cargo check -p market --all-targets`, 37 tests en verde): arreglado el literal duplicado en `yahoo.rs` (dividend_yield) y el test de relevancia ("motor/motors" como sufijo genérico).
+- Yahoo (search, quote, quotes, history, fundamentals con crumb, opciones, macro) ya implementado y testeado con fixtures.
+
 ## Pendiente
 - Proveedores (Yahoo, Binance, CoinGecko, GDELT, Google News, FRED primero; luego Finnhub y resto).
 - Enrutado con fallback, caché + single-flight, `snapshot`, `search`, hub de tiempo real.

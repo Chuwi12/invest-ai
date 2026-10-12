@@ -44,11 +44,11 @@ pub async fn connect(database_url: &str) -> anyhow::Result<SqlitePool> {
 
 /// Base en memoria compartida entre las conexiones del pool (para tests).
 pub async fn connect_memory() -> anyhow::Result<SqlitePool> {
-    // `shared_cache` hace que todas las conexiones vean la misma base; sin conexiones abiertas
-    // la base se destruye, así que el pool no debe cerrar las inactivas.
-    let opts = SqliteConnectOptions::new()
-        .in_memory(true)
-        .shared_cache(true)
+    // `sqlite::memory:` le da a cada pool una base con nombre propio (`file:sqlx-in-memory-N`) y
+    // caché compartida: todas sus conexiones ven la misma base y los tests no se pisan entre sí.
+    // `SqliteConnectOptions::new().in_memory(true)` NO sirve: cada conexión abre una base vacía.
+    // Sin conexiones abiertas la base se destruye, así que el pool no debe cerrar las inactivas.
+    let opts = SqliteConnectOptions::from_str("sqlite::memory:")?
         .foreign_keys(true)
         .busy_timeout(Duration::from_secs(5));
     let pool = SqlitePoolOptions::new()

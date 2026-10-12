@@ -1,0 +1,3 @@
+# Tablas de umbrales legibles en una línea (el formato por defecto parte cada tupla).
+use_small_heuristics = "Max"
+short_array_element_width_threshold = 24

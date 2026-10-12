@@ -9,7 +9,7 @@ use axum::{
 use domain::AssetId;
 use serde::de::DeserializeOwned;
 
-use crate::error::ApiError;
+use crate::error::{ApiError, from_rejection};
 
 /// `axum::Json` con errores en el formato de la API.
 #[derive(axum::extract::FromRequest)]
@@ -34,7 +34,7 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let bytes = Bytes::from_request(req, state)
             .await
-            .map_err(|e| ApiError::invalid(format!("no se pudo leer el cuerpo: {}", e.body_text())))?;
+            .map_err(|e| from_rejection(e.status(), format!("no se pudo leer el cuerpo: {}", e.body_text())))?;
         if bytes.iter().all(u8::is_ascii_whitespace) {
             return Ok(Self(T::default()));
         }

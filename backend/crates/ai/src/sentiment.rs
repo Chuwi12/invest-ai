@@ -61,9 +61,15 @@ const ES_NEGATIVE: &[(&str, f32)] = &[
     ("decepciona decepcionan decepcion incumple incumplen", -1.2),
     ("perdida perdidas pierde pierden", -1.2),
     ("demanda denuncia investigacion multa multas sancion sanciones suspende veta prohibe", -1.1),
-    ("cae caen caida caidas cayo retrocede retroceden debil debilidad desaceleracion ralentizacion", -1.0),
+    (
+        "cae caen caida caidas cayo retrocede retroceden debil debilidad desaceleracion ralentizacion",
+        -1.0,
+    ),
     ("baja bajan bajada bajo bajista pesimismo pesimista", -0.9),
-    ("miedo miedos temor temores preocupacion preocupa amenaza arancel aranceles retraso retrasos alerta advertencia", -0.9),
+    (
+        "miedo miedos temor temores preocupacion preocupa amenaza arancel aranceles retraso retrasos alerta advertencia",
+        -0.9,
+    ),
     ("riesgo riesgos volatil volatilidad", -0.4),
 ];
 
@@ -129,10 +135,10 @@ const PHRASES: &[(&str, &str, f32)] = &[
 ];
 
 const NEGATORS: &[&str] = &[
-    "not", "no", "never", "without", "neither", "nor", "cannot", "dont", "doesnt", "didnt",
-    "isnt", "arent", "wasnt", "werent", "wont", "cant", "couldnt", "wouldnt", "hasnt", "havent",
-    "fails", "fail", "failed", "sin", "nunca", "jamas", "ni", "tampoco", "nadie", "ningun",
-    "ninguna", "ninguno",
+    "not", "no", "never", "without", "neither", "nor", "cannot", "dont", "doesnt", "didnt", "isnt",
+    "arent", "wasnt", "werent", "wont", "cant", "couldnt", "wouldnt", "hasnt", "havent", "fails",
+    "fail", "failed", "sin", "nunca", "jamas", "ni", "tampoco", "nadie", "ningun", "ninguna",
+    "ninguno",
 ];
 const INTENSIFIERS: &[&str] = &[
     "sharply", "strongly", "massively", "hugely", "significantly", "dramatically", "deeply",
@@ -239,7 +245,9 @@ fn raw_score(text: &str) -> f32 {
                 i += 1;
                 continue;
             }
-            if INTENSIFIERS.contains(&t) && !tokens.get(i + 1).is_some_and(|n| phrase_weight(t, n).is_some()) {
+            if INTENSIFIERS.contains(&t)
+                && !tokens.get(i + 1).is_some_and(|n| phrase_weight(t, n).is_some())
+            {
                 boost = 1.5;
                 boost_until = i + 3;
                 i += 1;
@@ -438,7 +446,12 @@ mod tests {
     #[test]
     fn is_cheap() {
         let items: Vec<NewsItem> = (0..2000)
-            .map(|i| item(&format!("Stocks rally {i} as inflation fears fade, no recession seen"), Some("Analysts expect strong earnings growth next quarter despite tariffs")))
+            .map(|i| {
+                item(
+                    &format!("Stocks rally {i} as inflation fears fade, no recession seen"),
+                    Some("Analysts expect strong earnings growth next quarter despite tariffs"),
+                )
+            })
             .collect();
         let mut items = items;
         let t = std::time::Instant::now();

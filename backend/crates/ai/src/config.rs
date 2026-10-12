@@ -85,7 +85,10 @@ impl AiConfig {
             c.max_output_tokens = (v > 0).then_some(v);
         }
         if let Some(v) = text("LLM_THINK") {
-            c.think = matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on" | "si" | "sí");
+            c.think = matches!(
+                v.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on" | "si" | "sí"
+            );
         }
         c
     }
