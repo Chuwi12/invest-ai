@@ -40,6 +40,8 @@ pub struct AppState {
     pub tasks: TaskTracker,
     /// Se cancela al iniciar el apagado: cierra WebSockets y SSE.
     pub shutdown: CancellationToken,
+    /// Topes de concurrencia (WebSockets, análisis, chats).
+    pub limits: Arc<crate::limits::Limits>,
 }
 
 impl AppState {
@@ -55,6 +57,7 @@ impl AppState {
             analysis_flights: Arc::new(SingleFlight::new(tasks.clone())),
             tasks,
             shutdown: CancellationToken::new(),
+            limits: Arc::default(),
         }
     }
 

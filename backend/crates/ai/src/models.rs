@@ -272,6 +272,11 @@ impl ModelService for ModelManager {
         if id == self.active().await {
             return Err(DomainError::InvalidInput("no se puede borrar el modelo activo: elige otro antes".into()));
         }
+        // Solo se borra lo que está instalado: nada de nombres arbitrarios hacia Ollama.
+        let installed = self.client.tags().await?;
+        if !installed.iter().any(|t| t.name == id) {
+            return Err(DomainError::NotFound(format!("modelo «{id}» no instalado")));
+        }
         self.client.delete(id).await?;
         self.show_cache.lock().unwrap().remove(id);
         Ok(())

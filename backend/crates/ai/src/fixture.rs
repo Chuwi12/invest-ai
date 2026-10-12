@@ -70,6 +70,7 @@ fn summary(
         currency: Some(currency.into()),
         country: Some("US".into()),
         source: "fixture".into(),
+        source_url: None,
     }
 }
 
@@ -97,6 +98,8 @@ fn quote(
         timestamp: now() - Duration::seconds(3),
         source: "fixture".into(),
         delay_secs: Some(0),
+        source_url: None,
+        timestamp_origin: None,
     }
 }
 
@@ -132,6 +135,8 @@ fn macro_context() -> MacroContext {
         unit: unit.into(),
         as_of: now() - Duration::hours(2),
         source: "fixture".into(),
+        source_url: None,
+        timestamp_origin: None,
     };
     MacroContext {
         indicators: vec![
@@ -231,6 +236,8 @@ pub fn stock_snapshot() -> AssetSnapshot {
             trend: Some(Trend::Up),
             supports: vec![221.5, 214.0, 205.7],
             resistances: vec![232.0, 237.2],
+            source: None,
+            source_url: None,
         }),
         news: vec![
             news(

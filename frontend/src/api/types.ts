@@ -46,7 +46,12 @@ export interface AssetSummary {
   country: string | null
   /** Proveedor que devolvió el resultado (yahoo, coingecko, ...). */
   source: string
+  /** Página pública del proveedor donde comprobar el dato (puede faltar en backends antiguos). */
+  sourceUrl?: string | null
 }
+
+/** De dónde sale una marca de tiempo: la dio el proveedor o es la hora local de la consulta. */
+export type TimestampOrigin = 'provider' | 'local'
 
 // --- Precios ---------------------------------------------------------------------------------
 
@@ -69,6 +74,8 @@ export interface Quote {
   source: string
   /** Retraso del dato en segundos (0 = tiempo real). null = desconocido. */
   delaySecs: number | null
+  sourceUrl?: string | null
+  timestampOrigin?: TimestampOrigin | null
 }
 
 /** Actualización de precio en tiempo real (WebSocket). */
@@ -219,6 +226,8 @@ export interface Fundamentals {
   extra: Record<string, unknown>
   sources: string[]
   asOf: string | null
+  sourceUrl?: string | null
+  timestampOrigin?: TimestampOrigin | null
 }
 
 export type Trend = 'strong_up' | 'up' | 'sideways' | 'down' | 'strong_down'
@@ -226,6 +235,9 @@ export type Trend = 'strong_up' | 'up' | 'sideways' | 'down' | 'strong_down'
 /** Indicadores técnicos sobre velas diarias. Rendimientos y distancias como fracción. */
 export interface Indicators {
   asOf: string | null
+  /** Proveedor de las velas sobre las que la app calculó los indicadores. */
+  source?: string | null
+  sourceUrl?: string | null
   lastClose: number | null
   sma20: number | null
   sma50: number | null
@@ -291,6 +303,8 @@ export interface MacroIndicator {
   unit: string
   asOf: string
   source: string
+  sourceUrl?: string | null
+  timestampOrigin?: TimestampOrigin | null
 }
 
 export interface MacroContext {
@@ -441,6 +455,10 @@ export interface ProviderStatus {
   assetClasses: AssetClass[]
   lastError: string | null
   lastOk: string | null
+  /** Latencia de la última petición (ms). */
+  latencyMs?: number | null
+  /** Segundos que quedan de pausa tras un 429. */
+  blockedSecs?: number | null
 }
 
 export interface LlmStatus {
@@ -620,3 +638,27 @@ export type PullEvent =
   | { type: 'progress'; status: string; completed: number | null; total: number | null }
   | { type: 'done' }
   | { type: 'error'; message: string }
+
+// --- Procedencia del histórico y progreso del análisis ----------------------------------------
+
+/** Velas + procedencia (cabeceras `X-Data-Source`, `X-Data-Source-Url`, `X-Data-As-Of`). */
+export interface HistoryResult {
+  candles: Candle[]
+  /** null si el backend no informa del proveedor. */
+  source: string | null
+  sourceUrl: string | null
+  asOf: string | null
+}
+
+/** Eventos de `POST /assets/{id}/analysis/stream` (SSE). */
+export type AnalysisStreamEvent =
+  | { type: 'stage'; stage: string; label: string; index: number; total: number }
+  | { type: 'done'; analysis: Analysis }
+  | { type: 'error'; code: string; message: string }
+
+export interface AnalysisProgress {
+  stage: string
+  label: string
+  index: number
+  total: number
+}

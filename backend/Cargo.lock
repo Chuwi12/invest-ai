@@ -1334,6 +1334,7 @@ dependencies = [
  "chrono",
  "domain",
  "feed-rs",
+ "flate2",
  "futures",
  "moka",
  "reqwest",

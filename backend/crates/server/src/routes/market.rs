@@ -1,8 +1,13 @@
 //! Rutas de mercado: búsqueda, ficha, cotizaciones, histórico, indicadores, noticias y macro.
 
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, HeaderName, HeaderValue},
+    response::{IntoResponse, Response},
+};
 use domain::{
-    AssetClass, AssetId, AssetSummary, Candle, DomainError, Fundamentals, Indicators, Interval, MacroContext,
+    AssetClass, AssetId, AssetSummary, DomainError, Fundamentals, Indicators, Interval, MacroContext,
     NewsItem, Quote, Range,
 };
 use serde::Deserialize;
@@ -116,14 +121,40 @@ pub struct HistoryParams {
     interval: Option<Interval>,
 }
 
+/// Procedencia del histórico en cabeceras (el cuerpo sigue siendo `Candle[]`).
+pub const H_SOURCE: HeaderName = HeaderName::from_static("x-data-source");
+pub const H_SOURCE_URL: HeaderName = HeaderName::from_static("x-data-source-url");
+pub const H_AS_OF: HeaderName = HeaderName::from_static("x-data-as-of");
+
+fn provenance_headers(o: &market::provenance::HistoryOrigin) -> HeaderMap {
+    let mut h = HeaderMap::new();
+    let mut put = |name: HeaderName, v: &str| {
+        if let Ok(v) = HeaderValue::from_str(v) {
+            h.insert(name, v);
+        }
+    };
+    put(H_SOURCE, &o.source);
+    if let Some(u) = &o.source_url {
+        put(H_SOURCE_URL, u);
+    }
+    if let Some(t) = o.as_of {
+        put(H_AS_OF, &t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    }
+    h
+}
+
 pub async fn history(
     State(state): State<AppState>,
     AssetPath(id): AssetPath,
     AppQuery(p): AppQuery<HistoryParams>,
-) -> ApiResult<Json<Vec<Candle>>> {
+) -> ApiResult<Response> {
     let range = p.range.unwrap_or(Range::Y1);
     let interval = p.interval.unwrap_or_else(|| range.default_interval());
-    Ok(Json(state.market.history(&id, range, interval).await?))
+    let candles = state.market.history(&id, range, interval).await?;
+    let headers = market::provenance::history_origin(&id, range, interval)
+        .map(|o| provenance_headers(&o))
+        .unwrap_or_default();
+    Ok((headers, Json(candles)).into_response())
 }
 
 pub async fn indicators(State(state): State<AppState>, AssetPath(id): AssetPath) -> ApiResult<Json<Indicators>> {

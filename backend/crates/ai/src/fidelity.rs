@@ -21,6 +21,8 @@ pub enum Segment {
     Indicators,
     Fundamentals,
     Scores,
+    /// Entrada, stop y objetivos calculados en Rust a partir de los datos.
+    Levels,
     Macro,
     /// Noticia con su etiqueta (`N3`).
     News(String),

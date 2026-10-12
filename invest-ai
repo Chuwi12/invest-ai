@@ -53,7 +53,7 @@ env_get() {
     return 0
   fi
   if [[ -r $ENV_FILE ]]; then
-    line=$(grep -E "^[[:space:]]*${key}=" "$ENV_FILE" | tail -n 1 || true)
+    line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$ENV_FILE" | tail -n 1 || true)
     if [[ -n $line ]]; then
       val=${line#*=}
       val=${val#"${val%%[![:space:]]*}"}

@@ -1,5 +1,5 @@
 import { API_BASE, ApiError, isAbortError, toApiError } from './client'
-import type { ChatEvent, PullEvent } from './types'
+import type { AnalysisStreamEvent, ChatEvent, PullEvent } from './types'
 
 export interface SseMessage {
   event: string
@@ -220,4 +220,57 @@ export async function* streamPullEvents(
   }
   if (signal?.aborted) throw new DOMException('Abortado', 'AbortError')
   if (!terminated) yield { type: 'error', message: 'La conexión se cerró antes de terminar la descarga' }
+}
+
+function isAnalysisEvent(v: unknown): v is AnalysisStreamEvent {
+  if (typeof v !== 'object' || v === null) return false
+  const t = (v as { type?: unknown }).type
+  return t === 'stage' || t === 'done' || t === 'error'
+}
+
+/**
+ * POST + SSE del análisis (`/assets/{id}/analysis/stream`): `stage`* y después `done` o `error`.
+ * Si la respuesta HTTP no es 2xx lanza `ApiError` (el llamador decide el fallback ante 404).
+ * Si el servidor corta antes, emite un `error` sintético. Con `signal` abortado lanza `AbortError`.
+ */
+export async function* streamAnalysisEvents(
+  path: string,
+  signal?: AbortSignal,
+  fetchImpl: typeof fetch = fetch,
+): AsyncGenerator<AnalysisStreamEvent> {
+  const init: RequestInit = { method: 'POST', headers: { Accept: 'text/event-stream' } }
+  if (signal) init.signal = signal
+
+  let res: Response
+  try {
+    res = await fetchImpl(`${API_BASE}${path}`, init)
+  } catch (e) {
+    if (isAbortError(e)) throw e
+    throw new ApiError(0, 'network', 'No se pudo conectar con el servidor')
+  }
+  if (!res.ok) throw await toApiError(res)
+  if (!res.body) throw new ApiError(res.status, 'invalid_response', 'La respuesta no incluye un stream')
+
+  let terminated = false
+  try {
+    for await (const msg of parseSseStream(res.body, signal)) {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(msg.data)
+      } catch {
+        continue
+      }
+      if (!isAnalysisEvent(parsed)) continue
+      yield parsed
+      if (parsed.type === 'done' || parsed.type === 'error') {
+        terminated = true
+        return
+      }
+    }
+  } catch (e) {
+    if (signal?.aborted || isAbortError(e)) throw new DOMException('Abortado', 'AbortError')
+    throw e
+  }
+  if (signal?.aborted) throw new DOMException('Abortado', 'AbortError')
+  if (!terminated) yield { type: 'error', code: 'stream_closed', message: 'La conexión se cerró antes de terminar el análisis' }
 }

@@ -5,7 +5,7 @@ import { ErrorNotice, SkeletonRows } from '@/components/states'
 import { ExternalLink } from '@/components/ExternalLink'
 import { VirtualList } from '@/components/VirtualList'
 import { SENTIMENT_LABEL } from '@/lib/assets'
-import { formatDateTime, formatRelative } from '@/lib/format'
+import { formatDateTime, formatNumber, formatRelative } from '@/lib/format'
 import { sourceName } from '@/lib/sources'
 
 export const NewsRow = memo(function NewsRow({ n }: { n: NewsItem }) {
@@ -22,7 +22,7 @@ export const NewsRow = memo(function NewsRow({ n }: { n: NewsItem }) {
           <time dateTime={n.publishedAt} title={formatDateTime(n.publishedAt)}>· {formatRelative(n.publishedAt)}</time>
           <span>· vía {sourceName(n.provider)}</span>
           {s ? (
-            <span className={`chip ${s.score > 0.15 ? 'up' : s.score < -0.15 ? 'down' : ''}`} title={`Puntuación ${s.score.toFixed(2)} · método: ${s.method}`}>
+            <span className={`chip ${s.score > 0.15 ? 'up' : s.score < -0.15 ? 'down' : ''}`} title={`Puntuación ${formatNumber(s.score, 2)} · método: ${s.method}`}>
               {SENTIMENT_LABEL[s.label]}
             </span>
           ) : null}
@@ -51,7 +51,7 @@ export function NewsPanel({ summary }: { summary: AssetSummary }) {
     <div className="stack">
       {stats ? (
         <p className="small muted">
-          Sentimiento medio de {stats.n} titulares con valoración: <strong className={stats.avg > 0.15 ? 'up' : stats.avg < -0.15 ? 'down' : ''}>{stats.avg.toFixed(2)}</strong>{' '}
+          Sentimiento medio de {stats.n} titulares con valoración: <strong className={stats.avg > 0.15 ? 'up' : stats.avg < -0.15 ? 'down' : ''}>{formatNumber(stats.avg, 2)}</strong>{' '}
           ({stats.pos} positivos, {stats.neg} negativos). El sentimiento lo calcula el proveedor, un léxico o el modelo local; pasa el ratón sobre la etiqueta para ver el método.
         </p>
       ) : null}

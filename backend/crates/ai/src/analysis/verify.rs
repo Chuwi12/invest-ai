@@ -1,9 +1,9 @@
 //! Validación en Rust de lo que dice el modelo: cifras, citas de noticias, niveles de precio y
 //! calibración de la confianza. Nada de lo que sale del LLM llega al `Analysis` sin pasar por aquí.
 
-use domain::{AssetSnapshot, KeyLevels, SourceRef, Verdict};
+use domain::{AssetSnapshot, SourceRef, Verdict};
 
-use super::types::{Claim, LevelsOut};
+use super::types::Claim;
 use crate::{
     context::{NewsRegistry, extract_citations, news_source},
     fidelity::{NumberIndex, Segment, extract_numbers},
@@ -134,6 +134,43 @@ impl<'a> Verifier<'a> {
         marked
     }
 
+    /// Prosa por párrafos: como `prose`, y cada párrafo termina con las fuentes de las cifras que
+    /// usa (proveedor y hora), para que la tesis sea comprobable igual que las afirmaciones.
+    pub fn prose_cited(&mut self, text: &str, field: &str) -> String {
+        let text = truncate_chars(text.trim(), MAX_PROSE_CHARS);
+        let mut out = Vec::new();
+        for para in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
+            let (marked, bad) = self.idx.mark_unverified(para);
+            if !bad.is_empty() {
+                self.marked += bad.len();
+                let l = self.lang;
+                let w = tr!(
+                    l,
+                    "Cifras no verificables en los datos (marcadas con ⚠) en «{}»: {}",
+                    "Figures not verifiable in the data (marked with ⚠) in «{}»: {}",
+                    field,
+                    bad.join(", ")
+                );
+                self.warn(w);
+            }
+            let mut segs: Vec<Segment> = Vec::new();
+            for n in extract_numbers(para).iter().filter(|n| !n.exempt) {
+                for s in self.idx.find(n) {
+                    if !segs.contains(&s) {
+                        segs.push(s);
+                    }
+                }
+            }
+            if segs.iter().any(|s| !matches!(s, Segment::Scores)) {
+                segs.retain(|s| !matches!(s, Segment::Scores));
+            }
+            segs.truncate(3);
+            let suffix = self.cite(&segs, para);
+            out.push(format!("{marked}{suffix}"));
+        }
+        out.join("\n\n")
+    }
+
     /// Sufijo « (fuente: …)» con proveedor y marca de tiempo de cada tramo de datos usado.
     fn cite(&mut self, segs: &[Segment], text: &str) -> String {
         let mut parts = Vec::new();
@@ -231,6 +268,15 @@ impl<'a> Verifier<'a> {
                     },
                 ))
             }
+            Segment::Levels => Some((
+                format!("{} {}", l.t("niveles calculados", "computed levels"), Self::ts(snap.generated_at)),
+                SourceRef {
+                    title: format!("{} {id}", l.t("Niveles de entrada, stop y objetivos calculados", "Computed entry, stop and target levels")),
+                    url: None,
+                    provider: "invest-ai".into(),
+                    published_at: Some(snap.generated_at),
+                },
+            )),
             Segment::Scores => Some((
                 format!("{} {}", l.t("puntuación cuantitativa", "quantitative score"), Self::ts(snap.generated_at)),
                 SourceRef {
@@ -263,98 +309,6 @@ impl<'a> Verifier<'a> {
         }
         out
     }
-
-    /// Niveles de precio: soportes/resistencias deben ser los de los datos; entrada, stop y
-    /// objetivos son derivados por el modelo y solo se comprueba que tengan sentido respecto al
-    /// precio. Sin niveles válidos del modelo se usan los calculados en código.
-    pub fn levels(&mut self, raw: &LevelsOut, verdict: Verdict) -> KeyLevels {
-        let price = self
-            .snap
-            .quote
-            .as_ref()
-            .map(|q| q.price)
-            .or_else(|| self.snap.indicators.as_ref().and_then(|i| i.last_close))
-            .filter(|p| p.is_finite() && *p > 0.0);
-        let l = self.lang;
-        // Niveles que existen de verdad en los datos del snapshot.
-        let known = data_levels(self.snap);
-        let in_data = |_: &NumberIndex, x: f64| known.iter().any(|k| (k - x).abs() <= k.abs() * 0.0005 + 1e-9);
-        let mut pick = |model: &[f64], from_data: &[f64], supports: bool| -> Vec<f64> {
-            let mut v: Vec<f64> = model.iter().copied().filter(|x| x.is_finite() && *x > 0.0 && in_data(&self.idx, *x)).collect();
-            if v.len() < model.len() {
-                let w = tr!(l, "Se descartaron niveles que no figuran en los datos.", "Levels that are not in the data were dropped.");
-                if !self.warnings.contains(&w) {
-                    self.warnings.push(w);
-                }
-            }
-            if v.is_empty() {
-                v = from_data.iter().copied().filter(|x| x.is_finite() && *x > 0.0).take(3).collect();
-            }
-            if let Some(p) = price {
-                v.sort_by(|a, b| (a - p).abs().total_cmp(&(b - p).abs()));
-                // Un soporte no puede estar por encima del precio ni una resistencia por debajo.
-                v.retain(|x| if supports { *x <= p * 1.001 } else { *x >= p * 0.999 });
-            }
-            v.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
-            v.truncate(4);
-            v
-        };
-        let ind = self.snap.indicators.as_ref();
-        let supports = pick(&raw.supports, ind.map_or(&[][..], |i| &i.supports), true);
-        let resistances = pick(&raw.resistances, ind.map_or(&[][..], |i| &i.resistances), false);
-
-        let mut out = KeyLevels { supports, resistances, ..KeyLevels::default() };
-        let enters = matches!(verdict, Verdict::Buy | Verdict::Accumulate | Verdict::Hold | Verdict::Wait);
-        let mut derived = false;
-        if let (true, Some(p)) = (enters, price) {
-            let sane = |x: f64| x.is_finite() && x >= p * 0.3 && x <= p * 3.0;
-            if let [lo, hi] = raw.entry_zone[..]
-                && sane(lo)
-                && sane(hi)
-                && lo < hi
-                && hi <= p * 1.15
-            {
-                out.entry_zone = Some((lo, hi));
-                derived = true;
-            }
-            let floor = out.entry_zone.map_or(p, |z| z.0);
-            if let Some(s) = raw.stop_loss.filter(|s| sane(*s) && *s < floor) {
-                out.stop_loss = Some(s);
-                derived = true;
-            }
-            let mut t: Vec<f64> = raw.targets.iter().copied().filter(|x| sane(*x) && *x > p).collect();
-            t.sort_by(f64::total_cmp);
-            t.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
-            t.truncate(3);
-            derived |= !t.is_empty();
-            out.targets = t;
-        }
-        if derived {
-            self.warn(tr!(
-                l,
-                "La zona de entrada, el stop y los objetivos son orientativos y los deriva el modelo de los niveles de los datos; no son datos de mercado.",
-                "Entry zone, stop and targets are indicative and derived by the model from the data's levels; they are not market data."
-            ));
-        }
-        out
-    }
-}
-
-/// Todos los niveles de precio presentes en el snapshot (medias, bandas, extremos, soportes…).
-fn data_levels(snap: &AssetSnapshot) -> Vec<f64> {
-    let mut v = Vec::new();
-    if let Some(i) = &snap.indicators {
-        v.extend(i.supports.iter().chain(&i.resistances).copied());
-        v.extend([i.sma20, i.sma50, i.sma200, i.ema12, i.ema26, i.bb_upper, i.bb_middle, i.bb_lower, i.high52w, i.low52w, i.last_close].into_iter().flatten());
-    }
-    if let Some(q) = &snap.quote {
-        v.extend([Some(q.price), q.open, q.high, q.low, q.prev_close].into_iter().flatten());
-    }
-    if let Some(f) = &snap.fundamentals {
-        v.extend([f.analyst_target_mean, f.analyst_target_high, f.analyst_target_low, f.all_time_high].into_iter().flatten());
-    }
-    v.retain(|x| x.is_finite() && *x > 0.0);
-    v
 }
 
 /// Confianza calibrada (0.05–0.85): mezcla la del modelo con la de la puntuación determinista,
@@ -436,30 +390,6 @@ mod tests {
         assert!(out.contains('⚠'), "{out}");
         assert_eq!(v.marked, 1);
         assert!(v.warnings[0].contains("tesis"));
-    }
-
-    #[test]
-    fn levels_use_data_levels_and_sanity_check_the_rest() {
-        let f = fx();
-        let p = f.snap.quote.as_ref().unwrap().price;
-        let ind = f.snap.indicators.as_ref().unwrap();
-        let real_support = ind.supports[0];
-        let mut v = Verifier::new(&f.text, &f.snap, &f.reg, Lang::Es);
-        let raw = LevelsOut {
-            supports: vec![real_support, 1.23],
-            resistances: vec![],
-            entry_zone: vec![p * 0.97, p * 0.995],
-            stop_loss: Some(p * 0.9),
-            targets: vec![p * 1.1, p * 0.5, p * 50.0],
-        };
-        let k = v.levels(&raw, Verdict::Accumulate);
-        assert_eq!(k.supports, vec![real_support]);
-        assert!(!k.resistances.is_empty(), "sin resistencias del modelo se usan las de los datos");
-        assert!(k.entry_zone.is_some() && k.stop_loss.is_some());
-        assert_eq!(k.targets.len(), 1, "solo el objetivo por encima del precio y razonable");
-        // Con veredicto de salida no se proponen entradas.
-        let k = Verifier::new(&f.text, &f.snap, &f.reg, Lang::Es).levels(&raw, Verdict::Avoid);
-        assert!(k.entry_zone.is_none() && k.stop_loss.is_none() && k.targets.is_empty());
     }
 
     #[test]

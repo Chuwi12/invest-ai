@@ -161,7 +161,13 @@ impl Fred {
     async fn fetch_indicator(&self, def: &'static Def) -> Option<MacroIndicator> {
         let limit = if matches!(def.kind, Kind::YoY) { 14 } else { 2 };
         match self.observations(def.series, limit, None, false).await {
-            Ok(obs) => indicator(def.key, def.name, def.unit, def.kind, &obs),
+            Ok(obs) => indicator(def.key, def.name, def.unit, def.kind, &obs).map(|mut i| {
+                i.source_url = Some(format!(
+                    "https://fred.stlouisfed.org/series/{}",
+                    crate::symbol::enc(def.series)
+                ));
+                i
+            }),
             Err(e) => {
                 tracing::debug!(series = def.series, error = %e, "FRED: serie no disponible");
                 None
@@ -253,6 +259,8 @@ fn indicator(key: &str, name: &str, unit: &str, kind: Kind, obs: &[Obs]) -> Opti
         unit: unit.into(),
         as_of: from_ymd(date)?,
         source: "fred".into(),
+        source_url: None,
+        timestamp_origin: Some(domain::TimestampOrigin::Provider),
     })
 }
 
@@ -321,6 +329,8 @@ impl Provider for Fred {
                 .ok_or_else(|| ProviderError::upstream("fecha no válida"))?,
             source: "fred".into(),
             delay_secs: None,
+            source_url: None,
+            timestamp_origin: Some(domain::TimestampOrigin::Provider),
         })
     }
 

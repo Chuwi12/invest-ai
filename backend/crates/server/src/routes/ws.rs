@@ -15,7 +15,7 @@ use axum::{
         State, WebSocketUpgrade,
         ws::{CloseFrame, Message, WebSocket},
     },
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use domain::{AssetId, PriceTick};
@@ -53,7 +53,8 @@ enum ServerMessage<'a> {
 }
 
 pub async fn handler(State(state): State<AppState>, headers: HeaderMap, ws: WebSocketUpgrade) -> Response {
-    if !origin_allowed(&headers, &state.settings.allowed_origins) {
+    // Los navegadores no aplican CORS a los WebSockets; `guard` ya filtra, esto es defensa en profundidad.
+    if !crate::guard::browser_request_allowed(&headers, &state.settings.allowed_origins) {
         return ApiError::Http {
             status: StatusCode::FORBIDDEN,
             code: "forbidden",
@@ -61,30 +62,14 @@ pub async fn handler(State(state): State<AppState>, headers: HeaderMap, ws: WebS
         }
         .into_response();
     }
-    ws.max_message_size(MAX_INCOMING_BYTES).on_upgrade(move |socket| connection(socket, state))
-}
-
-/// Los navegadores no aplican CORS a los WebSockets: sin esta comprobación cualquier web abierta
-/// en la misma máquina podría leer el socket. Sin cabecera `Origin` (clientes que no son
-/// navegadores) se permite.
-fn origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
-    let Some(origin) = headers.get(header::ORIGIN) else { return true };
-    let Ok(origin) = origin.to_str() else { return false };
-    let origin = origin.trim_end_matches('/');
-    if allowed.iter().any(|a| a.eq_ignore_ascii_case(origin)) {
-        return true;
-    }
-    let Some((_, authority)) = origin.split_once("://") else { return false };
-    // Mismo origen que el propio servidor (despliegue de un único binario).
-    if headers.get(header::HOST).and_then(|h| h.to_str().ok()).is_some_and(|h| h.eq_ignore_ascii_case(authority)) {
-        return true;
-    }
-    // Cualquier puerto de loopback (Vite, previews...).
-    let host = authority.strip_prefix('[').map_or_else(
-        || authority.split(':').next().unwrap_or_default(),
-        |rest| rest.split(']').next().unwrap_or_default(),
-    );
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
+    // Tope de sockets simultáneos (S-06): 429 inmediato, sin cola.
+    let Ok(permit) = state.limits.websockets.clone().try_acquire_owned() else {
+        return crate::limits::too_many("conexiones WebSocket");
+    };
+    ws.max_message_size(MAX_INCOMING_BYTES).on_upgrade(move |socket| async move {
+        let _permit = permit;
+        connection(socket, state).await;
+    })
 }
 
 struct Throttle {
@@ -335,32 +320,7 @@ async fn sleep_until_opt(deadline: Option<Instant>) {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::HeaderValue;
-
     use super::*;
-
-    fn headers(origin: Option<&str>, host: &str) -> HeaderMap {
-        let mut h = HeaderMap::new();
-        h.insert(header::HOST, HeaderValue::from_str(host).unwrap());
-        if let Some(o) = origin {
-            h.insert(header::ORIGIN, HeaderValue::from_str(o).unwrap());
-        }
-        h
-    }
-
-    #[test]
-    fn origin_rules() {
-        let allowed = vec!["http://localhost:5180".to_string()];
-        let h = |o| headers(o, "127.0.0.1:8787");
-        assert!(origin_allowed(&h(None), &allowed));
-        assert!(origin_allowed(&h(Some("http://localhost:5180")), &allowed));
-        assert!(origin_allowed(&h(Some("http://127.0.0.1:5180")), &allowed));
-        assert!(origin_allowed(&h(Some("http://[::1]:3000")), &allowed));
-        assert!(origin_allowed(&headers(Some("https://app.example.com"), "app.example.com"), &allowed));
-        assert!(!origin_allowed(&h(Some("https://evil.example")), &allowed));
-        assert!(!origin_allowed(&h(Some("null")), &allowed));
-        assert!(!origin_allowed(&h(Some("http://localhost.evil.example")), &allowed));
-    }
 
     #[test]
     fn parse_ids_splits_valid_and_invalid() {

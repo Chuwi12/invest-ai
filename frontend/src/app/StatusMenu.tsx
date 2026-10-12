@@ -1,7 +1,8 @@
 import { Activity } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useStatus } from '@/api/hooks'
-import { formatRelative } from '@/lib/format'
+import type { ProviderStatus } from '@/api/types'
+import { formatInt, formatRelative } from '@/lib/format'
 import { sourceName } from '@/lib/sources'
 import { useConnectionState } from '@/realtime/hooks'
 
@@ -27,7 +28,7 @@ export function StatusMenu() {
   }, [open])
 
   const providers = data?.providers.filter((p) => p.enabled) ?? []
-  const failing = providers.filter((p) => p.lastError)
+  const failing = providers.filter((p) => p.lastError || p.blockedSecs)
   const llmOk = data?.llm.available ?? false
   const wsOk = ws === 'open' || ws === 'idle'
   const level = isError || (data && !llmOk) || ws === 'reconnecting' ? 'bad' : failing.length > 0 || ws === 'connecting' ? 'wait' : data ? 'ok' : 'wait'
@@ -55,11 +56,11 @@ export function StatusMenu() {
               <div className="small muted">Proveedores de datos</div>
               <ul className="stack" style={{ gap: '0.3rem' }}>
                 {data.providers.map((p) => (
-                  <li key={p.name} className="row small" title={p.lastError ?? undefined}>
-                    <span className={`dot ${!p.enabled ? '' : p.lastError ? 'wait' : 'ok'}`} aria-hidden="true" />
+                  <li key={p.name} className="row small" title={[p.lastError, p.blockedSecs ? `En pausa ${p.blockedSecs} s tras un límite de peticiones` : null, p.latencyMs != null ? `Última petición: ${p.latencyMs} ms` : null].filter(Boolean).join(' · ') || undefined}>
+                    <span className={`dot ${!p.enabled ? '' : p.lastError || p.blockedSecs ? 'wait' : 'ok'}`} aria-hidden="true" />
                     <span className="grow">{sourceName(p.name)}</span>
-                    <span className="muted tiny trunc" style={{ maxWidth: '12rem' }}>
-                      {!p.enabled ? (p.requiresKey && !p.hasKey ? 'sin clave' : 'desactivado') : p.lastError ? `error: ${p.lastError}` : p.lastOk ? formatRelative(p.lastOk) : 'sin uso'}
+                    <span className="muted tiny trunc" style={{ maxWidth: '14rem' }}>
+                      {providerDetail(p)}
                     </span>
                   </li>
                 ))}
@@ -72,6 +73,17 @@ export function StatusMenu() {
       ) : null}
     </div>
   )
+}
+
+function providerDetail(p: ProviderStatus): string {
+  if (!p.enabled) return p.requiresKey && !p.hasKey ? 'sin clave' : 'desactivado'
+  const parts: string[] = []
+  if (p.blockedSecs) parts.push(`en pausa ${formatInt(p.blockedSecs)} s`)
+  if (p.lastError) parts.push(`error: ${p.lastError}`)
+  else if (p.lastOk) parts.push(formatRelative(p.lastOk))
+  else parts.push('sin uso')
+  if (p.latencyMs !== null && p.latencyMs !== undefined) parts.push(`${formatInt(p.latencyMs)} ms`)
+  return parts.join(' · ')
 }
 
 function Row({ ok, label, value }: { ok: boolean; label: string; value: string }) {

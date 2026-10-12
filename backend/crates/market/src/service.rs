@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use domain::{
     AssetClass, AssetId, AssetSnapshot, AssetSummary, Candle, DomainError, Fundamentals,
     Indicators, Interval, MacroContext, MarketData, NewsItem, PriceTick, ProviderStatus, Quote,
-    Range,
+    Range, TimestampOrigin,
 };
 use futures::{FutureExt, StreamExt, stream::BoxStream};
 use moka::future::Cache;
@@ -31,6 +31,7 @@ use crate::{
     indicators,
     news::{self, Relevance},
     options::OptionsChain,
+    provenance,
     providers::{
         Capability, NewsQuery, PResult, Provider, ProviderError, SearchHit,
         alphavantage::AlphaVantage,
@@ -208,6 +209,37 @@ pub fn order_for(class: AssetClass, cap: Capability) -> &'static [&'static str] 
     }
 }
 
+/// Rellena la URL de verificación de una cotización a partir de su proveedor.
+fn with_quote_url(mut q: Quote) -> Quote {
+    if q.source_url.is_none() {
+        q.source_url = symbol::verify_url(&q.source, &q.id);
+    }
+    q
+}
+
+/// Rellena la URL de verificación y el origen de la fecha de unos fundamentales.
+fn with_fundamentals_origin(mut f: Fundamentals, id: &AssetId) -> Fundamentals {
+    let first = f.sources.first().cloned();
+    if f.source_url.is_none() {
+        f.source_url = first.as_deref().and_then(|p| symbol::verify_url(p, id));
+    }
+    if f.timestamp_origin.is_none() && f.as_of.is_some() {
+        // Yahoo y Finnhub no fechan el cálculo: `as_of` es la hora de la consulta.
+        f.timestamp_origin = Some(match first.as_deref() {
+            Some("yahoo" | "finnhub") | None => TimestampOrigin::Local,
+            Some(_) => TimestampOrigin::Provider,
+        });
+    }
+    f
+}
+
+fn with_summary_url(mut s: AssetSummary) -> AssetSummary {
+    if s.source_url.is_none() {
+        s.source_url = symbol::verify_url(&s.source, &s.id);
+    }
+    s
+}
+
 pub(crate) fn clone_err(e: &DomainError) -> DomainError {
     match e {
         DomainError::NotFound(m) => DomainError::NotFound(m.clone()),
@@ -243,13 +275,19 @@ fn cache<T: Clone + Send + Sync + 'static>(ttl: Duration, cap: u64) -> Cache<Str
 // Núcleo
 // ---------------------------------------------------------------------------------------------
 
+/// Velas y el proveedor que las sirvió.
+struct HistEntry {
+    source: String,
+    candles: Vec<Candle>,
+}
+
 struct Inner {
     slots: Vec<Slot>,
     yahoo: Arc<Yahoo>,
     sec: Arc<Sec>,
     quotes: Cache<String, Quote>,
-    history_intraday: Cache<String, Arc<Vec<Candle>>>,
-    history_daily: Cache<String, Arc<Vec<Candle>>>,
+    history_intraday: Cache<String, Arc<HistEntry>>,
+    history_daily: Cache<String, Arc<HistEntry>>,
     indicators: Cache<String, Indicators>,
     fundamentals: Cache<String, Option<Fundamentals>>,
     news: Cache<String, Arc<Vec<NewsItem>>>,
@@ -291,6 +329,21 @@ impl Inner {
         F: Fn(Arc<dyn Provider>) -> Fut,
         Fut: Future<Output = PResult<T>>,
     {
+        self.route_named(what, names, f, accept).await.map(|(_, v)| v)
+    }
+
+    /// Como `route`, y dice qué proveedor respondió.
+    async fn route_named<T, F, Fut>(
+        &self,
+        what: &str,
+        names: &[&str],
+        f: F,
+        accept: impl Fn(&T) -> bool,
+    ) -> domain::Result<(String, T)>
+    where
+        F: Fn(Arc<dyn Provider>) -> Fut,
+        Fut: Future<Output = PResult<T>>,
+    {
         let mut not_found = false;
         let mut last: Option<DomainError> = None;
         for name in names {
@@ -301,7 +354,7 @@ impl Inner {
                 continue;
             }
             match slot.run(&f).await {
-                Ok(v) if accept(&v) => return Ok(v),
+                Ok(v) if accept(&v) => return Ok(((*name).to_string(), v)),
                 Ok(_) | Err(ProviderError::NotFound(_)) => not_found = true,
                 Err(ProviderError::Unsupported) => {}
                 Err(e) => {
@@ -334,6 +387,7 @@ impl Inner {
                 |q: &Quote| q.price.is_finite(),
             )
             .await
+            .map(with_quote_url)
         })
         .await
     }
@@ -377,6 +431,7 @@ impl Inner {
             {
                 for q in qs {
                     if q.price.is_finite() && group.iter().any(|g| g == &q.id) {
+                        let q = with_quote_url(q);
                         self.quotes.insert(q.id.to_string(), q.clone()).await;
                         found.insert(q.id.clone(), q);
                     }
@@ -408,6 +463,16 @@ impl Inner {
         range: Range,
         interval: Interval,
     ) -> domain::Result<Vec<Candle>> {
+        Ok(self.history_src(id, range, interval).await?.1)
+    }
+
+    /// Histórico y proveedor que lo sirvió (queda anotado en `provenance`).
+    async fn history_src(
+        &self,
+        id: &AssetId,
+        range: Range,
+        interval: Interval,
+    ) -> domain::Result<(String, Vec<Candle>)> {
         symbol::validate(id)?;
         let key = format!("{id}|{}|{}", range.as_str(), interval.as_str());
         let cache = if interval.seconds() < Interval::D1.seconds() {
@@ -415,9 +480,9 @@ impl Inner {
         } else {
             &self.history_daily
         };
-        let arc = cached(cache, key, async {
+        let entry = cached(cache, key, async {
             let id = id.clone();
-            self.route(
+            self.route_named(
                 &format!("histórico de {id}"),
                 order_for(id.class, Capability::History),
                 |p| {
@@ -427,22 +492,38 @@ impl Inner {
                 |c: &Vec<Candle>| !c.is_empty(),
             )
             .await
-            .map(Arc::new)
+            .map(|(source, candles)| Arc::new(HistEntry { source, candles }))
         })
         .await?;
-        Ok((*arc).clone())
+        provenance::record_history(
+            id,
+            range,
+            interval,
+            provenance::HistoryOrigin {
+                source: entry.source.clone(),
+                source_url: symbol::verify_url(&entry.source, id),
+                as_of: entry
+                    .candles
+                    .last()
+                    .and_then(|c| DateTime::<Utc>::from_timestamp(c.t, 0)),
+            },
+        );
+        Ok((entry.source.clone(), entry.candles.clone()))
     }
 
     async fn indicators(&self, id: &AssetId) -> domain::Result<Indicators> {
         symbol::validate(id)?;
         cached(&self.indicators, id.to_string(), async {
-            let candles = self.history(id, Range::Y2, Interval::D1).await?;
+            let (source, candles) = self.history_src(id, Range::Y2, Interval::D1).await?;
             if candles.len() < 2 {
                 return Err(DomainError::NotFound(format!(
                     "histórico insuficiente de {id}"
                 )));
             }
-            Ok(indicators::compute(&candles))
+            let mut ind = indicators::compute(&candles);
+            ind.source_url = symbol::verify_url(&source, id);
+            ind.source = Some(source);
+            Ok(ind)
         })
         .await
     }
@@ -471,7 +552,7 @@ impl Inner {
                 )
                 .await;
             match r {
-                Ok(f) => Ok(f),
+                Ok(f) => Ok(f.map(|f| with_fundamentals_origin(f, &id))),
                 // Sin fundamentales no es un error: simplemente no los hay.
                 Err(DomainError::NotFound(_)) => Ok(None),
                 Err(e) => Err(e),
@@ -548,7 +629,9 @@ impl Inner {
             });
             hits.truncate(limit);
             Ok(Arc::new(
-                hits.into_iter().map(|h| h.summary).collect::<Vec<_>>(),
+                hits.into_iter()
+                    .map(|h| with_summary_url(h.summary))
+                    .collect::<Vec<_>>(),
             ))
         })
         .await?;
@@ -570,7 +653,7 @@ impl Inner {
             if let Some(mut s) = found {
                 s.id = id.clone();
                 s.class = id.class;
-                return Ok(s);
+                return Ok(with_summary_url(s));
             }
             // La búsqueda no lo lista, pero si hay cotización el activo existe.
             let q = match quote {
@@ -585,6 +668,7 @@ impl Inner {
                 exchange: None,
                 currency: q.currency,
                 country: None,
+                source_url: symbol::verify_url(&q.source, id),
                 source: q.source,
             })
         })
@@ -742,6 +826,7 @@ impl Inner {
                     currency: q.as_ref().ok().and_then(|q| q.currency.clone()),
                     country: None,
                     source: "derived".into(),
+                    source_url: None,
                 }
             }
         };
@@ -975,10 +1060,7 @@ impl MarketService {
                     last_ok: st.last_ok,
                     last_error: st.last_error.clone(),
                     last_latency_ms: st.last_latency_ms,
-                    blocked_secs: st
-                        .blocked_until
-                        .and_then(|u| u.checked_duration_since(Instant::now()))
-                        .map(|d| d.as_secs()),
+                    blocked_secs: blocked_secs(st.blocked_until),
                 }
             })
             .collect()
@@ -1072,8 +1154,77 @@ impl MarketData for MarketService {
                     asset_classes: info.classes.clone(),
                     last_error: st.last_error.clone(),
                     last_ok: st.last_ok,
+                    latency_ms: st.last_latency_ms,
+                    blocked_secs: blocked_secs(st.blocked_until),
                 }
             })
             .collect()
+    }
+}
+
+fn blocked_secs(until: Option<Instant>) -> Option<u64> {
+    until
+        .and_then(|u| u.checked_duration_since(Instant::now()))
+        .map(|d| d.as_secs().max(1))
+}
+
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+    use domain::MarketState;
+
+    fn quote(source: &str, id: &AssetId) -> Quote {
+        Quote {
+            id: id.clone(),
+            price: 1.0,
+            change: None,
+            change_pct: None,
+            open: None,
+            high: None,
+            low: None,
+            prev_close: None,
+            volume: None,
+            market_cap: None,
+            currency: None,
+            market_state: MarketState::Unknown,
+            timestamp: Utc::now(),
+            source: source.into(),
+            delay_secs: None,
+            source_url: None,
+            timestamp_origin: None,
+        }
+    }
+
+    #[test]
+    fn quote_gets_verification_url_from_its_provider() {
+        let id = AssetId::new(AssetClass::Stock, "AAPL");
+        let q = with_quote_url(quote("yahoo", &id));
+        assert_eq!(q.source_url.as_deref(), Some("https://finance.yahoo.com/quote/AAPL"));
+        // Sin página pública por activo no se inventa ninguna.
+        assert!(with_quote_url(quote("alphavantage", &id)).source_url.is_none());
+    }
+
+    #[test]
+    fn fundamentals_origin_distinguishes_local_and_provider_dates() {
+        let id = AssetId::new(AssetClass::Stock, "AAPL");
+        let f = |src: &str, as_of: Option<DateTime<Utc>>| Fundamentals {
+            sources: vec![src.into()],
+            as_of,
+            ..Default::default()
+        };
+        let y = with_fundamentals_origin(f("yahoo", Some(Utc::now())), &id);
+        assert_eq!(y.timestamp_origin, Some(TimestampOrigin::Local));
+        assert!(y.source_url.is_some());
+        let av = with_fundamentals_origin(f("alphavantage", Some(Utc::now())), &id);
+        assert_eq!(av.timestamp_origin, Some(TimestampOrigin::Provider));
+        let none = with_fundamentals_origin(f("fmp", None), &id);
+        assert_eq!(none.timestamp_origin, None);
+    }
+
+    #[test]
+    fn blocked_secs_only_while_blocked() {
+        assert_eq!(blocked_secs(None), None);
+        assert_eq!(blocked_secs(Some(Instant::now() - Duration::from_secs(1))), None);
+        assert!(blocked_secs(Some(Instant::now() + Duration::from_secs(30))).unwrap() >= 29);
     }
 }

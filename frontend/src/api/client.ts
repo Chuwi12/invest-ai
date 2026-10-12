@@ -72,6 +72,11 @@ export interface RequestOptions {
 
 /** `fetch` tipado: JSON dentro, JSON fuera, 204 => `undefined`. */
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  return (await requestWithHeaders<T>(path, opts)).data
+}
+
+/** Como `request`, y devuelve también las cabeceras de la respuesta. */
+export async function requestWithHeaders<T>(path: string, opts: RequestOptions = {}): Promise<{ data: T; headers: Headers }> {
   const { method = 'GET', query, body, signal } = opts
   const init: RequestInit = { method, headers: { Accept: 'application/json' } }
   if (signal) init.signal = signal
@@ -88,8 +93,8 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     throw new ApiError(0, 'network', 'No se pudo conectar con el servidor')
   }
   if (!res.ok) throw await toApiError(res)
-  if (res.status === 204) return undefined as T
+  if (res.status === 204) return { data: undefined as T, headers: res.headers }
   const text = await res.text()
-  if (!text) return undefined as T
-  return JSON.parse(text) as T
+  if (!text) return { data: undefined as T, headers: res.headers }
+  return { data: JSON.parse(text) as T, headers: res.headers }
 }

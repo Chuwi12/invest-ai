@@ -40,17 +40,20 @@ pub const BODY_LIMIT: usize = 256 * 1024;
 
 pub fn app(state: AppState, static_dir: Option<PathBuf>) -> Router {
     let origins = state.settings.allowed_origins.clone();
+    let settings = state.settings.clone();
     let mut app = Router::new().nest("/api", api(state));
     if let Some(dir) = static_dir {
         app = app.merge(static_files::router(dir));
     }
     app.layer(DefaultBodyLimit::max(BODY_LIMIT))
         .layer(cors(&origins))
+        .layer(middleware::from_fn_with_state(settings, crate::guard::guard))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
+        .layer(middleware::from_fn(crate::security_headers::apply))
 }
 
 fn api(state: AppState) -> Router {
@@ -90,11 +93,17 @@ fn api(state: AppState) -> Router {
     // Generar un análisis puede tardar un minuto: sin timeout de 30 s.
     let generation = Router::new()
         .route("/assets/{id}/analysis", post(analysis::generate))
+        .layer(middleware::from_fn_with_state(state.limits.analyses.clone(), crate::limits::limit))
         .layer(CompressionLayer::new());
+
+    // Chat (SSE): tope de generaciones simultáneas; el permiso dura lo que el stream.
+    let chat = Router::new()
+        .route("/conversations/{cid}/messages", post(chat::send_message))
+        .layer(middleware::from_fn_with_state(state.limits.chats.clone(), crate::limits::limit));
 
     // SSE y WebSocket, sin timeout ni compresión (comprimir rompería el streaming y el handshake 101).
     let streaming = Router::new()
-        .route("/conversations/{cid}/messages", post(chat::send_message))
+        .route("/assets/{id}/analysis/stream", post(analysis::generate_stream))
         .route("/models/{id}/pull", post(models::pull))
         .route("/ws", get(ws::handler));
 
@@ -102,6 +111,7 @@ fn api(state: AppState) -> Router {
         .merge(rest)
         .merge(generation)
         .merge(streaming)
+        .merge(chat)
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(unknown_route)
         .with_state(state)

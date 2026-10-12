@@ -8,7 +8,7 @@ import { LivePrice } from '@/components/LivePrice'
 import { Provenance } from '@/components/Provenance'
 import { HORIZON_HINT, HORIZON_LABEL, VERDICT_HINT, VERDICT_LABEL, symbolOf } from '@/lib/assets'
 import { analysisFreshness } from '@/lib/freshness'
-import { formatDate, formatDateTime, formatPercent, formatPrice, formatRelative } from '@/lib/format'
+import { formatDate, formatDateTime, formatPercent, formatPrice, formatRelative, formatSigned } from '@/lib/format'
 import { sourceName } from '@/lib/sources'
 import type { Quote } from '@/api/types'
 
@@ -55,7 +55,7 @@ const CatalystRow = ({ c }: { c: Catalyst }) => (
     <span>{c.description}</span>
     <span className="muted small num" style={{ whiteSpace: 'nowrap' }}>
       {c.date ? formatDate(c.date) : 'sin fecha'}
-      {c.impact !== null ? <span className={c.impact > 0 ? 'up' : c.impact < 0 ? 'down' : ''}> · impacto {c.impact > 0 ? '+' : ''}{c.impact.toFixed(1)}</span> : null}
+      {c.impact !== null ? <span className={c.impact > 0 ? 'up' : c.impact < 0 ? 'down' : ''}> · impacto {formatSigned(c.impact, 1)}</span> : null}
     </span>
   </li>
 )

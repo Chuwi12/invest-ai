@@ -79,6 +79,12 @@ export function formatNumber(value: number | null | undefined, digits = 2): stri
   return nf(`n${digits}`, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value)
 }
 
+/** Número con signo explícito y coma decimal: «+0,4», «−0,3», «0,0». */
+export function formatSigned(value: number | null | undefined, digits = 1): string {
+  if (!isNum(value)) return DASH
+  return nf(`sg${digits}`, { minimumFractionDigits: digits, maximumFractionDigits: digits, signDisplay: 'exceptZero' }).format(value)
+}
+
 export function formatInt(value: number | null | undefined): string {
   if (!isNum(value)) return DASH
   return nf('i', { maximumFractionDigits: 0 }).format(value)

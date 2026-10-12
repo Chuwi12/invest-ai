@@ -43,7 +43,7 @@ export function FundamentalsPanel({ summary }: { summary: AssetSummary }) {
   return (
     <div className="stack" style={{ gap: '0.5rem' }}>
       <div className="row wrap">
-        <Provenance provider={f.sources} asOf={f.asOf} assetId={summary.id} stale={fr.stale} staleReason={fr.reason} label="Fuentes" />
+        <Provenance provider={f.sources} asOf={f.asOf} assetId={summary.id} href={f.sourceUrl} verifyUrl={f.sourceUrl} origin={f.timestampOrigin} stale={fr.stale} staleReason={fr.reason} label="Fuentes" />
       </div>
       {f.description ? <p className="small" style={{ maxWidth: '70ch' }}>{f.description}</p> : null}
       <div className="row wrap small muted">

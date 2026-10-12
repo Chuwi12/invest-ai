@@ -55,6 +55,7 @@ pub async fn resolve_summary_lenient(state: &AppState, id: &AssetId) -> ApiResul
                 currency: None,
                 country: None,
                 source: "local".into(),
+                source_url: None,
             })
         }
         Err(e) => Err(e),

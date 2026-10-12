@@ -276,6 +276,7 @@ pub fn parse_search(text: &str) -> PResult<Vec<SearchHit>> {
                 currency: Some("USD".into()),
                 country: None,
                 source: "coingecko".into(),
+                source_url: None,
             },
             liquidity,
         });
@@ -290,10 +291,9 @@ pub fn quote_from_simple(text: &str, coin: &str, id: &AssetId) -> PResult<Quote>
         .filter(|p| *p > 0.0)
         .ok_or_else(|| ProviderError::NotFound(format!("CoinGecko sin precio para {coin}")))?;
     let change_pct = num(&c["usd_24h_change"]);
-    let ts = c["last_updated_at"]
-        .as_i64()
-        .and_then(from_secs)
-        .unwrap_or_else(Utc::now);
+    let provider_ts = c["last_updated_at"].as_i64().and_then(from_secs);
+    let origin = if provider_ts.is_some() { domain::TimestampOrigin::Provider } else { domain::TimestampOrigin::Local };
+    let ts = provider_ts.unwrap_or_else(Utc::now);
     Ok(Quote {
         id: id.clone(),
         price,
@@ -310,6 +310,8 @@ pub fn quote_from_simple(text: &str, coin: &str, id: &AssetId) -> PResult<Quote>
         timestamp: ts,
         source: "coingecko".into(),
         delay_secs: None,
+        source_url: None,
+        timestamp_origin: Some(origin),
     })
 }
 

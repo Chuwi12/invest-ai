@@ -31,6 +31,32 @@ pub enum DomainError {
     Internal(String),
 }
 
+impl DomainError {
+    /// Código estable de la API (`docs/API.md`).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::NotFound(_) => "not_found",
+            Self::InvalidInput(_) => "invalid_input",
+            Self::RateLimited { .. } => "rate_limited",
+            Self::Upstream { .. } => "upstream",
+            Self::Unavailable(_) => "unavailable",
+            Self::Internal(_) => "internal",
+        }
+    }
+
+    /// Inversa aproximada de `code` (para errores recibidos como evento).
+    pub fn from_code(code: &str, message: String) -> Self {
+        match code {
+            "not_found" => Self::NotFound(message),
+            "invalid_input" => Self::InvalidInput(message),
+            "rate_limited" => Self::RateLimited { provider: message },
+            "upstream" => Self::Upstream { provider: "llm".into(), message },
+            "unavailable" => Self::Unavailable(message),
+            _ => Self::Internal(message),
+        }
+    }
+}
+
 pub type Result<T, E = DomainError> = std::result::Result<T, E>;
 
 // ---------------------------------------------------------------------------------------------
@@ -121,6 +147,13 @@ impl fmt::Display for AssetId {
     }
 }
 
+/// Lista blanca del símbolo: `^[A-Za-z0-9.^=\-_]{1,32}$` (`AAPL`, `^GSPC`, `GC=F`, `EURUSD=X`,
+/// `BRK-B`, `DX-Y.NYB`). Excluye controles, `/`, `%`, espacios y Unicode (seguridad S-09).
+pub fn valid_symbol(symbol: &str) -> bool {
+    (1..=32).contains(&symbol.len())
+        && symbol.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'^' | b'=' | b'-' | b'_'))
+}
+
 impl FromStr for AssetId {
     type Err = DomainError;
     fn from_str(s: &str) -> Result<Self> {
@@ -128,8 +161,9 @@ impl FromStr for AssetId {
             .split_once(':')
             .ok_or_else(|| DomainError::InvalidInput(format!("id de activo sin clase: {s}")))?;
         let symbol = symbol.trim();
-        if symbol.is_empty() || symbol.len() > 64 {
-            return Err(DomainError::InvalidInput(format!("símbolo no válido: {s}")));
+        if !valid_symbol(symbol) {
+            // No se refleja el símbolo: puede llevar saltos de línea u otros controles (log forging).
+            return Err(DomainError::InvalidInput("símbolo de activo no válido".to_string()));
         }
         Ok(Self { class: class.parse()?, symbol: symbol.to_string() })
     }
@@ -160,6 +194,9 @@ pub struct AssetSummary {
     pub country: Option<String>,
     /// Proveedor que devolvió el resultado (yahoo, coingecko, ...).
     pub source: String,
+    /// Página pública del proveedor donde comprobar el dato.
+    #[serde(default)]
+    pub source_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -176,6 +213,14 @@ pub enum MarketState {
     /// Mercados 24/7 (cripto).
     Continuous,
     Unknown,
+}
+
+/// De dónde sale una marca de tiempo: la dio el proveedor o es la hora local de la consulta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimestampOrigin {
+    Provider,
+    Local,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +242,12 @@ pub struct Quote {
     pub source: String,
     /// Retraso del dato respecto al mercado en segundos (0 = tiempo real). None = desconocido.
     pub delay_secs: Option<u32>,
+    /// Página pública del proveedor donde comprobar la cifra.
+    #[serde(default)]
+    pub source_url: Option<String>,
+    /// Si `timestamp` lo dio el proveedor o es la hora local. None = desconocido.
+    #[serde(default)]
+    pub timestamp_origin: Option<TimestampOrigin>,
 }
 
 /// Actualización de precio en tiempo real (WebSocket).
@@ -410,6 +461,12 @@ pub struct Fundamentals {
     pub extra: BTreeMap<String, serde_json::Value>,
     pub sources: Vec<String>,
     pub as_of: Option<DateTime<Utc>>,
+    /// Página pública del primer proveedor de `sources` donde comprobar las cifras.
+    #[serde(default)]
+    pub source_url: Option<String>,
+    /// Si `as_of` lo dio el proveedor o es la hora local de la consulta.
+    #[serde(default)]
+    pub timestamp_origin: Option<TimestampOrigin>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -435,6 +492,11 @@ pub enum Trend {
 #[serde(rename_all = "camelCase")]
 pub struct Indicators {
     pub as_of: Option<DateTime<Utc>>,
+    /// Proveedor de las velas con las que se calcularon (el cálculo es propio).
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub source_url: Option<String>,
     pub last_close: Option<f64>,
     pub sma20: Option<f64>,
     pub sma50: Option<f64>,
@@ -520,6 +582,10 @@ pub struct MacroIndicator {
     pub unit: String,
     pub as_of: DateTime<Utc>,
     pub source: String,
+    #[serde(default)]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub timestamp_origin: Option<TimestampOrigin>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -644,6 +710,77 @@ pub struct Analysis {
     pub price_at_analysis: Option<f64>,
     pub model: String,
     pub generated_at: DateTime<Utc>,
+    /// Explicación de por qué faltan (o cómo se calcularon) entrada, stop y objetivos. `None` en
+    /// análisis antiguos.
+    #[serde(default)]
+    pub levels_note: Option<String>,
+    /// Escenarios alcista/base/bajista con probabilidades que suman 100 (solo `deep`).
+    #[serde(default)]
+    pub scenarios: Option<Vec<Scenario>>,
+    /// Rentabilidad esperada ponderada por probabilidad, en % respecto al precio del análisis.
+    #[serde(default)]
+    pub expected_return_pct: Option<f64>,
+    /// Qué tendría que pasar para cambiar de veredicto (comprobable con datos).
+    #[serde(default)]
+    pub would_change_if: Option<Vec<String>>,
+    /// Por qué ese horizonte.
+    #[serde(default)]
+    pub horizon_note: Option<String>,
+    /// Tamaño de posición orientativo calculado en código según ATR/volatilidad.
+    #[serde(default)]
+    pub position_sizing: Option<PositionSizing>,
+    /// Nota de método: modelo, profundidad, llamadas, tokens, tiempo y aviso de no asesoramiento.
+    #[serde(default)]
+    pub method: Option<String>,
+    /// Avisos de calidad del propio análisis (afirmaciones descartadas, cifras sin verificar…),
+    /// separados de `data_warnings`, que solo recoge carencias reales de los datos.
+    #[serde(default)]
+    pub quality_notes: Option<Vec<String>>,
+}
+
+/// Un escenario del análisis profundo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Scenario {
+    /// `bullish` | `base` | `bearish`.
+    pub kind: String,
+    /// 0–100; las de todos los escenarios suman 100.
+    pub probability: f32,
+    pub description: String,
+    /// Precio objetivo tomado de un nivel de los datos (resistencia, soporte, objetivo de analistas…).
+    pub target_price: Option<f64>,
+    /// Qué nivel de los datos se usó como precio objetivo.
+    pub target_basis: Option<String>,
+    /// % de variación desde el precio del análisis hasta `target_price`.
+    pub return_pct: Option<f64>,
+}
+
+/// Tamaño de posición orientativo (no es asesoramiento).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionSizing {
+    /// % máximo orientativo de la cartera en este activo.
+    pub max_portfolio_pct: f64,
+    /// Riesgo asumido por operación como % de la cartera (si hay stop).
+    pub risk_per_trade_pct: Option<f64>,
+    /// Distancia de entrada a stop en %, o 2×ATR si no hay stop.
+    pub stop_distance_pct: Option<f64>,
+    pub atr_pct: Option<f64>,
+    pub volatility30d: Option<f64>,
+    /// Cómo se calculó, en lenguaje llano.
+    pub rationale: String,
+}
+
+/// Progreso del análisis en streaming (`POST /assets/{id}/analysis/stream`, SSE).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
+pub enum AnalysisEvent {
+    /// Empieza una etapa. `stage` es un id estable: snapshot, technical, fundamental, sentiment,
+    /// macro_risk, debate, judge, verify. `index` empieza en 1.
+    Stage { stage: String, label: String, index: u32, total: u32 },
+    Done { analysis: Analysis },
+    Error { code: String, message: String },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -740,6 +877,12 @@ pub struct ProviderStatus {
     pub asset_classes: Vec<AssetClass>,
     pub last_error: Option<String>,
     pub last_ok: Option<DateTime<Utc>>,
+    /// Latencia de la última petición, en milisegundos.
+    #[serde(default)]
+    pub latency_ms: Option<u64>,
+    /// Segundos que quedan de pausa tras un 429.
+    #[serde(default)]
+    pub blocked_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -793,6 +936,22 @@ pub trait Analyst: Send + Sync + 'static {
     async fn analyze_with(&self, snapshot: &AssetSnapshot, depth: Option<AnalysisDepth>) -> Result<Analysis> {
         let _ = depth;
         self.analyze(snapshot).await
+    }
+    /// Análisis con progreso: etapas y, al final, `Done` o `Error`. Por defecto no informa de
+    /// etapas intermedias. Recibe `Arc<Self>` para que el stream sea `'static`.
+    fn analyze_stream(
+        self: std::sync::Arc<Self>,
+        snapshot: AssetSnapshot,
+        depth: Option<AnalysisDepth>,
+    ) -> BoxStream<'static, AnalysisEvent> {
+        use futures::StreamExt as _;
+        futures::stream::once(async move {
+            match self.analyze_with(&snapshot, depth).await {
+                Ok(analysis) => AnalysisEvent::Done { analysis },
+                Err(e) => AnalysisEvent::Error { code: e.code().to_string(), message: e.to_string() },
+            }
+        })
+        .boxed()
     }
 }
 
@@ -936,6 +1095,23 @@ mod tests {
         assert_eq!(yahoo.symbol, "BRK-B");
         assert!("BTC".parse::<AssetId>().is_err());
         assert!("planet:X".parse::<AssetId>().is_err());
+    }
+
+    #[test]
+    fn asset_symbol_whitelist() {
+        for ok in ["index:^GSPC", "future:GC=F", "forex:EURUSD=X", "stock:BRK-B", "index:DX-Y.NYB", "stock:SAN.MC", "bond:DGS10", "crypto:BTC"] {
+            assert!(ok.parse::<AssetId>().is_ok(), "{ok} debería ser válido");
+        }
+        let long = format!("stock:{}", "A".repeat(33));
+        for bad in ["stock:", "stock:a/b", "stock:../x", "stock:a%00", "stock:a\r\nb", "stock:a\0", "stock:a b", "stock:ñu", "stock:a?b", "stock:a#b", long.as_str()] {
+            assert!(bad.parse::<AssetId>().is_err(), "{bad:?} debería rechazarse");
+        }
+        // El error no refleja la entrada (log forging).
+        let err = "stock:a\r\nb".parse::<AssetId>().unwrap_err().to_string();
+        assert!(!err.contains('\n') && !err.contains('\r'));
+        assert!(serde_json::from_str::<AssetId>("\"stock:a/b\"").is_err());
+        assert!("stock:A".repeat(1).parse::<AssetId>().is_ok());
+        assert!(format!("stock:{}", "A".repeat(32)).parse::<AssetId>().is_ok());
     }
 
     #[test]

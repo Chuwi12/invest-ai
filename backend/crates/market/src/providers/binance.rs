@@ -202,10 +202,9 @@ pub fn quote_from_ticker(v: &Value, id: Option<&AssetId>) -> PResult<Quote> {
     let price = num(&v["lastPrice"])
         .filter(|p| *p > 0.0)
         .ok_or_else(|| ProviderError::upstream("ticker sin precio"))?;
-    let ts = v["closeTime"]
-        .as_i64()
-        .and_then(from_ms)
-        .unwrap_or_else(Utc::now);
+    let provider_ts = v["closeTime"].as_i64().and_then(from_ms);
+    let origin = if provider_ts.is_some() { domain::TimestampOrigin::Provider } else { domain::TimestampOrigin::Local };
+    let ts = provider_ts.unwrap_or_else(Utc::now);
     Ok(Quote {
         id,
         price,
@@ -222,6 +221,8 @@ pub fn quote_from_ticker(v: &Value, id: Option<&AssetId>) -> PResult<Quote> {
         timestamp: ts,
         source: "binance".into(),
         delay_secs: Some(0),
+        source_url: None,
+        timestamp_origin: Some(origin),
     })
 }
 

@@ -202,6 +202,8 @@ pub fn quote_from_json(v: &Value, id: &AssetId) -> PResult<Quote> {
         timestamp: ts,
         source: "twelvedata".into(),
         delay_secs: None,
+        source_url: None,
+        timestamp_origin: Some(domain::TimestampOrigin::Provider),
     })
 }
 

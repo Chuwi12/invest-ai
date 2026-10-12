@@ -49,17 +49,17 @@ const PROVIDERS: ProviderStatus[] = [
     name: 'yahoo', enabled: true, requiresKey: false, hasKey: false,
     capabilities: ['search', 'quote', 'history', 'fundamentals', 'news', 'options'],
     assetClasses: ['stock', 'etf', 'fund', 'index', 'future', 'commodity', 'forex', 'option', 'bond'],
-    lastError: null, lastOk: new Date(Date.now() - 4_000).toISOString(),
+    lastError: null, lastOk: new Date(Date.now() - 4_000).toISOString(), latencyMs: 184,
   },
   {
     name: 'binance', enabled: true, requiresKey: false, hasKey: false,
     capabilities: ['quote', 'realtime', 'history'], assetClasses: ['crypto'],
-    lastError: null, lastOk: new Date(Date.now() - 1_000).toISOString(),
+    lastError: null, lastOk: new Date(Date.now() - 1_000).toISOString(), latencyMs: 61,
   },
   {
     name: 'coingecko', enabled: true, requiresKey: false, hasKey: false,
     capabilities: ['search', 'fundamentals'], assetClasses: ['crypto'],
-    lastError: 'HTTP 429: límite de peticiones (reintento en 60 s)', lastOk: new Date(Date.now() - 600_000).toISOString(),
+    lastError: 'límite de peticiones alcanzado', lastOk: new Date(Date.now() - 600_000).toISOString(), blockedSecs: 42, latencyMs: 912,
   },
   {
     name: 'finnhub', enabled: false, requiresKey: true, hasKey: false,
@@ -141,7 +141,15 @@ export const mockApi: Api = {
   async history(id, range, interval, signal) {
     await lag(signal, 150)
     assertExists(id)
-    return genCandles(id, range, interval)
+    const candles = genCandles(id, range, interval)
+    const source = id.startsWith('crypto:') ? 'binance' : 'yahoo'
+    const sym = encodeURIComponent(id.slice(id.indexOf(':') + 1))
+    return {
+      candles,
+      source,
+      sourceUrl: source === 'binance' ? `https://www.binance.com/en/trade/${sym}_USDT` : `https://finance.yahoo.com/quote/${sym}`,
+      asOf: new Date((candles[candles.length - 1]?.t ?? 0) * 1000).toISOString(),
+    }
   },
 
   async indicators(id, signal) {
@@ -185,6 +193,28 @@ export const mockApi: Api = {
     db.analyses[id] = list.slice(0, 20)
     saveDb()
     return a
+  },
+
+  async *streamAnalysis(id, depth, signal) {
+    // Etapas como las del backend real (mismo contrato SSE), con pausas proporcionales a la profundidad.
+    const scale = depth === 'quick' ? 0.4 : depth === 'deep' ? 2 : 1
+    const stages: [string, string, number][] = [
+      ['data', 'Reuniendo datos en vivo', 1500],
+      ['scoring', 'Calculando puntuaciones', 1000],
+      ['llm', 'El modelo redacta el análisis', 3500],
+      ['validate', 'Validando el resultado', 800],
+    ]
+    for (const [i, [stage, label, ms]] of stages.entries()) {
+      yield { type: 'stage', stage, label, index: i + 1, total: stages.length }
+      await sleep(ms * scale, signal)
+    }
+    const db = getDb()
+    const list = (db.analyses[id] ??= [])
+    const a = genAnalysis(id, list.length + 1)
+    list.unshift(a)
+    db.analyses[id] = list.slice(0, 20)
+    saveDb()
+    yield { type: 'done', analysis: a }
   },
 
   async analyses(id, signal) {

@@ -190,6 +190,7 @@ impl ToolRunner {
                 currency: None,
                 country: None,
                 source: "tool".into(),
+                source_url: None,
             },
             quote: None,
             fundamentals: None,

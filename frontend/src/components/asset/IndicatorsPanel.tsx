@@ -34,13 +34,15 @@ export function IndicatorsPanel({ summary }: { summary: AssetSummary }) {
       <div className="row wrap">
         {i.trend ? <span className="chip accent">Tendencia: {TREND_LABEL[i.trend]}</span> : null}
         <Provenance
-          provider={summary.source}
+          provider={i.source ?? summary.source}
           asOf={i.asOf}
           assetId={summary.id}
+          href={i.sourceUrl}
+          verifyUrl={i.sourceUrl}
           stale={f.stale}
           staleReason={f.reason}
           label="Datos base"
-          extra={`calculado por la app sobre velas diarias (cierre ${formatPrice(i.lastClose, opt)})`}
+          extra={`calculado por la app sobre velas diarias (cierre ${formatPrice(i.lastClose, opt)})${i.source ? '' : ' · proveedor deducido, el backend no lo indicó'}`}
         />
       </div>
 

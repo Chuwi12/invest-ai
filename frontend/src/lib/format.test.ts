@@ -12,6 +12,7 @@ import {
   formatPoints,
   formatPrice,
   formatRelative,
+  formatSigned,
   priceDecimals,
   toneOf,
 } from './format'
@@ -135,5 +136,14 @@ describe('formatDelay', () => {
     expect(formatDelay(0)).toBe('Tiempo real')
     expect(formatDelay(900)).toBe('Retraso de 15 min')
     expect(formatDelay(null)).toBe('Retraso desconocido')
+  })
+})
+
+describe('formatSigned', () => {
+  it('usa coma decimal y signo explícito', () => {
+    expect(formatSigned(0.4)).toBe('+0,4')
+    expect(formatSigned(-0.35, 2)).toMatch(/^[-−]0,35$/)
+    expect(formatSigned(0)).toBe('0,0')
+    expect(formatSigned(null)).toBe('—')
   })
 })

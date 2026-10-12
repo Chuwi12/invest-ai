@@ -4,6 +4,7 @@ pub mod http;
 pub mod indicators;
 pub mod news;
 pub mod options;
+pub mod provenance;
 pub mod providers;
 pub mod ratelimit;
 pub mod realtime;

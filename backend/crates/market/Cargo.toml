@@ -29,3 +29,4 @@ url = "2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+flate2 = "1"

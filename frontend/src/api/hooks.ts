@@ -7,10 +7,11 @@ import {
 } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './index'
-import { isAbortError } from './client'
+import { ApiError, isAbortError } from './client'
 import type {
   Analysis,
   AnalysisDepth,
+  AnalysisProgress,
   AssetClass,
   AssetDetail,
   AssetId,
@@ -138,7 +139,7 @@ export function useSparkline(id: AssetId, enabled = true) {
     staleTime: 5 * MIN,
     gcTime: 30 * MIN,
     enabled,
-    select: (candles) => candles.map((c) => c.c),
+    select: (h) => h.candles.map((c) => c.c),
   })
 }
 
@@ -196,16 +197,27 @@ export function useSnapshot(id: AssetId, enabled = true) {
 
 /**
  * Genera un análisis nuevo (10–60 s). Devuelve `run` (con su propio AbortController) y `cancel`.
- * Cancelar corta la espera en el navegador; el backend puede terminar y guardar el resultado.
+ * Cancelar aborta la petición SSE; el backend cancela el análisis al soltarse la conexión (o, con el
+ * fallback al POST normal, puede terminar y guardarlo igualmente). `progress` son las etapas reales.
  */
 export function useGenerateAnalysis(id: AssetId) {
   const qc = useQueryClient()
   const controller = useRef<AbortController | null>(null)
+  const [stages, setStages] = useState<AnalysisProgress[]>([])
   const mutation = useMutation({
-    mutationFn: (depth: AnalysisDepth) => {
+    mutationFn: async (depth: AnalysisDepth): Promise<Analysis> => {
       const ac = new AbortController()
       controller.current = ac
-      return api.generateAnalysis(id, depth, ac.signal)
+      setStages([])
+      for await (const ev of api.streamAnalysis(id, depth, ac.signal)) {
+        if (ev.type === 'stage') {
+          const p = { stage: ev.stage, label: ev.label, index: ev.index, total: ev.total }
+          setStages((prev) => [...prev.filter((x) => x.stage !== p.stage), p])
+        }
+        else if (ev.type === 'done') return ev.analysis
+        else throw new ApiError(0, ev.code, ev.message)
+      }
+      throw new ApiError(0, 'stream_closed', 'La conexión se cerró antes de terminar el análisis')
     },
     onSuccess: (analysis) => {
       qc.setQueryData<Analysis | null>(qk.analysis(id), analysis)
@@ -214,10 +226,11 @@ export function useGenerateAnalysis(id: AssetId) {
     },
     onSettled: () => {
       controller.current = null
+      setStages([])
     },
   })
   const cancel = useCallback(() => controller.current?.abort(), [])
-  return { ...mutation, cancel }
+  return { ...mutation, cancel, stages }
 }
 
 // --- Conversaciones --------------------------------------------------------------------------

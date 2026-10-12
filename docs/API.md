@@ -42,6 +42,28 @@ Cualquier error responde con JSON `{ "error": { "code": string, "message": strin
 | GET | `/news` | `limit` (def. 30) | `NewsItem[]` (mercado general) |
 | GET | `/macro` | — | `MacroContext` |
 
+### Procedencia verificable
+
+Toda cifra de mercado debe poder comprobarse en su fuente. Campos añadidos (todos opcionales, `null`
+si no se conocen; nunca se inventa una URL):
+
+| Tipo | Campos nuevos |
+|------|---------------|
+| `AssetSummary` | `sourceUrl` |
+| `Quote`, `Fundamentals`, `MacroIndicator` | `sourceUrl`, `timestampOrigin: "provider" \| "local"` |
+| `Indicators` | `source` (proveedor de las velas usadas en el cálculo), `sourceUrl` |
+| `ProviderStatus` | `latencyMs` (última petición), `blockedSecs` (pausa restante tras un 429) |
+
+- `timestampOrigin = "provider"`: `timestamp`/`asOf` es la hora que dio el proveedor. `"local"`: el
+  proveedor no la da y es la hora de la consulta (Yahoo/Finnhub en `Fundamentals.asOf`; Binance/CoinGecko
+  si faltara el campo).
+- `NewsItem.url` ya es el enlace al artículo/filing original (no necesita `sourceUrl`).
+- `GET /assets/{id}/history` sigue devolviendo `Candle[]`; la procedencia va en cabeceras de respuesta:
+  `X-Data-Source` (proveedor que sirvió las velas), `X-Data-Source-Url` y `X-Data-As-Of` (inicio de la
+  última vela, ISO 8601). Faltan si el backend no la conoce (p. ej. el servidor simulado). La API se
+  sirve en el mismo origen que la UI (o a través del proxy de Vite), por lo que no hace falta
+  `Access-Control-Expose-Headers`; solo haría falta si el frontend se alojara en otro origen.
+
 ```ts
 type AssetDetail = {
   summary: AssetSummary;

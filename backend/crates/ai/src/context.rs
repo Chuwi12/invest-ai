@@ -143,6 +143,71 @@ const LEVELS: [Level; 6] = [
     Level { max_news: 3, summary_chars: 0, extras: false, max_macro: 4, max_reasons: 2 },
 ];
 
+/// Qué partes del snapshot se incluyen. Cada etapa del análisis pide solo lo que necesita.
+#[derive(Debug, Clone, Copy)]
+pub struct Sections {
+    pub quote: bool,
+    pub indicators: bool,
+    pub fundamentals: bool,
+    pub news: bool,
+    pub macro_ctx: bool,
+    pub gaps: bool,
+    /// Máscara de filas de la tabla de puntuaciones (`Sections::S_*`); 0 = sin tabla.
+    pub scores: u8,
+    /// Veredicto cuantitativo provisional y sus razones.
+    pub verdict: bool,
+}
+
+impl Sections {
+    pub const S_TECHNICAL: u8 = 1;
+    pub const S_MOMENTUM: u8 = 2;
+    pub const S_VALUATION: u8 = 4;
+    pub const S_FUNDAMENTAL: u8 = 8;
+    pub const S_SENTIMENT: u8 = 16;
+    pub const S_MACRO: u8 = 32;
+    pub const S_RISK: u8 = 64;
+    pub const S_ALL: u8 = 127;
+
+    pub const ALL: Self = Self {
+        quote: true,
+        indicators: true,
+        fundamentals: true,
+        news: true,
+        macro_ctx: true,
+        gaps: true,
+        scores: Self::S_ALL,
+        verdict: true,
+    };
+
+    const NONE: Self = Self {
+        quote: false,
+        indicators: false,
+        fundamentals: false,
+        news: false,
+        macro_ctx: false,
+        gaps: true,
+        scores: 0,
+        verdict: false,
+    };
+
+    /// Lo mínimo que necesita el juez y los abogados: cotización, puntuaciones y huecos.
+    pub fn judge() -> Self {
+        Self { quote: true, scores: Self::S_ALL, verdict: true, ..Self::NONE }
+    }
+    pub fn technical() -> Self {
+        Self { quote: true, indicators: true, scores: Self::S_TECHNICAL | Self::S_MOMENTUM, ..Self::NONE }
+    }
+    pub fn fundamental() -> Self {
+        Self { quote: true, fundamentals: true, scores: Self::S_FUNDAMENTAL | Self::S_VALUATION, ..Self::NONE }
+    }
+    pub fn sentiment() -> Self {
+        Self { news: true, scores: Self::S_SENTIMENT, ..Self::NONE }
+    }
+    pub fn macro_risk() -> Self {
+        Self { quote: true, indicators: true, fundamentals: true, macro_ctx: true, scores: Self::S_MACRO | Self::S_RISK, ..Self::NONE }
+    }
+}
+
 /// Construye el contexto del activo. `registry` es la numeración de noticias ya en uso (vacía
 /// para un análisis; compartida entre activos y herramientas en el chat).
 pub fn build_context(
@@ -151,10 +216,21 @@ pub fn build_context(
     opts: &ContextOptions,
     registry: &mut NewsRegistry,
 ) -> BuiltContext {
+    build_context_sections(snap, card, opts, registry, &Sections::ALL)
+}
+
+/// Como `build_context`, solo con las partes de `sections`.
+pub fn build_context_sections(
+    snap: &AssetSnapshot,
+    card: &Scorecard,
+    opts: &ContextOptions,
+    registry: &mut NewsRegistry,
+    sections: &Sections,
+) -> BuiltContext {
     let mut last: Option<(String, NewsRegistry)> = None;
     for (n, level) in LEVELS.iter().enumerate() {
         let mut reg = registry.clone();
-        let text = render(snap, card, opts.lang, level, &mut reg);
+        let text = render(snap, card, opts.lang, level, &mut reg, sections);
         let tokens = estimate_tokens(&text);
         if tokens <= opts.max_tokens {
             *registry = reg.clone();
@@ -255,6 +331,7 @@ fn render(
     l: Lang,
     lv: &Level,
     reg: &mut NewsRegistry,
+    sec: &Sections,
 ) -> String {
     let mut out = String::with_capacity(4096);
     let s = &snap.summary;
@@ -293,25 +370,37 @@ fn render(
         )
     );
 
-    if let Some(q) = &snap.quote {
+    if sec.quote
+        && let Some(q) = &snap.quote
+    {
         render_quote(&mut out, q, snap.generated_at, l);
     }
-    if let Some(i) = &snap.indicators {
+    if sec.indicators
+        && let Some(i) = &snap.indicators
+    {
         render_indicators(&mut out, i, snap.quote.as_ref().map(|q| q.price), l, lv);
     }
-    if let Some(f) = &snap.fundamentals {
+    if sec.fundamentals
+        && let Some(f) = &snap.fundamentals
+    {
         render_fundamentals(&mut out, f, snap, l, lv);
     }
-    render_scores(&mut out, card, l, lv);
-    render_news(&mut out, &snap.news, snap.generated_at, l, lv, reg);
-    if let Some(m) = &snap.macro_context {
+    if sec.scores != 0 || sec.verdict {
+        render_scores(&mut out, card, l, lv, sec);
+    }
+    if sec.news {
+        render_news(&mut out, &snap.news, snap.generated_at, l, lv, reg);
+    }
+    if sec.macro_ctx
+        && let Some(m) = &snap.macro_context
+    {
         render_macro(&mut out, m, l, lv);
     }
 
     // Huecos de datos: obligan al modelo a decirlo en lugar de inventar.
     let mut gaps: Vec<&str> = snap.missing.iter().map(|s| s.as_str()).collect();
     gaps.extend(card.gaps.iter().map(|s| s.as_str()));
-    if !gaps.is_empty() {
+    if sec.gaps && !gaps.is_empty() {
         section(&mut out, l.t("Datos no disponibles", "Missing data"));
         for g in gaps {
             let _ = writeln!(out, "- {g}");
@@ -625,7 +714,7 @@ fn render_fundamentals(
     t.render(out, (l.t("Concepto", "Item"), l.t("Valor", "Value")));
 }
 
-fn render_scores(out: &mut String, card: &Scorecard, l: Lang, lv: &Level) {
+fn render_scores(out: &mut String, card: &Scorecard, l: Lang, lv: &Level, sec: &Sections) {
     section(
         out,
         l.t(
@@ -642,34 +731,40 @@ fn render_scores(out: &mut String, card: &Scorecard, l: Lang, lv: &Level) {
         l.t("Razones", "Reasons")
     );
     let join = |v: &[String]| v.iter().take(lv.max_reasons).cloned().collect::<Vec<_>>().join("; ");
-    let rows: [(&str, Option<f32>, &[String]); 7] = [
-        (l.t("Técnico", "Technical"), s.technical, &card.reasons.technical),
-        ("Momentum", s.momentum, &card.reasons.momentum),
-        (l.t("Valoración", "Valuation"), s.valuation, &card.reasons.valuation),
-        (l.t("Fundamentales", "Fundamentals"), s.fundamental, &card.reasons.fundamental),
-        (l.t("Sentimiento", "Sentiment"), s.sentiment, &card.reasons.sentiment),
-        ("Macro", s.macro_score, &card.reasons.macro_score),
-        (l.t("Riesgo", "Risk"), s.risk, &card.reasons.risk),
+    let rows: [(u8, &str, Option<f32>, &[String]); 7] = [
+        (Sections::S_TECHNICAL, l.t("Técnico", "Technical"), s.technical, &card.reasons.technical),
+        (Sections::S_MOMENTUM, "Momentum", s.momentum, &card.reasons.momentum),
+        (Sections::S_VALUATION, l.t("Valoración", "Valuation"), s.valuation, &card.reasons.valuation),
+        (Sections::S_FUNDAMENTAL, l.t("Fundamentales", "Fundamentals"), s.fundamental, &card.reasons.fundamental),
+        (Sections::S_SENTIMENT, l.t("Sentimiento", "Sentiment"), s.sentiment, &card.reasons.sentiment),
+        (Sections::S_MACRO, "Macro", s.macro_score, &card.reasons.macro_score),
+        (Sections::S_RISK, l.t("Riesgo", "Risk"), s.risk, &card.reasons.risk),
     ];
-    for (name, score, reasons) in rows {
-        if let Some(v) = score {
+    for (bit, name, score, reasons) in rows {
+        if sec.scores & bit != 0
+            && let Some(v) = score
+        {
             let _ = writeln!(out, "| {name} | {v:.0} | {} |", join(reasons));
         }
     }
-    let _ = writeln!(out, "| **Global** | **{:.0}** | |", s.overall);
-    let _ = writeln!(
-        out,
-        "{}",
-        tr!(
-            l,
-            "Veredicto cuantitativo provisional: {} (confianza {:.2}, cobertura de datos {:.0} %). {}",
-            "Provisional quantitative verdict: {} (confidence {:.2}, data coverage {:.0}%). {}",
-            verdict_name(l, card.verdict),
-            card.confidence,
-            card.coverage * 100.0,
-            card.verdict_reasons.join("; ")
-        )
-    );
+    if sec.scores == Sections::S_ALL {
+        let _ = writeln!(out, "| **Global** | **{:.0}** | |", s.overall);
+    }
+    if sec.verdict {
+        let _ = writeln!(
+            out,
+            "{}",
+            tr!(
+                l,
+                "Veredicto cuantitativo provisional: {} (confianza {:.2}, cobertura de datos {:.0} %). {}",
+                "Provisional quantitative verdict: {} (confidence {:.2}, data coverage {:.0}%). {}",
+                verdict_name(l, card.verdict),
+                card.confidence,
+                card.coverage * 100.0,
+                card.verdict_reasons.join("; ")
+            )
+        );
+    }
 }
 
 fn render_news(

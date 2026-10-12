@@ -57,7 +57,8 @@ export function PriceChart({ id, summary, quote }: Props) {
   const [overlays, setOverlays] = useState<Set<Overlay>>(new Set(['sma50']))
   const effective: Interval = interval === 'auto' || !intervalsFor(range).includes(interval) ? defaultInterval(range) : interval
   const q = useHistory(id, range, interval === 'auto' || !intervalsFor(range).includes(interval) ? undefined : interval)
-  const candles = q.data
+  const candles = q.data?.candles
+  const origin = q.data
 
   const host = useRef<HTMLDivElement>(null)
   const tip = useRef<HTMLDivElement>(null)
@@ -235,13 +236,15 @@ export function PriceChart({ id, summary, quote }: Props) {
       {candles && candles.length === 0 ? <div className="notice">El proveedor no devolvió velas para este rango.</div> : null}
       {lastIso ? (
         <Provenance
-          provider={quote?.source ?? summary.source}
+          provider={origin?.source ?? quote?.source ?? summary.source}
           asOf={lastIso}
           assetId={id}
+          href={origin?.sourceUrl}
+          verifyUrl={origin?.sourceUrl}
           stale={fresh?.stale ?? false}
           staleReason={fresh?.reason}
           label="Velas"
-          extra={`${candles?.length ?? 0} velas · última ${formatDateTime(lastIso)}${cur ? ` · ${cur}` : ''}`}
+          extra={`${candles?.length ?? 0} velas · última ${formatDateTime(lastIso)}${cur ? ` · ${cur}` : ''}${origin?.source ? '' : ' · proveedor deducido, el backend no lo indicó'}`}
         />
       ) : null}
     </div>

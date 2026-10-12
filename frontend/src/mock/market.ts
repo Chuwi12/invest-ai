@@ -188,6 +188,11 @@ export function genQuote(id: AssetId): Quote {
     timestamp: new Date(Date.now() - delay * 1000).toISOString(),
     source: cls === 'crypto' ? 'binance' : 'yahoo',
     delaySecs: delay,
+    sourceUrl:
+      cls === 'crypto'
+        ? `https://www.binance.com/en/trade/${encodeURIComponent(id.slice(id.indexOf(':') + 1))}_USDT`
+        : `https://finance.yahoo.com/quote/${encodeURIComponent(id.slice(id.indexOf(':') + 1))}`,
+    timestampOrigin: 'provider',
   }
 }
 

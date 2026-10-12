@@ -5,10 +5,10 @@ use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use domain::{
-    Analysis, AnalysisDepth, Analyst, AssetSnapshot, ChatEvent, ChatRequest, DomainError, LlmStatus, ModelService,
+    Analysis, AnalysisDepth, AnalysisEvent, Analyst, AssetSnapshot, ChatEvent, ChatRequest, DomainError, LlmStatus, ModelService,
     Result, SettingsStore,
 };
-use futures::stream::BoxStream;
+use futures::{StreamExt, stream::BoxStream};
 
 use crate::{analysis::AnalysisEngine, chat::ChatEngine, config::AiConfig, models::ModelManager, ollama::OllamaClient};
 
@@ -49,6 +49,36 @@ impl Analyst for OllamaAnalyst {
 
     async fn analyze_with(&self, snapshot: &AssetSnapshot, depth: Option<AnalysisDepth>) -> Result<Analysis> {
         self.engine.analyze(snapshot, depth).await
+    }
+
+    fn analyze_stream(self: Arc<Self>, snapshot: AssetSnapshot, depth: Option<AnalysisDepth>) -> BoxStream<'static, AnalysisEvent> {
+        /// Aborta el análisis si se suelta el stream (el cliente HTTP de Ollama cancela la generación).
+        struct AbortOnDrop(tokio::task::JoinHandle<()>);
+        impl Drop for AbortOnDrop {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let engine = self.engine.clone();
+        let handle = tokio::spawn(async move {
+            let last = match engine.analyze_progress(&snapshot, depth, Some(tx.clone())).await {
+                Ok(analysis) => AnalysisEvent::Done { analysis },
+                Err(e) => AnalysisEvent::Error { code: e.code().to_string(), message: e.to_string() },
+            };
+            let _ = tx.send(last);
+        });
+        async_stream::stream! {
+            let _guard = AbortOnDrop(handle);
+            while let Some(ev) = rx.recv().await {
+                let end = !matches!(ev, AnalysisEvent::Stage { .. });
+                yield ev;
+                if end {
+                    break;
+                }
+            }
+        }
+        .boxed()
     }
 
     fn chat(&self, req: ChatRequest) -> BoxStream<'static, ChatEvent> {

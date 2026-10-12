@@ -457,6 +457,8 @@ pub fn macro_from_quotes(quotes: &[Quote]) -> Vec<MacroIndicator> {
                 unit: (*unit).into(),
                 as_of: q.timestamp,
                 source: "yahoo".into(),
+                source_url: crate::symbol::verify_url("yahoo", &q.id),
+                timestamp_origin: q.timestamp_origin,
             })
         })
         .collect()
@@ -581,6 +583,7 @@ pub fn parse_search(text: &str) -> PResult<(Vec<SearchHit>, Vec<NewsItem>)> {
                 currency: None,
                 country: None,
                 source: "yahoo".into(),
+                source_url: None,
             },
             liquidity: relevance * tier,
         });
@@ -812,6 +815,12 @@ pub fn quote_from_chart(id: &AssetId, data: &ChartData, now: DateTime<Utc>) -> Q
             .unwrap_or(now),
         source: "yahoo".into(),
         delay_secs: None,
+        source_url: None,
+        timestamp_origin: Some(if m.regular_market_time.is_some() {
+            domain::TimestampOrigin::Provider
+        } else {
+            domain::TimestampOrigin::Local
+        }),
     }
 }
 
@@ -858,8 +867,9 @@ pub fn parse_quotes(text: &str, requested: &HashMap<String, Vec<&AssetId>>) -> P
         let is_crypto = r["quoteType"].as_str() == Some("CRYPTOCURRENCY");
         let ts = r["regularMarketTime"]
             .as_i64()
-            .and_then(|t| DateTime::<Utc>::from_timestamp(t, 0))
-            .unwrap_or_else(Utc::now);
+            .and_then(|t| DateTime::<Utc>::from_timestamp(t, 0));
+        let origin = if ts.is_some() { domain::TimestampOrigin::Provider } else { domain::TimestampOrigin::Local };
+        let ts = ts.unwrap_or_else(Utc::now);
         for id in ids {
             out.push(Quote {
                 id: (*id).clone(),
@@ -881,6 +891,8 @@ pub fn parse_quotes(text: &str, requested: &HashMap<String, Vec<&AssetId>>) -> P
                 timestamp: ts,
                 source: "yahoo".into(),
                 delay_secs: r["exchangeDataDelayedBy"].as_u64().map(|d| d as u32),
+                source_url: None,
+                timestamp_origin: Some(origin),
             });
         }
     }
@@ -1357,6 +1369,8 @@ mod tests {
             timestamp: Utc::now(),
             source: "yahoo".into(),
             delay_secs: None,
+            source_url: None,
+            timestamp_origin: None,
         };
         let ind = macro_from_quotes(&[mk("^TNX", 4.2), mk("^VIX", 17.5)]);
         let keys: Vec<_> = ind.iter().map(|i| i.key.as_str()).collect();

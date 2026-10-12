@@ -48,6 +48,8 @@ fn macro_ind(key: &str, value: f64, change: Option<f64>, unit: &str) -> MacroInd
         unit: unit.into(),
         as_of: now(),
         source: "t".into(),
+        source_url: None,
+        timestamp_origin: None,
     }
 }
 

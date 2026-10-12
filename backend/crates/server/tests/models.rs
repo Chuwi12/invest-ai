@@ -43,6 +43,9 @@ async fn active_model_can_be_switched_only_to_installed_models() {
     assert_eq!(s, StatusCode::NO_CONTENT);
     let (s, _) = app.send(Method::DELETE, "/api/models/qwen2.5%3A7b", None).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+    // Un nombre cualquiera que no está instalado tampoco llega a Ollama.
+    let (s, b) = app.send(Method::DELETE, "/api/models/fantasma%3A1b", None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{b}");
 }
 
 #[tokio::test]

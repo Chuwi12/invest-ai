@@ -1,6 +1,28 @@
 import type { Api } from './api'
-import { assetPath, request } from './client'
-import { streamChatEvents, streamPullEvents } from './sse'
+import { ApiError, assetPath, request, requestWithHeaders } from './client'
+import { streamAnalysisEvents, streamChatEvents, streamPullEvents } from './sse'
+import type { Analysis, AnalysisDepth, AnalysisStreamEvent, Candle, HistoryResult } from './types'
+
+/**
+ * Progreso real del análisis por SSE. Si el backend aún no tiene el endpoint (404/405) se cae al
+ * `POST /analysis` normal y se emite solo el `done`, sin etapas.
+ */
+async function* streamAnalysisWithFallback(
+  id: string,
+  depth: AnalysisDepth,
+  signal?: AbortSignal,
+): AsyncGenerator<AnalysisStreamEvent> {
+  try {
+    yield* streamAnalysisEvents(`${assetPath(id)}/analysis/stream?depth=${encodeURIComponent(depth)}`, signal)
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 404 || e.status === 405)) {
+      const analysis = await request<Analysis>(`${assetPath(id)}/analysis`, { method: 'POST', query: { depth }, signal })
+      yield { type: 'done', analysis }
+      return
+    }
+    throw e
+  }
+}
 
 /** Cliente real contra el backend (`/api/...`, ver docs/API.md). */
 export const httpApi: Api = {
@@ -13,8 +35,15 @@ export const httpApi: Api = {
   quote: (id, signal) => request(`${assetPath(id)}/quote`, { signal }),
   quotes: (ids, signal) =>
     ids.length === 0 ? Promise.resolve([]) : request('/quotes', { query: { ids: ids.join(',') }, signal }),
-  history: (id, range, interval, signal) =>
-    request(`${assetPath(id)}/history`, { query: { range, interval }, signal }),
+  history: async (id, range, interval, signal): Promise<HistoryResult> => {
+    const { data, headers } = await requestWithHeaders<Candle[]>(`${assetPath(id)}/history`, { query: { range, interval }, signal })
+    return {
+      candles: data,
+      source: headers.get('x-data-source'),
+      sourceUrl: headers.get('x-data-source-url'),
+      asOf: headers.get('x-data-as-of'),
+    }
+  },
   indicators: (id, signal) => request(`${assetPath(id)}/indicators`, { signal }),
   fundamentals: (id, signal) => request(`${assetPath(id)}/fundamentals`, { signal }),
   news: (id, limit, signal) => request(`${assetPath(id)}/news`, { query: { limit }, signal }),
@@ -24,6 +53,7 @@ export const httpApi: Api = {
   latestAnalysis: (id, signal) => request(`${assetPath(id)}/analysis`, { signal }),
   generateAnalysis: (id, depth, signal) =>
     request(`${assetPath(id)}/analysis`, { method: 'POST', query: { depth }, signal }),
+  streamAnalysis: (id, depth, signal) => streamAnalysisWithFallback(id, depth, signal),
   analyses: (id, signal) => request(`${assetPath(id)}/analyses`, { signal }),
   snapshot: (id, signal) => request(`${assetPath(id)}/snapshot`, { signal }),
 

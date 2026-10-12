@@ -2,41 +2,50 @@
 //! puntuación determinista.
 //!
 //! ```text
-//!  snapshot ─▶ saneado ─▶ puntuación (Rust) ─▶ contexto <market_data> (presupuesto de tokens)
-//!      ├─ quick:    [analista combinado] ───────────────────────────────▶ juez
-//!      ├─ standard: [técnico][fundamental][sentimiento][macro/riesgo] ──▶ juez
-//!      └─ deep:     [técnico][fundamental][sentimiento][macro/riesgo] ─▶ [abogado alcista][abogado bajista] ─▶ juez
+//!  snapshot ─▶ saneado ─▶ puntuación + niveles (Rust) ─▶ contexto por etapa (solo lo que necesita)
+//!      ├─ quick:    [analista combinado] ────────────────────────────────▶ juez ─▶ verificación
+//!      ├─ standard: [técnico][fundamental][sentimiento][macro/riesgo] ───▶ juez ─▶ verificación
+//!      └─ deep:     [técnico][fundamental][sentimiento][macro/riesgo] ─▶ [abogado alcista][abogado bajista] ─▶ juez ─▶ verificación
 //! ```
 //!
 //! Cada etapa devuelve JSON con esquema (`format` de Ollama). Entre etapa y etapa, Rust comprueba
 //! cada cifra contra el contexto (`fidelity`) y descarta lo que no esté: el juez solo ve
-//! afirmaciones verificadas, y el `Analysis` final lleva fuente y marca de tiempo en cada una.
+//! afirmaciones verificadas. Entrada, stop, objetivos, escenarios (precios) y tamaño de posición
+//! los calcula Rust (`levels`), no el modelo. Tras el juez: tesis específica (si es genérica, un
+//! reintento), verificación de cifras y revisión de redacción (`lint`; el modelo solo corrige si
+//! hay algo sospechoso).
 
+mod gaps;
+mod levels;
+mod lint;
 mod prompts;
 mod types;
 mod verify;
 
 use std::{
-    sync::atomic::{AtomicU64, Ordering},
     sync::Arc,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use chrono::{NaiveDate, Utc};
 use domain::{
-    Analysis, AnalysisDepth, AssetSnapshot, Catalyst, DomainError, Horizon, KeyLevels, ModelTier, Result,
-    ScoreBreakdown, Verdict,
+    Analysis, AnalysisDepth, AnalysisEvent, AssetSnapshot, Catalyst, DomainError, Horizon, ModelTier, Result,
+    Scenario, ScoreBreakdown, Verdict,
 };
 use futures::{FutureExt, StreamExt, future::BoxFuture, stream};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
+use tokio::sync::mpsc::UnboundedSender;
 
 use self::{
-    types::{Claim, DebateReport, JudgeOut, StageReport, debate_schema, judge_schema, stage_schema},
+    levels::LevelPlan,
+    types::{Claim, DebateReport, JudgeOut, Rewrite, StageReport, debate_schema, judge_schema, rewrite_schema, stage_schema},
     verify::{Checked, Verifier, calibrate},
 };
 use crate::{
     config::AiConfig,
-    context::{ContextOptions, build_context, NewsRegistry},
+    context::{ContextOptions, NewsRegistry, Sections, build_context, build_context_sections},
+    fidelity::{Segment, extract_numbers},
     lang::{Lang, tr},
     models::{ModelCaps, ModelManager},
     ollama::{ChatParams, OllamaClient, WireMessage},
@@ -77,10 +86,68 @@ struct Usage {
     calls: AtomicU64,
 }
 
+/// Ids estables de las etapas del progreso (contrato de `AnalysisEvent::Stage`).
+fn steps(depth: AnalysisDepth) -> Vec<&'static str> {
+    match depth {
+        AnalysisDepth::Quick => vec!["snapshot", "technical", "judge", "verify"],
+        AnalysisDepth::Standard => vec!["snapshot", "technical", "fundamental", "sentiment", "macro_risk", "judge", "verify"],
+        AnalysisDepth::Deep => {
+            vec!["snapshot", "technical", "fundamental", "sentiment", "macro_risk", "debate", "judge", "verify"]
+        }
+    }
+}
+
+fn step_label(id: &str, depth: AnalysisDepth, lang: Lang) -> &'static str {
+    match id {
+        "snapshot" => lang.t("Preparando datos, puntuación y niveles", "Preparing data, scores and levels"),
+        "technical" if depth == AnalysisDepth::Quick => {
+            lang.t("Análisis combinado: técnico, fundamental, noticias y macro", "Combined analysis: technical, fundamental, news and macro")
+        }
+        "technical" => lang.t("Análisis técnico", "Technical analysis"),
+        "fundamental" => lang.t("Análisis fundamental y valoración", "Fundamental and valuation analysis"),
+        "sentiment" => lang.t("Noticias y sentimiento", "News and sentiment"),
+        "macro_risk" => lang.t("Entorno macro y riesgo", "Macro environment and risk"),
+        "debate" => lang.t("Debate: caso alcista contra caso bajista", "Debate: bull case against bear case"),
+        "judge" => lang.t("Veredicto del juez", "Judge's verdict"),
+        _ => lang.t("Verificando cifras y redacción", "Verifying figures and wording"),
+    }
+}
+
+/// Emisor de progreso (no hace nada si nadie escucha).
+#[derive(Clone)]
+struct Progress {
+    tx: Option<UnboundedSender<AnalysisEvent>>,
+    steps: Vec<&'static str>,
+    depth: AnalysisDepth,
+    lang: Lang,
+}
+
+impl Progress {
+    fn at(&self, id: &str) {
+        let Some(tx) = &self.tx else { return };
+        let Some(pos) = self.steps.iter().position(|s| *s == id) else { return };
+        let _ = tx.send(AnalysisEvent::Stage {
+            stage: id.to_string(),
+            label: step_label(id, self.depth, self.lang).to_string(),
+            index: pos as u32 + 1,
+            total: self.steps.len() as u32,
+        });
+    }
+}
+
 pub struct AnalysisEngine {
     client: OllamaClient,
     models: Arc<ModelManager>,
     cfg: AiConfig,
+}
+
+/// Cifras distintas mínimas que debe citar la tesis según la profundidad.
+fn min_figures(depth: AnalysisDepth) -> usize {
+    match depth {
+        AnalysisDepth::Quick => 5,
+        AnalysisDepth::Standard => 7,
+        AnalysisDepth::Deep => 9,
+    }
 }
 
 impl AnalysisEngine {
@@ -119,8 +186,7 @@ impl AnalysisEngine {
         }
     }
 
-    /// Llamada con salida estructurada: valida el JSON y, si falla, reintenta una vez pidiéndole
-    /// al modelo que lo repare.
+    /// Llamada con salida estructurada desde un system y un user.
     async fn structured<T: DeserializeOwned>(
         &self,
         caps: &ModelCaps,
@@ -130,7 +196,20 @@ impl AnalysisEngine {
         max_tokens: u32,
         usage: &Usage,
     ) -> std::result::Result<T, CallError> {
-        let mut messages = vec![WireMessage::system(system), WireMessage::user(user)];
+        let messages = vec![WireMessage::system(system), WireMessage::user(user)];
+        self.structured_from(caps, messages, schema, max_tokens, usage).await.map(|(v, _)| v)
+    }
+
+    /// Llamada con salida estructurada: valida el JSON y, si falla, reintenta una vez pidiéndole
+    /// al modelo que lo repare. Devuelve también el texto crudo de la respuesta válida.
+    async fn structured_from<T: DeserializeOwned>(
+        &self,
+        caps: &ModelCaps,
+        mut messages: Vec<WireMessage>,
+        schema: &Value,
+        max_tokens: u32,
+        usage: &Usage,
+    ) -> std::result::Result<(T, String), CallError> {
         let mut last_err = String::new();
         for attempt in 0..2 {
             let mut params = self.base_params(caps, messages.clone(), Some(max_tokens));
@@ -148,7 +227,7 @@ impl AnalysisEngine {
             usage.prompt.fetch_add(u64::from(out.usage.prompt_tokens.unwrap_or(0)), Ordering::Relaxed);
             usage.completion.fetch_add(u64::from(out.usage.completion_tokens.unwrap_or(0)), Ordering::Relaxed);
             match parse_json::<T>(&out.content) {
-                Ok(v) => return Ok(v),
+                Ok(v) => return Ok((v, out.content)),
                 Err(e) => {
                     tracing::debug!(attempt, error = %e, "JSON del modelo no válido");
                     last_err = e;
@@ -164,37 +243,70 @@ impl AnalysisEngine {
 
     /// Ejecuta el análisis completo.
     pub async fn analyze(&self, snapshot: &AssetSnapshot, depth: Option<AnalysisDepth>) -> Result<Analysis> {
+        self.analyze_progress(snapshot, depth, None).await
+    }
+
+    /// Como `analyze`, enviando el progreso por `events` (si hay receptor).
+    pub async fn analyze_progress(
+        &self,
+        snapshot: &AssetSnapshot,
+        depth: Option<AnalysisDepth>,
+        events: Option<UnboundedSender<AnalysisEvent>>,
+    ) -> Result<Analysis> {
         let model = self.models.active().await;
         let caps = self.models.caps(&model).await;
         let depth = depth.unwrap_or_else(|| default_depth(&caps));
         let lang = self.lang();
         let started = std::time::Instant::now();
+        let prog = Progress { tx: events, steps: steps(depth), depth, lang };
 
+        // --- Datos, puntuación y niveles (todo en Rust) ---
+        prog.at("snapshot");
         let snap = sanitize_snapshot(snapshot);
         let card = scoring::score(&snap, lang);
         let mut registry = NewsRegistry::new();
-        // El contexto ocupa ~40 % de la ventana: el resto es para el system, las etapas previas
-        // (resumen) y la respuesta.
+        // Cada contexto ocupa como mucho ~40 % de la ventana: el resto es para el system, las
+        // etapas previas (resumen) y la respuesta.
         let max_tokens = (self.cfg.num_ctx as usize * 40 / 100).clamp(1200, 16_000);
-        let built = build_context(&snap, &card, &ContextOptions { max_tokens, lang }, &mut registry);
+        let opts = ContextOptions { max_tokens, lang };
+        // Contexto completo: fija la numeración de noticias y es el índice de verificación.
+        let built = build_context(&snap, &card, &opts, &mut registry);
+        let stage_ctx = |sec: &Sections| build_context_sections(&snap, &card, &opts, &mut registry.clone(), sec).text;
         let lang_code = self.cfg.lang_code();
         let system = system_prompt(&lang_code);
-        let prefix = data_block(&built.text);
+        // Niveles: dos planes porque dependen del veredicto final (esperar ≠ comprar).
+        let plan_now = levels::plan(&snap, Verdict::Accumulate, lang);
+        let plan_wait = levels::plan(&snap, Verdict::Wait, lang);
+        let levels_block = levels_block(plan_now.as_ref(), plan_wait.as_ref(), lang);
+
         let mut v = Verifier::new(&built.text, &snap, &built.news, lang);
+        v.idx.add_text(&levels_block, Segment::Levels);
         let usage = Usage::default();
         let mut stage_notes: Vec<String> = Vec::new();
 
-        // --- Etapas de análisis (independientes entre sí) ---
+        // --- Etapas de análisis (independientes entre sí, cada una con su contexto) ---
         let stages = stage_plan(depth);
         let par = self.cfg.parallel.max(1);
         let futs: Vec<BoxFuture<'_, (usize, std::result::Result<StageReport, CallError>)>> = stages
             .iter()
             .enumerate()
             .map(|(i, st)| {
-                let user = format!("{prefix}{}", prompts::with_language(st.task(), &lang_code));
-                let schema = stage_schema(st.combined(), if st.combined() { 8 } else { 5 });
-                let (system, caps, usage) = (&system, &caps, &usage);
-                async move { (i, self.structured::<StageReport>(caps, system, user, &schema, 900, usage).await) }.boxed()
+                let ctx = match st {
+                    Stage::Combined => built.text.clone(),
+                    Stage::Technical => stage_ctx(&Sections::technical()),
+                    Stage::Fundamental => stage_ctx(&Sections::fundamental()),
+                    Stage::Sentiment => stage_ctx(&Sections::sentiment()),
+                    Stage::MacroRisk => stage_ctx(&Sections::macro_risk()),
+                };
+                let user = format!("{}{}", data_block(&ctx), prompts::with_language(st.task(), &lang_code));
+                let schema = stage_schema(st.combined(), if st.combined() { 6 } else { 4 });
+                let (system, caps, usage, prog) = (&system, &caps, &usage, &prog);
+                let id = st.id();
+                async move {
+                    prog.at(id);
+                    (i, self.structured::<StageReport>(caps, system, user, &schema, 600, usage).await)
+                }
+                .boxed()
             })
             .collect();
         let results: Vec<_> = stream::iter(futs).buffer_unordered(par).collect().await;
@@ -217,25 +329,26 @@ impl AnalysisEngine {
 
         // Verificación de cada hallazgo y digest para el juez.
         let mut digest = String::new();
-        let mut analyst_missing: Vec<String> = Vec::new();
         for (st, rep) in stages.iter().zip(&reports) {
             let Some(rep) = rep else { continue };
             let checked: Vec<Checked> = rep.findings.iter().filter_map(|c| v.claim(c)).collect();
-            analyst_missing.extend(rep.missing.iter().map(|m| truncate_chars(m, 160)));
             digest.push_str(&render_stage(st.label(lang), rep, &checked, lang));
         }
 
         // --- Abogados del diablo (solo deep) ---
         let debated = depth == AnalysisDepth::Deep && !digest.is_empty();
         if debated {
-            let tasks = [("bull", prompts::bull_task(&digest)), ("bear", prompts::bear_task(&digest))];
+            prog.at("debate");
+            let tasks = [prompts::bull_task(&digest), prompts::bear_task(&digest)];
+            // Contexto compacto (cotización + indicadores): lo demás ya está en el digest.
+            let debate_ctx = stage_ctx(&Sections::judge());
             let futs: Vec<BoxFuture<'_, (usize, std::result::Result<DebateReport, CallError>)>> = tasks
                 .iter()
                 .enumerate()
-                .map(|(i, (_, task))| {
-                    let user = format!("{prefix}{}", prompts::with_language(task.clone(), &lang_code));
+                .map(|(i, task)| {
+                    let user = format!("{}{}", data_block(&debate_ctx), prompts::with_language(task.clone(), &lang_code));
                     let (system, caps, usage) = (&system, &caps, &usage);
-                    async move { (i, self.structured::<DebateReport>(caps, system, user, &debate_schema(), 800, usage).await) }.boxed()
+                    async move { (i, self.structured::<DebateReport>(caps, system, user, &debate_schema(), 450, usage).await) }.boxed()
                 })
                 .collect();
             let results: Vec<_> = stream::iter(futs).buffer_unordered(par).collect().await;
@@ -272,63 +385,126 @@ impl AnalysisEngine {
         }
 
         // --- Juez ---
-        let judge_user = format!("{prefix}{}", prompts::with_language(prompts::judge_task(lang, &digest, card.verdict, debated), &lang_code));
-        let judge_max = self.cfg.max_output_tokens.unwrap_or(2048).max(1500);
-        let judged = self.structured::<JudgeOut>(&caps, &system, judge_user, &judge_schema(), judge_max, &usage).await;
+        prog.at("judge");
+        let deep = depth == AnalysisDepth::Deep;
+        let judge_ctx = format!("{}\n{levels_block}", stage_ctx(&Sections::judge()));
+        let judge_user = format!(
+            "{}{}",
+            data_block(&judge_ctx),
+            prompts::with_language(prompts::judge_task(lang, &digest, card.verdict, debated, deep, &lang_code), &lang_code)
+        );
+        let judge_max = self.cfg.max_output_tokens.unwrap_or(2048).max(if deep { 2600 } else { 1800 });
+        let schema = judge_schema(deep);
+        let msgs = vec![WireMessage::system(&system), WireMessage::user(judge_user)];
+        let mut quality_notes: Vec<String> = Vec::new();
+        let mut generic_penalty = 0usize;
+        let mut judged = self.structured_from::<JudgeOut>(&caps, msgs.clone(), &schema, judge_max, &usage).await;
+        if let Ok((j, raw)) = &judged {
+            let min = min_figures(depth);
+            let spec = lint::specificity(&j.thesis);
+            if spec.is_generic(min) {
+                tracing::info!(figures = spec.figures, boilerplate = spec.boilerplate.len(), "tesis genérica: se pide reescribirla");
+                let mut retry = msgs;
+                retry.push(WireMessage::assistant(truncate_chars(raw, 7000)));
+                retry.push(WireMessage::user(prompts::specificity_request(&spec.feedback(min), min)));
+                match self.structured_from::<JudgeOut>(&caps, retry, &schema, judge_max, &usage).await {
+                    Err(CallError::Fatal(e)) => return Err(e),
+                    Err(CallError::Invalid(_)) => generic_penalty = 1,
+                    Ok((j2, raw2)) => {
+                        let spec2 = lint::specificity(&j2.thesis);
+                        if spec2.figures >= spec.figures {
+                            if spec2.is_generic(min) {
+                                generic_penalty = 1;
+                            }
+                            judged = Ok((j2, raw2));
+                        } else {
+                            generic_penalty = 1;
+                        }
+                    }
+                }
+                if generic_penalty > 0 {
+                    quality_notes.push(tr!(
+                        lang,
+                        "La tesis sigue siendo poco específica tras un reintento: se redujo la confianza.",
+                        "The thesis is still not specific enough after a retry: confidence was reduced."
+                    ));
+                }
+            }
+        }
+
+        // --- Verificación: redacción (solo llama al modelo si hay algo sospechoso) ---
+        prog.at("verify");
+        let judged = match judged {
+            Ok((mut j, _)) => {
+                if let Some(note) = self.fix_wording(&caps, &system, &lang_code, &mut j, &usage).await? {
+                    quality_notes.push(note);
+                }
+                Ok(j)
+            }
+            Err(e) => Err(e),
+        };
 
         let (mut analysis, used_fallback) = match judged {
-            Ok(j) => (assemble(j, &snap, &card, &mut v, lang), false),
+            Ok(j) => (assemble(j, &snap, &card, &mut v, lang, deep), false),
             Err(CallError::Fatal(e)) => return Err(e),
             Err(CallError::Invalid(e)) => {
                 tracing::warn!(error = %e, "el juez no produjo JSON válido: se usa la puntuación determinista");
                 (fallback(&snap, &card, &mut v, lang), true)
             }
         };
+        v.dropped += generic_penalty;
+        if generic_penalty > 0 && !used_fallback {
+            analysis.confidence = (analysis.confidence - 0.05).clamp(0.05, 0.85);
+        }
+
+        // --- Niveles y tamaño de posición: Rust, con el veredicto definitivo ---
+        let plan = levels::plan(&snap, analysis.verdict, lang);
+        if let Some(plan) = &plan {
+            analysis.key_levels = plan.key_levels(&snap);
+            analysis.levels_note = Some(plan.note());
+            analysis.position_sizing = levels::sizing(plan, &snap, &card, analysis.verdict, lang);
+            if let Some(sc) = analysis.scenarios.as_mut() {
+                price_scenarios(sc, plan, analysis_price(&snap), lang);
+                analysis.expected_return_pct = expected_return(sc);
+            }
+        } else {
+            analysis.levels_note = Some(tr!(
+                lang,
+                "Sin precio actual en los datos: no se calculan entrada, stop ni objetivos.",
+                "No current price in the data: entry, stop and targets are not computed."
+            ));
+        }
+        if let Some(ps) = &analysis.position_sizing {
+            let line = format!("{}: {}", lang.t("Tamaño de posición (orientativo)", "Position size (indicative)"), ps.rationale);
+            analysis.strategy = Some(match analysis.strategy.take() {
+                Some(s) if !s.is_empty() => format!("{s}\n{line}"),
+                _ => line,
+            });
+        }
 
         // --- Avisos y metadatos ---
-        let mut warnings: Vec<String> = Vec::new();
-        let push = |w: String, out: &mut Vec<String>| {
-            if !w.trim().is_empty() && !out.contains(&w) {
-                out.push(w);
+        let mut notes: Vec<String> = Vec::new();
+        for w in v.warnings.iter().chain(&stage_notes).chain(&built.trimmed).chain(&quality_notes) {
+            if !w.trim().is_empty() && !notes.contains(w) {
+                notes.push(w.clone());
             }
-        };
-        for m in &snap.missing {
-            push(m.clone(), &mut warnings);
-        }
-        for g in &card.gaps {
-            push(g.clone(), &mut warnings);
-        }
-        for m in analyst_missing.iter().chain(analysis.data_warnings.clone().iter()) {
-            push(m.clone(), &mut warnings);
-        }
-        for w in v.warnings.iter().chain(&stage_notes).chain(&built.trimmed) {
-            push(w.clone(), &mut warnings);
         }
         if used_fallback {
-            push(
-                tr!(lang, "El modelo no devolvió un JSON válido ni tras reintentarlo: se muestra el veredicto de la puntuación cuantitativa, sin análisis del LLM.", "The model did not return valid JSON even after a retry: showing the quantitative score's verdict, without LLM analysis."),
-                &mut warnings,
-            );
+            notes.push(tr!(lang, "El modelo no devolvió un JSON válido ni tras reintentarlo: se muestra el veredicto de la puntuación cuantitativa, sin análisis del LLM.", "The model did not return valid JSON even after a retry: showing the quantitative score's verdict, without LLM analysis."));
         }
-        push(
-            tr!(
-                lang,
-                "Método: modelo {}, profundidad {}, {} llamadas, {} tokens de entrada y {} de salida, {:.0} s.",
-                "Method: model {}, depth {}, {} calls, {} input and {} output tokens, {:.0} s.",
-                caps.id,
-                depth_name(depth),
-                usage.calls.load(Ordering::Relaxed),
-                usage.prompt.load(Ordering::Relaxed),
-                usage.completion.load(Ordering::Relaxed),
-                started.elapsed().as_secs_f32()
-            ),
-            &mut warnings,
-        );
-        push(
-            tr!(lang, "Análisis automatizado con un modelo de IA local: no es asesoramiento financiero. Puede contener errores.", "Automated analysis by a local AI model: not financial advice. It may contain errors."),
-            &mut warnings,
-        );
-        analysis.data_warnings = warnings;
+        analysis.data_warnings = gaps::real_gaps(&snap, &card, lang);
+        analysis.quality_notes = Some(notes);
+        analysis.method = Some(tr!(
+            lang,
+            "Modelo {}, profundidad {}, {} llamadas, {} tokens de entrada y {} de salida, {:.0} s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+            "Model {}, depth {}, {} calls, {} input and {} output tokens, {:.0} s. Automated analysis by a local AI model: not financial advice, it may contain errors.",
+            caps.id,
+            depth_name(depth),
+            usage.calls.load(Ordering::Relaxed),
+            usage.prompt.load(Ordering::Relaxed),
+            usage.completion.load(Ordering::Relaxed),
+            started.elapsed().as_secs_f32()
+        ));
         analysis.sources = v.sources();
         analysis.model = caps.id.clone();
         analysis.asset = snap.summary.id.clone();
@@ -338,6 +514,118 @@ impl AnalysisEngine {
         analysis.generated_at = Utc::now();
         Ok(analysis)
     }
+
+    /// Revisa la redacción del juez; si hay palabras inexistentes, otro alfabeto, inglés colado…
+    /// pide al modelo (una sola llamada) que corrija solo esos textos. Si no hay nada sospechoso
+    /// no cuesta ninguna llamada. Devuelve un aviso si quedan problemas sin corregir.
+    async fn fix_wording(
+        &self,
+        caps: &ModelCaps,
+        system: &str,
+        lang_code: &str,
+        j: &mut JudgeOut,
+        usage: &Usage,
+    ) -> Result<Option<String>> {
+        if lang_code != "es" {
+            return Ok(None);
+        }
+        let flagged: Vec<(usize, Vec<String>)> = judge_texts_mut(j)
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| {
+                let issues: Vec<String> = lint::spanish_issues(t).into_iter().map(|x| x.what).collect();
+                (!issues.is_empty()).then_some((i, issues))
+            })
+            .take(8)
+            .collect();
+        if flagged.is_empty() {
+            return Ok(None);
+        }
+        let items: Vec<(String, Vec<String>)> = {
+            let texts = judge_texts_mut(j);
+            flagged.iter().map(|(i, iss)| (texts[*i].clone(), iss.clone())).collect()
+        };
+        tracing::info!(n = items.len(), "redacción sospechosa: se pide corregirla");
+        let user = prompts::rewrite_task(lang_code, &items);
+        let fixed = self
+            .structured::<Rewrite>(caps, system, user, &rewrite_schema(items.len()), 1400, usage)
+            .await;
+        let mut remaining = Vec::new();
+        match fixed {
+            Err(CallError::Fatal(e)) => return Err(e),
+            Err(CallError::Invalid(_)) => remaining.extend(items.iter().flat_map(|(_, iss)| iss.clone())),
+            Ok(r) => {
+                let mut texts = judge_texts_mut(j);
+                for (k, (idx, _)) in flagged.iter().enumerate() {
+                    let (old, _) = &items[k];
+                    let Some(new) = r.texts.get(k) else { continue };
+                    let new = new.trim();
+                    // Solo se acepta si las cifras y citas no cambian y mejora la redacción.
+                    let same_numbers = numbers_of(old) == numbers_of(new);
+                    let better = lint::spanish_issues(new).len() < lint::spanish_issues(old).len();
+                    if same_numbers && better && !new.is_empty() {
+                        *texts[*idx] = new.to_string();
+                    }
+                }
+                for (idx, _) in &flagged {
+                    remaining.extend(lint::spanish_issues(texts[*idx]).into_iter().map(|x| x.what));
+                }
+            }
+        }
+        remaining.dedup();
+        Ok((!remaining.is_empty()).then(|| {
+            format!(
+                "Posibles errores de redacción que no se pudieron corregir: {}.",
+                remaining.into_iter().take(4).collect::<Vec<_>>().join("; ")
+            )
+        }))
+    }
+}
+
+/// Cifras y citas de un texto, para comprobar que una reescritura no las toca.
+fn numbers_of(t: &str) -> Vec<String> {
+    let mut v: Vec<String> = extract_numbers(t).into_iter().filter(|n| !n.exempt).map(|n| n.raw).collect();
+    v.extend(crate::context::extract_citations(t).into_iter().map(|n| format!("N{n}")));
+    v.sort();
+    v
+}
+
+/// Todos los textos redactados por el juez, en un orden estable.
+fn judge_texts_mut(j: &mut JudgeOut) -> Vec<&mut String> {
+    let mut v: Vec<&mut String> = vec![&mut j.summary, &mut j.thesis, &mut j.horizon_note, &mut j.entry_strategy, &mut j.exit_strategy, &mut j.uncertainty];
+    v.extend(j.bull_case.iter_mut().map(|c| &mut c.text));
+    v.extend(j.bear_case.iter_mut().map(|c| &mut c.text));
+    v.extend(j.risks.iter_mut().map(|c| &mut c.text));
+    v.extend(j.would_change_if.iter_mut());
+    v.extend(j.scenarios.iter_mut().map(|s| &mut s.description));
+    v.extend(j.catalysts.iter_mut().map(|c| &mut c.description));
+    v
+}
+
+fn levels_block(now: Option<&LevelPlan>, wait: Option<&LevelPlan>, lang: Lang) -> String {
+    let Some(now) = now else { return String::new() };
+    let mut s = now.prompt_block(lang);
+    if let Some(w) = wait
+        && let Some((a, b)) = w.entry_zone
+    {
+        s.push_str(&tr!(
+            lang,
+            "Si el veredicto es esperar: zona de entrada {} – {}{}.\n",
+            "If the verdict is wait: entry zone {} – {}{}.\n",
+            crate::fmt::price(a),
+            crate::fmt::price(b),
+            w.stop_loss.map(|x| format!(", stop {}", crate::fmt::price(x))).unwrap_or_default()
+        ));
+    }
+    s.push_str(lang.t(
+        "Con reducir o evitar no hay entrada, stop ni objetivos.\n",
+        "With reduce or avoid there is no entry, stop or targets.\n",
+    ));
+    s
+}
+
+fn analysis_price(snap: &AssetSnapshot) -> Option<f64> {
+    snap.quote.as_ref().map(|q| q.price).filter(|p| p.is_finite() && *p > 0.0)
 }
 
 pub fn depth_name(d: AnalysisDepth) -> &'static str {
@@ -369,6 +657,14 @@ impl Stage {
     }
     fn combined(self) -> bool {
         self == Self::Combined
+    }
+    fn id(self) -> &'static str {
+        match self {
+            Self::Technical | Self::Combined => "technical",
+            Self::Fundamental => "fundamental",
+            Self::Sentiment => "sentiment",
+            Self::MacroRisk => "macro_risk",
+        }
     }
     fn label(self, l: Lang) -> &'static str {
         match self {
@@ -408,16 +704,62 @@ fn render_stage(label: &str, rep: &StageReport, checked: &[Checked], lang: Lang)
     s
 }
 
+/// Normaliza probabilidades a enteros que suman exactamente 100 (método del mayor resto).
+fn normalize_probabilities(p: &[f32]) -> Vec<f32> {
+    let clean: Vec<f64> = p.iter().map(|x| if x.is_finite() { f64::from(x.max(0.0)) } else { 0.0 }).collect();
+    let total: f64 = clean.iter().sum();
+    if total <= 0.0 {
+        return vec![];
+    }
+    let exact: Vec<f64> = clean.iter().map(|x| x / total * 100.0).collect();
+    let mut floors: Vec<f64> = exact.iter().map(|x| x.floor()).collect();
+    let mut left = 100.0 - floors.iter().sum::<f64>();
+    let mut order: Vec<usize> = (0..exact.len()).collect();
+    order.sort_by(|a, b| (exact[*b] - floors[*b]).total_cmp(&(exact[*a] - floors[*a])));
+    for i in order {
+        if left < 0.5 {
+            break;
+        }
+        floors[i] += 1.0;
+        left -= 1.0;
+    }
+    floors.into_iter().map(|x| x as f32).collect()
+}
+
+fn price_scenarios(sc: &mut [Scenario], plan: &LevelPlan, price: Option<f64>, lang: Lang) {
+    let lv = levels::scenario_levels(plan, lang);
+    for s in sc.iter_mut() {
+        let l = match s.kind.as_str() {
+            "bullish" => lv.bullish.clone(),
+            "base" => lv.base.clone(),
+            _ => lv.bearish.clone(),
+        };
+        if let Some(l) = l {
+            s.target_price = Some(l.value);
+            s.target_basis = Some(l.basis);
+            s.return_pct = price.map(|p| ((l.value / p - 1.0) * 1000.0).round() / 10.0);
+        }
+    }
+}
+
+fn expected_return(sc: &[Scenario]) -> Option<f64> {
+    if sc.is_empty() || sc.iter().any(|s| s.return_pct.is_none()) {
+        return None;
+    }
+    let e: f64 = sc.iter().map(|s| f64::from(s.probability) / 100.0 * s.return_pct.unwrap_or(0.0)).sum();
+    Some((e * 10.0).round() / 10.0)
+}
+
 /// Convierte la salida del juez (ya sin confiar en ella) en un `Analysis` parcial: el llamador
-/// completa id, fuentes, avisos, modelo y marcas de tiempo.
-fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifier<'_>, lang: Lang) -> Analysis {
+/// completa id, fuentes, avisos, niveles, modelo y marcas de tiempo.
+fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifier<'_>, lang: Lang, deep: bool) -> Analysis {
     let claims = |list: &[Claim], v: &mut Verifier<'_>| -> Vec<String> { list.iter().filter_map(|c| v.claim(c)).map(|c| c.text).collect() };
     let bull_case = claims(&j.bull_case, v);
     let bear_case = claims(&j.bear_case, v);
     let risks = claims(&j.risks, v);
 
     let summary = v.prose(&j.summary, lang.t("resumen", "summary"));
-    let mut thesis = v.prose(&j.thesis, lang.t("tesis", "thesis"));
+    let mut thesis = v.prose_cited(&j.thesis, lang.t("tesis", "thesis"));
     if !j.uncertainty.trim().is_empty() {
         let u = v.prose(&j.uncertainty, lang.t("incertidumbre", "uncertainty"));
         thesis.push_str(&format!("\n\n{}: {u}", lang.t("Incertidumbre", "Uncertainty")));
@@ -427,12 +769,12 @@ fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifie
         thesis.push_str(&format!("\n\n{}:\n", lang.t("La conclusión cambiaría si", "The conclusion would change if")));
         thesis.push_str(&change.iter().map(|c| format!("- {c}")).collect::<Vec<_>>().join("\n"));
     }
+    let horizon_note = (!j.horizon_note.trim().is_empty()).then(|| v.prose(&j.horizon_note, lang.t("horizonte", "horizon")));
 
     let mut strategy_parts = Vec::new();
     for (label, text, field) in [
         (lang.t("Entrada", "Entry"), &j.entry_strategy, "entrada"),
         (lang.t("Salida", "Exit"), &j.exit_strategy, "salida"),
-        (lang.t("Tamaño de posición (orientativo)", "Position size (indicative)"), &j.position_sizing, "tamaño"),
     ] {
         if !text.trim().is_empty() {
             strategy_parts.push(format!("{label}: {}", v.prose(text, field)));
@@ -450,9 +792,10 @@ fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifie
         })
         .collect();
 
-    let key_levels = v.levels(&j.key_levels, j.verdict);
+    // Escenarios (deep): tres tipos distintos, probabilidades normalizadas a 100.
+    let scenarios = if deep { build_scenarios(&j, v, lang) } else { None };
+
     let confidence = calibrate(j.confidence, card, j.verdict, v.dropped, v.marked);
-    let missing: Vec<String> = j.missing_data.iter().map(|m| truncate_chars(m, 200)).collect();
 
     Analysis {
         id: String::new(),
@@ -467,18 +810,51 @@ fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifie
         bear_case,
         risks,
         catalysts,
-        key_levels,
+        key_levels: Default::default(),
         strategy: (!strategy_parts.is_empty()).then(|| strategy_parts.join("\n")),
-        data_warnings: missing,
+        data_warnings: vec![],
         sources: vec![],
         price_at_analysis: None,
         model: String::new(),
         generated_at: Utc::now(),
+        levels_note: None,
+        scenarios,
+        expected_return_pct: None,
+        would_change_if: Some(change),
+        horizon_note,
+        position_sizing: None,
+        method: None,
+        quality_notes: None,
     }
 }
 
+fn build_scenarios(j: &JudgeOut, v: &mut Verifier<'_>, lang: Lang) -> Option<Vec<Scenario>> {
+    let mut out: Vec<(String, f32, String)> = Vec::new();
+    for kind in ["bullish", "base", "bearish"] {
+        let s = j.scenarios.iter().find(|s| s.kind == kind)?;
+        out.push((kind.to_string(), s.probability, s.description.clone()));
+    }
+    let probs = normalize_probabilities(&out.iter().map(|o| o.1).collect::<Vec<_>>());
+    if probs.len() != 3 {
+        return None;
+    }
+    Some(
+        out.into_iter()
+            .zip(probs)
+            .map(|((kind, _, desc), probability)| Scenario {
+                description: v.prose(&desc, lang.t("escenario", "scenario")),
+                kind,
+                probability,
+                target_price: None,
+                target_basis: None,
+                return_pct: None,
+            })
+            .collect(),
+    )
+}
+
 /// Análisis construido solo con la puntuación determinista (si el LLM no da JSON válido).
-fn fallback(snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifier<'_>, lang: Lang) -> Analysis {
+fn fallback(snap: &AssetSnapshot, card: &Scorecard, _v: &mut Verifier<'_>, lang: Lang) -> Analysis {
     let reasons: Vec<String> = card.verdict_reasons.iter().take(4).cloned().collect();
     let summary = tr!(
         lang,
@@ -502,23 +878,21 @@ fn fallback(snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifier<'_>, lang: 
         bear_case: vec![],
         risks: vec![],
         catalysts: vec![],
-        key_levels: v.levels(&types::LevelsOut::default(), Verdict::Wait).into_levels_only(),
+        key_levels: Default::default(),
         strategy: None,
         data_warnings: vec![],
         sources: vec![],
         price_at_analysis: None,
         model: String::new(),
         generated_at: Utc::now(),
-    }
-}
-
-trait LevelsOnly {
-    fn into_levels_only(self) -> KeyLevels;
-}
-impl LevelsOnly for KeyLevels {
-    /// Sin juez no se proponen entrada, stop ni objetivos: solo los niveles que están en los datos.
-    fn into_levels_only(self) -> KeyLevels {
-        KeyLevels { entry_zone: None, stop_loss: None, targets: vec![], ..self }
+        levels_note: None,
+        scenarios: None,
+        expected_return_pct: None,
+        would_change_if: None,
+        horizon_note: None,
+        position_sizing: None,
+        method: None,
+        quality_notes: None,
     }
 }
 

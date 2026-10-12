@@ -1,12 +1,12 @@
 import { Check, Loader2, Sparkles, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useAnalyses, useGenerateAnalysis, useLatestAnalysis, useStatus } from '@/api/hooks'
-import type { AnalysisDepth, AssetSummary, Quote } from '@/api/types'
+import type { AnalysisDepth, AnalysisProgress, AssetSummary, Quote } from '@/api/types'
 import { ANALYSIS_DEPTHS } from '@/api/types'
 import { AnalysisReport } from '@/components/AnalysisReport'
 import { ErrorNotice, SkeletonRows } from '@/components/states'
 import { VERDICT_LABEL } from '@/lib/assets'
-import { formatDateTime, formatPercent, formatPrice, formatRelative } from '@/lib/format'
+import { formatDateTime, formatInt, formatPercent, formatPrice, formatRelative } from '@/lib/format'
 
 const DEPTH_INFO: Record<AnalysisDepth, { label: string; hint: string; typical: string }> = {
   quick: { label: 'Rápido', hint: 'Solo los datos ya reunidos; sin consultas extra.', typical: '≈ 10 s' },
@@ -14,35 +14,45 @@ const DEPTH_INFO: Record<AnalysisDepth, { label: string; hint: string; typical: 
   deep: { label: 'Profundo', hint: 'Más herramientas y verificaciones cruzadas del modelo.', typical: '60 s o más' },
 }
 
-const STAGES = ['Reuniendo datos en vivo', 'Calculando puntuaciones', 'El modelo redacta el análisis', 'Validando el resultado']
-
-function Progress({ depth, onCancel }: { depth: AnalysisDepth; onCancel: () => void }) {
+/** Etapas reales emitidas por el backend (`stage`), acumuladas por índice. */
+function Progress({ depth, stages, onCancel }: { depth: AnalysisDepth; stages: AnalysisProgress[]; onCancel: () => void }) {
   const [secs, setSecs] = useState(0)
   useEffect(() => {
     const t = setInterval(() => setSecs((s) => s + 1), 1000)
     return () => clearInterval(t)
   }, [])
-  const scale = depth === 'quick' ? 0.4 : depth === 'deep' ? 2 : 1
-  const stage = Math.min(STAGES.length - 1, Math.floor(secs / (8 * scale)))
+  const seen = stages
+  const progress = stages[stages.length - 1] ?? null
+  const now = progress?.stage
   return (
     <div className="panel stack" role="status" aria-live="polite">
       <div className="row">
         <Loader2 className="spin" aria-hidden="true" style={{ animation: 'spin 1s linear infinite' }} />
-        <strong className="grow">Generando análisis ({DEPTH_INFO[depth].label.toLowerCase()})</strong>
+        <strong className="grow">
+          Generando análisis ({DEPTH_INFO[depth].label.toLowerCase()})
+          {progress ? <span className="muted small"> · paso {formatInt(progress.index)} de {formatInt(progress.total)}</span> : null}
+        </strong>
         <span className="num muted">{secs} s</span>
         <button type="button" className="btn sm" onClick={onCancel}><X aria-hidden="true" /> Cancelar</button>
       </div>
       <div className="indet" />
-      <ol className="progress-steps">
-        {STAGES.map((s, i) => (
-          <li key={s} className={i < stage ? 'done' : i === stage ? 'now' : ''}>
-            {i < stage ? <Check size={14} aria-hidden="true" /> : <span style={{ width: 14 }} />} {s}
-          </li>
-        ))}
-      </ol>
+      {seen.length > 0 ? (
+        <ol className="progress-steps">
+          {seen.map((p) => (
+            <li key={p.stage} className={p.stage === now ? 'now' : 'done'}>
+              {p.stage === now ? <span style={{ width: 14 }} /> : <Check size={14} aria-hidden="true" />} {p.label}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="small muted">Conectando con el análisis…</p>
+      )}
       <p className="tiny muted">
-        El backend no informa del avance real: las etapas son orientativas según el tiempo transcurrido. Suele tardar {DEPTH_INFO[depth].typical}; en equipos modestos o con modelos grandes puede tardar bastante más.
-        Si cancelas, el servidor puede terminar y guardar el resultado igualmente.
+        {seen.length === 0 && secs >= 6
+          ? 'Todavía no ha llegado ninguna etapa: este backend puede no informar del avance. '
+          : ''}
+        Suele tardar {DEPTH_INFO[depth].typical}; en equipos modestos o con modelos grandes puede tardar bastante más.
+        Al cancelar se corta la conexión y el servidor deja de trabajar en el análisis.
       </p>
     </div>
   )
@@ -83,7 +93,7 @@ export function AnalysisPanel({ summary, quote }: { summary: AssetSummary; quote
         {llmDown ? <div className="notice warn" role="status">La IA local no está disponible{status.data?.llm.error ? `: ${status.data.llm.error}` : ''}. Arranca Ollama para generar análisis.</div> : null}
       </div>
 
-      {gen.isPending ? <Progress depth={depth} onCancel={gen.cancel} /> : null}
+      {gen.isPending ? <Progress depth={depth} stages={gen.stages} onCancel={gen.cancel} /> : null}
       {gen.isError && !(gen.error instanceof DOMException) && gen.error.name !== 'AbortError' ? (
         <ErrorNotice error={gen.error} onRetry={() => gen.mutate(depth)} title="No se pudo generar el análisis" />
       ) : null}

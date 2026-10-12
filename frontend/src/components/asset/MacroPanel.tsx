@@ -23,7 +23,7 @@ export function MacroPanel() {
                 <td>{m.name}</td>
                 <td className="r num">{formatNumber(m.value, 2)} {m.unit}</td>
                 <td className={`r num ${toneOf(m.change)}`}>{m.change === null ? '—' : formatNumber(m.change, 2)}</td>
-                <td><Provenance provider={m.source} asOf={m.asOf} stale={f.stale} staleReason={f.reason} label="" /></td>
+                <td><Provenance provider={m.source} asOf={m.asOf} href={m.sourceUrl} verifyUrl={m.sourceUrl} origin={m.timestampOrigin} stale={f.stale} staleReason={f.reason} label="" /></td>
               </tr>
             )
           })}

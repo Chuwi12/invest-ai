@@ -1,12 +1,12 @@
 import type {
   Analysis,
   AnalysisDepth,
+  AnalysisStreamEvent,
   AssetClass,
   AssetDetail,
   AssetId,
   AssetSnapshot,
   AssetSummary,
-  Candle,
   ChatEvent,
   Conversation,
   ConversationWithMessages,
@@ -15,6 +15,7 @@ import type {
   Favorite,
   Fundamentals,
   Health,
+  HistoryResult,
   Indicators,
   Interval,
   MacroContext,
@@ -43,7 +44,7 @@ export interface Api {
   asset(id: AssetId, signal?: AbortSignal): Promise<AssetDetail>
   quote(id: AssetId, signal?: AbortSignal): Promise<Quote>
   quotes(ids: AssetId[], signal?: AbortSignal): Promise<Quote[]>
-  history(id: AssetId, range: Range, interval?: Interval, signal?: AbortSignal): Promise<Candle[]>
+  history(id: AssetId, range: Range, interval?: Interval, signal?: AbortSignal): Promise<HistoryResult>
   indicators(id: AssetId, signal?: AbortSignal): Promise<Indicators>
   fundamentals(id: AssetId, signal?: AbortSignal): Promise<Fundamentals | null>
   news(id: AssetId, limit?: number, signal?: AbortSignal): Promise<NewsItem[]>
@@ -53,6 +54,11 @@ export interface Api {
   latestAnalysis(id: AssetId, signal?: AbortSignal): Promise<Analysis | null>
   /** Puede tardar 10–60 s (más con `deep`). */
   generateAnalysis(id: AssetId, depth: AnalysisDepth, signal?: AbortSignal): Promise<Analysis>
+  /**
+   * SSE `POST /assets/{id}/analysis/stream`: itera `stage`* y termina con `done` o `error`.
+   * Si el backend responde 404 cae al POST normal (solo emite `done`). Abortable.
+   */
+  streamAnalysis(id: AssetId, depth: AnalysisDepth, signal?: AbortSignal): AsyncGenerator<AnalysisStreamEvent>
   analyses(id: AssetId, signal?: AbortSignal): Promise<Analysis[]>
   snapshot(id: AssetId, signal?: AbortSignal): Promise<AssetSnapshot>
 

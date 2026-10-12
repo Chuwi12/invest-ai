@@ -41,20 +41,44 @@ async fn spa_fallback(State(index): State<Arc<PathBuf>>, req: Request) -> Respon
 }
 
 async fn cache_headers(req: Request, next: Next) -> Response {
-    let hashed = req.uri().path().starts_with("/assets/");
+    let hashed = is_hashed_asset(req.uri().path());
     let mut res = next.run(req).await;
-    let is_html = res
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("text/html"));
     if res.status().is_success() && !res.headers().contains_key(header::CACHE_CONTROL) {
         if hashed {
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(IMMUTABLE));
-        } else if is_html {
-            // El HTML referencia los ficheros con hash: debe revalidarse siempre.
+        } else {
+            // El HTML referencia los ficheros con hash: debe revalidarse siempre; lo demás (sin hash
+            // en el nombre) también, para no servir versiones viejas "para siempre".
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
         }
     }
     res
+}
+
+/// `/assets/<nombre>-<hash de 8 caracteres>.<ext>` (Vite). Solo esos ficheros son inmutables.
+fn is_hashed_asset(path: &str) -> bool {
+    let Some(name) = path.strip_prefix("/assets/") else { return false };
+    if name.contains('/') {
+        return false;
+    }
+    let Some((stem, _ext)) = name.rsplit_once('.') else { return false };
+    let b = stem.as_bytes();
+    b.len() >= 10
+        && b[b.len() - 9] == b'-'
+        && b[b.len() - 8..].iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_hashed_asset;
+
+    #[test]
+    fn hashed_assets() {
+        for ok in ["/assets/index-CV56swxT.js", "/assets/Dashboard-E-YmeDM_.js", "/assets/geist-latin-wght-normal-BgDaEnEv.woff2"] {
+            assert!(is_hashed_asset(ok), "{ok}");
+        }
+        for bad in ["/assets/app.js", "/assets/index.js", "/assets/x/index-CV56swxT.js", "/index-CV56swxT.js", "/assets/-CV56swxT.js", "/assets/"] {
+            assert!(!is_hashed_asset(bad), "{bad}");
+        }
+    }
 }

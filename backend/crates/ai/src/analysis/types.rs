@@ -27,8 +27,6 @@ pub struct StageReport {
     pub confidence: f32,
     #[serde(default)]
     pub findings: Vec<Claim>,
-    #[serde(default)]
-    pub missing: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,18 +48,14 @@ pub struct CatalystOut {
     pub impact: Option<f32>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct LevelsOut {
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScenarioOut {
     #[serde(default)]
-    pub supports: Vec<f64>,
+    pub kind: String,
     #[serde(default)]
-    pub resistances: Vec<f64>,
+    pub probability: f32,
     #[serde(default)]
-    pub entry_zone: Vec<f64>,
-    #[serde(default)]
-    pub stop_loss: Option<f64>,
-    #[serde(default)]
-    pub targets: Vec<f64>,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,6 +63,8 @@ pub struct JudgeOut {
     pub verdict: Verdict,
     pub confidence: f32,
     pub horizon: Horizon,
+    #[serde(default)]
+    pub horizon_note: String,
     pub summary: String,
     pub thesis: String,
     #[serde(default)]
@@ -80,19 +76,15 @@ pub struct JudgeOut {
     #[serde(default)]
     pub catalysts: Vec<CatalystOut>,
     #[serde(default)]
-    pub key_levels: LevelsOut,
-    #[serde(default)]
     pub entry_strategy: String,
     #[serde(default)]
     pub exit_strategy: String,
     #[serde(default)]
-    pub position_sizing: String,
-    #[serde(default)]
-    pub missing_data: Vec<String>,
-    #[serde(default)]
     pub would_change_if: Vec<String>,
     #[serde(default)]
     pub uncertainty: String,
+    #[serde(default)]
+    pub scenarios: Vec<ScenarioOut>,
 }
 
 fn s() -> Value {
@@ -100,14 +92,11 @@ fn s() -> Value {
 }
 
 fn claim_schema(with_area: bool) -> Value {
-    let mut props = json!({
-        "text": s(),
-        "figures": {"type": "array", "items": s(), "maxItems": 8}
-    });
+    let mut props = json!({ "text": s() });
     if with_area {
         props["area"] = json!({"type": "string", "enum": ["technical", "fundamental", "sentiment", "macro_risk"]});
     }
-    json!({"type": "object", "properties": props, "required": ["text", "figures"]})
+    json!({"type": "object", "properties": props, "required": ["text"]})
 }
 
 fn list_of(item: Value, max: usize) -> Value {
@@ -120,10 +109,9 @@ pub fn stage_schema(with_area: bool, max_findings: usize) -> Value {
         "properties": {
             "stance": {"type": "string", "enum": ["bullish", "bearish", "neutral", "mixed"]},
             "confidence": {"type": "number"},
-            "findings": list_of(claim_schema(with_area), max_findings),
-            "missing": list_of(s(), 6)
+            "findings": list_of(claim_schema(with_area), max_findings)
         },
-        "required": ["stance", "confidence", "findings", "missing"]
+        "required": ["stance", "confidence", "findings"]
     })
 }
 
@@ -131,7 +119,7 @@ pub fn debate_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "arguments": list_of(claim_schema(false), 5),
+            "arguments": list_of(claim_schema(false), 4),
             "opponent_weakness": s(),
             "would_prove_me_wrong": s()
         },
@@ -139,42 +127,61 @@ pub fn debate_schema() -> Value {
     })
 }
 
-pub fn judge_schema() -> Value {
-    let num_list = |max| list_of(json!({"type": "number"}), max);
-    json!({
-        "type": "object",
-        "properties": {
-            "verdict": {"type": "string", "enum": ["buy", "accumulate", "hold", "wait", "reduce", "avoid"]},
-            "confidence": {"type": "number"},
-            "horizon": {"type": "string", "enum": ["short", "medium", "long"]},
-            "summary": s(),
-            "thesis": s(),
-            "bull_case": list_of(claim_schema(false), 5),
-            "bear_case": list_of(claim_schema(false), 5),
-            "risks": list_of(claim_schema(false), 6),
-            "catalysts": list_of(json!({
-                "type": "object",
-                "properties": {"date": s(), "description": s(), "impact": {"type": "number"}},
-                "required": ["description"]
-            }), 5),
-            "key_levels": {
+pub fn judge_schema(deep: bool) -> Value {
+    let mut props = json!({
+        "verdict": {"type": "string", "enum": ["buy", "accumulate", "hold", "wait", "reduce", "avoid"]},
+        "confidence": {"type": "number"},
+        "horizon": {"type": "string", "enum": ["short", "medium", "long"]},
+        "horizon_note": s(),
+        "summary": s(),
+        "thesis": s(),
+        "bull_case": list_of(claim_schema(false), 4),
+        "bear_case": list_of(claim_schema(false), 4),
+        "risks": list_of(claim_schema(false), 5),
+        "catalysts": list_of(json!({
+            "type": "object",
+            "properties": {"date": s(), "description": s(), "impact": {"type": "number"}},
+            "required": ["description"]
+        }), 4),
+        "entry_strategy": s(),
+        "exit_strategy": s(),
+        "would_change_if": list_of(s(), 4),
+        "uncertainty": s()
+    });
+    let mut required = vec![
+        "verdict", "confidence", "horizon", "horizon_note", "summary", "thesis", "bull_case", "bear_case", "risks",
+        "entry_strategy", "exit_strategy", "would_change_if", "uncertainty",
+    ];
+    if deep {
+        props["scenarios"] = json!({
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
                 "type": "object",
                 "properties": {
-                    "supports": num_list(4),
-                    "resistances": num_list(4),
-                    "entry_zone": num_list(2),
-                    "stop_loss": {"type": "number"},
-                    "targets": num_list(3)
-                }
-            },
-            "entry_strategy": s(),
-            "exit_strategy": s(),
-            "position_sizing": s(),
-            "missing_data": list_of(s(), 8),
-            "would_change_if": list_of(s(), 5),
-            "uncertainty": s()
-        },
-        "required": ["verdict", "confidence", "horizon", "summary", "thesis", "bull_case", "bear_case",
-            "risks", "entry_strategy", "exit_strategy", "position_sizing", "missing_data", "would_change_if", "uncertainty"]
+                    "kind": {"type": "string", "enum": ["bullish", "base", "bearish"]},
+                    "probability": {"type": "number"},
+                    "description": s()
+                },
+                "required": ["kind", "probability", "description"]
+            }
+        });
+        required.push("scenarios");
+    }
+    json!({"type": "object", "properties": props, "required": required})
+}
+
+/// Esquema de la pasada de corrección de redacción: la misma lista de textos corregidos.
+pub fn rewrite_schema(n: usize) -> Value {
+    json!({
+        "type": "object",
+        "properties": {"texts": {"type": "array", "items": s(), "minItems": n, "maxItems": n}},
+        "required": ["texts"]
     })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Rewrite {
+    pub texts: Vec<String>,
 }

@@ -47,6 +47,9 @@ export function AssetHeader({ summary, quote, isFavorite }: { summary: AssetSumm
             provider={quote.source}
             asOf={quote.timestamp}
             assetId={summary.id}
+            href={quote.sourceUrl}
+            verifyUrl={quote.sourceUrl}
+            origin={quote.timestampOrigin}
             stale={fresh.stale}
             staleReason={fresh.reason}
             label="Cotización"

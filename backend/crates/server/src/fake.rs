@@ -61,6 +61,7 @@ fn summary_of(e: &(&str, &str, &str, &str, f64)) -> AssetSummary {
         currency: Some(e.3.to_string()),
         country: None,
         source: "fake".into(),
+        source_url: None,
     }
 }
 
@@ -119,6 +120,8 @@ impl FakeMarket {
             timestamp: fixed_time(),
             source: "fake".into(),
             delay_secs: Some(0),
+            source_url: None,
+            timestamp_origin: None,
         }
     }
 
@@ -242,6 +245,8 @@ impl MarketData for FakeMarket {
                 unit: "%".into(),
                 as_of: fixed_time(),
                 source: "fake".into(),
+                source_url: None,
+                timestamp_origin: None,
             }],
             as_of: Some(fixed_time()),
         })
@@ -302,6 +307,8 @@ impl MarketData for FakeMarket {
             asset_classes: AssetClass::ALL.to_vec(),
             last_error: None,
             last_ok: Some(fixed_time()),
+            blocked_secs: None,
+            latency_ms: None,
         }]
     }
 }
@@ -379,6 +386,14 @@ impl FakeAnalyst {
             price_at_analysis: price,
             model: "fake-model".into(),
             generated_at: Utc::now(),
+            levels_note: Some("Niveles simulados.".into()),
+            scenarios: None,
+            expected_return_pct: None,
+            would_change_if: Some(vec!["El precio cierra bajo el stop.".into()]),
+            horizon_note: Some("Horizonte simulado.".into()),
+            position_sizing: None,
+            method: Some("Modelo simulado.".into()),
+            quality_notes: Some(Vec::new()),
         }
     }
 }
@@ -392,6 +407,41 @@ impl Analyst for FakeAnalyst {
             tokio::time::sleep(delay).await;
         }
         Ok(Self::build_analysis(snapshot))
+    }
+
+    fn analyze_stream(
+        self: std::sync::Arc<Self>,
+        snapshot: AssetSnapshot,
+        _depth: Option<domain::AnalysisDepth>,
+    ) -> BoxStream<'static, domain::AnalysisEvent> {
+        use domain::AnalysisEvent;
+        const STAGES: [(&str, &str); 4] = [
+            ("snapshot", "Preparando datos, puntuación y niveles"),
+            ("technical", "Análisis técnico (simulado)"),
+            ("judge", "Veredicto del juez (simulado)"),
+            ("verify", "Verificando cifras y redacción"),
+        ];
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            self.analyze_calls.fetch_add(1, Ordering::SeqCst);
+            let delay = *self.analyze_delay.lock().unwrap() / STAGES.len() as u32;
+            for (i, (stage, label)) in STAGES.iter().enumerate() {
+                let ev = AnalysisEvent::Stage {
+                    stage: (*stage).into(),
+                    label: (*label).into(),
+                    index: i as u32 + 1,
+                    total: STAGES.len() as u32,
+                };
+                if tx.send(ev).is_err() {
+                    return;
+                }
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+            let _ = tx.send(AnalysisEvent::Done { analysis: Self::build_analysis(&snapshot) });
+        });
+        tokio_stream::wrappers::UnboundedReceiverStream::new(rx).boxed()
     }
 
     fn chat(&self, req: ChatRequest) -> BoxStream<'static, ChatEvent> {

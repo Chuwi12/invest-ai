@@ -23,9 +23,11 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
-        let bind_addr = env_or("BIND_ADDR", "127.0.0.1:8787")
+        let bind_addr: SocketAddr = env_or("BIND_ADDR", "127.0.0.1:8787")
             .parse()
             .context("BIND_ADDR no es una dirección válida (p. ej. 127.0.0.1:8787)")?;
+        let allow_remote = matches!(std::env::var("INVEST_AI_ALLOW_REMOTE").ok().as_deref(), Some("1"));
+        check_bind(bind_addr, allow_remote)?;
         let frontend_origins = std::env::var("FRONTEND_ORIGIN")
             .unwrap_or_default()
             .split(',')
@@ -44,6 +46,27 @@ impl Config {
             ),
         })
     }
+}
+
+/// S-05: la API no tiene autenticación, así que solo escucha en loopback salvo opt-out explícito.
+fn check_bind(addr: SocketAddr, allow_remote: bool) -> anyhow::Result<()> {
+    if addr.ip().is_loopback() {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        allow_remote,
+        "BIND_ADDR={addr} no es loopback: la API no tiene autenticación y quedaría expuesta a la red. \
+         Usa 127.0.0.1/[::1], o define INVEST_AI_ALLOW_REMOTE=1 si sabes lo que haces"
+    );
+    tracing::warn!(
+        "############################################################################\n\
+         ## INVEST_AI_ALLOW_REMOTE=1: escuchando en {addr}, NO es loopback.\n\
+         ## La API NO tiene autenticación: cualquiera con acceso a la red puede leer\n\
+         ## tus chats, borrar modelos de Ollama y consumir tu GPU. Protégela con un\n\
+         ## cortafuegos o un proxy con autenticación.\n\
+         ############################################################################"
+    );
+    Ok(())
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -70,6 +93,19 @@ fn has_index(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bind_must_be_loopback_unless_opted_out() {
+        let a = |s: &str| s.parse::<SocketAddr>().unwrap();
+        for ok in ["127.0.0.1:8787", "127.0.0.2:80", "[::1]:8787"] {
+            assert!(check_bind(a(ok), false).is_ok(), "{ok}");
+        }
+        for bad in ["0.0.0.0:8787", "192.168.1.5:8787", "[::]:8787", "8.8.8.8:80"] {
+            let err = check_bind(a(bad), false).unwrap_err().to_string();
+            assert!(err.contains("INVEST_AI_ALLOW_REMOTE"), "{bad}: {err}");
+            assert!(check_bind(a(bad), true).is_ok(), "{bad} con opt-out");
+        }
+    }
 
     #[test]
     fn static_dir_needs_index_html() {

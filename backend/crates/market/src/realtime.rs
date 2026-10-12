@@ -709,6 +709,8 @@ mod tests {
             timestamp: Utc.timestamp_opt(secs, 0).unwrap(),
             source: "test".into(),
             delay_secs: Some(0),
+            source_url: None,
+            timestamp_origin: None,
         }
     }
 
