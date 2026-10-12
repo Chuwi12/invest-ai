@@ -123,14 +123,25 @@ const BOILERPLATE: &[&str] = &[
 /// Quita las frases repetidas (en cualquier párrafo): los modelos pequeños copian el mismo párrafo
 /// en los tres campos de la tesis. Los párrafos que quedan vacíos desaparecen.
 pub fn dedupe_sentences(text: &str) -> String {
-    let mut seen: Vec<String> = Vec::new();
+    let mut seen: Vec<std::collections::HashSet<String>> = Vec::new();
     let mut paras = Vec::new();
     for para in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
         let mut kept = Vec::new();
         for sent in para.split_inclusive(". ").map(str::trim).filter(|x| !x.is_empty()) {
-            let key: String = sent.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
-            if !seen.contains(&key) {
-                seen.push(key);
+            let words: std::collections::HashSet<String> = sent
+                .to_lowercase()
+                .split(|c: char| !c.is_alphanumeric() && c != '.')
+                .filter(|w| w.chars().count() >= 3)
+                .map(str::to_string)
+                .collect();
+            // Repetición literal o parafraseada: ≥ 70 % de palabras en común con una frase anterior.
+            let dup = seen.iter().any(|o| {
+                let inter = o.intersection(&words).count() as f64;
+                let union = o.union(&words).count().max(1) as f64;
+                inter / union >= 0.7
+            });
+            if !dup {
+                seen.push(words);
                 kept.push(sent);
             }
         }
@@ -214,6 +225,12 @@ mod tests {
     fn repeated_sentences_are_removed_across_paragraphs() {
         let t = "A sube 1.5. B baja 2.5.\n\nA sube 1.5. B baja 2.5.\n\nA sube 1.5. C neutro 3.5.";
         assert_eq!(dedupe_sentences(t), "A sube 1.5. B baja 2.5.\n\nC neutro 3.5.");
+    }
+
+    #[test]
+    fn paraphrased_repetitions_are_removed_but_different_sentences_stay() {
+        let t = "El PER forward de 35.4 indica valoración alta.\n\nEl PER forward de 35.4 indica una valoración alta. El ATR14 de 6.69 marca volatilidad moderada.";
+        assert_eq!(dedupe_sentences(t), "El PER forward de 35.4 indica valoración alta.\n\nEl ATR14 de 6.69 marca volatilidad moderada.");
     }
 
     #[test]

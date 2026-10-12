@@ -57,8 +57,8 @@ snapshot ─▶ saneado ─▶ puntuación (scoring.rs) + niveles (levels.rs, Ru
   redacción, eventos), `server/tests/analysis_stream.rs`.
 
 ## Pendiente / límites conocidos (qwen2.5:7b)
-- El 7B a veces repite el mismo párrafo en los tres campos de tesis o escribe descripciones de escenario incoherentes
-  con su tipo; el lint de especificidad no detecta repetición entre párrafos (en curso).
+- El 7B a veces escribe descripciones de escenario incoherentes con su precio objetivo. La repetición entre párrafos
+  de la tesis se elimina (Jaccard ≥ 0,7 por frase, `lint::dedupe_sentences`).
 - El lint de castellano es heurístico: no detecta frases sin sentido ni palabras inexistentes que no estén en la lista.
 - El análisis de BTC/cripto y la prueba de chat con tools: ver «Prueba real».
 - `analysis.thesis` sigue incluyendo «Incertidumbre» y «La conclusión cambiaría si» (compatibilidad con el frontend
@@ -104,10 +104,16 @@ escenarios 40/40/20 con precios 344.96 / 339.07 (punto medio) / 328.98 (banda in
 snapshot estaba completo). Antes: `targets [350.0 redondo]`, `stopLoss null`, avisos tipo «no hay datos de competidores».
 Aviso honesto: `riskReward` bajo 1 y «tamaño 39 % limitado a 10 %» son lo que salen de los datos, no un fallo.
 
+Extracto (BTC deep, veredicto `hold`): zona de entrada 81827.38 + 0,5×ATR (esperar sobre el soporte), stop 79769.92 =
+banda de Bollinger inferior 81827.38 − 1×ATR14 (2057.45), objetivos 84078.75 (SMA20) / 86330.11 (banda superior) /
+87307.83 (resistencia), recompensa/riesgo 0.7; tamaño 8 % (cálculo 32 %, tope 8 % por riesgo 53/100); escenarios
+30/40/30 con precios 86330.11 / 82953.06 (punto medio) / 81059.79 (SMA50), `dataWarnings: []`. Defecto visible: la
+descripción del escenario bajista habla del soporte 79769.92 y su precio objetivo es la SMA50 (81059.79).
+
 Chat con tools («¿Cómo está el RSI de NVDA comparado con AMD?»): 7 s; llama a `get_indicators` para `stock:NVDA` y
 `stock:AMD`, responde con RSI14 49.6 vs 51.9 (cifras correctas); el 7B interpretó mal «sobrecompra» → se añadió al
 system prompt la regla 70/30 (no re-medido en chat).
 
 Defectos que quedan con el 7B (medidos): a veces repite ideas entre párrafos de la tesis (se eliminan frases idénticas,
-no parafraseadas); inventa porcentajes derivados («3.4 %») que se descartan/marcan con ⚠ y bajan la confianza;
+solo parafraseadas casi literales); inventa porcentajes derivados («3.4 %») que se descartan/marcan con ⚠ y bajan la confianza;
 descripciones de escenarios flojas; en `quick` la tesis sigue siendo poco específica más veces de lo deseable.
