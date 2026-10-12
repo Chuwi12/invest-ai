@@ -394,6 +394,11 @@ impl FakeAnalyst {
             position_sizing: None,
             method: Some("Modelo simulado.".into()),
             quality_notes: Some(Vec::new()),
+            depth: None,
+            duration_ms: None,
+            llm_calls: None,
+            prompt_tokens: None,
+            completion_tokens: None,
         }
     }
 }

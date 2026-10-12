@@ -189,6 +189,11 @@ type Analysis = { /* ...los de siempre... */
   positionSizing?: PositionSizing | null;
   method?: string | null;              // modelo, profundidad, llamadas, tokens, tiempo, aviso de no asesoramiento
   qualityNotes?: string[] | null;      // descartes, cifras sin verificar, reintentos, redacción dudosa
+  depth?: "quick" | "standard" | "deep" | null;   // metadatos del método, para mostrar tiempos reales
+  durationMs?: number | null;
+  llmCalls?: number | null;            // incluye reintentos y correcciones
+  promptTokens?: number | null;
+  completionTokens?: number | null;
 };
 type Scenario = { kind: "bullish" | "base" | "bearish"; probability: number; description: string;
   targetPrice: number | null; targetBasis: string | null; returnPct: number | null };

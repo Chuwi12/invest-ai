@@ -505,6 +505,11 @@ impl AnalysisEngine {
             usage.completion.load(Ordering::Relaxed),
             started.elapsed().as_secs_f32()
         ));
+        analysis.depth = Some(depth);
+        analysis.duration_ms = Some(started.elapsed().as_millis() as u64);
+        analysis.llm_calls = Some(usage.calls.load(Ordering::Relaxed) as u32);
+        analysis.prompt_tokens = Some(usage.prompt.load(Ordering::Relaxed) as u32);
+        analysis.completion_tokens = Some(usage.completion.load(Ordering::Relaxed) as u32);
         analysis.sources = v.sources();
         analysis.model = caps.id.clone();
         analysis.asset = snap.summary.id.clone();
@@ -825,6 +830,11 @@ fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifie
         position_sizing: None,
         method: None,
         quality_notes: None,
+        depth: None,
+        duration_ms: None,
+        llm_calls: None,
+        prompt_tokens: None,
+        completion_tokens: None,
     }
 }
 
@@ -902,6 +912,11 @@ fn fallback(snap: &AssetSnapshot, card: &Scorecard, _v: &mut Verifier<'_>, lang:
         position_sizing: None,
         method: None,
         quality_notes: None,
+        depth: None,
+        duration_ms: None,
+        llm_calls: None,
+        prompt_tokens: None,
+        completion_tokens: None,
     }
 }
 

@@ -534,7 +534,7 @@ async fn analysis_generate_store_and_list() {
         "id", "asset", "verdict", "confidence", "horizon", "scores", "summary", "thesis", "bullCase", "bearCase",
         "risks", "catalysts", "keyLevels", "strategy", "dataWarnings", "sources", "priceAtAnalysis", "model",
         "generatedAt", "levelsNote", "scenarios", "expectedReturnPct", "wouldChangeIf", "horizonNote",
-        "positionSizing", "method", "qualityNotes",
+        "positionSizing", "method", "qualityNotes", "depth", "durationMs", "llmCalls", "promptTokens", "completionTokens",
     ]);
     assert_keys(&analysis["scores"], &[
         "overall", "technical", "momentum", "fundamental", "valuation", "sentiment", "macroScore", "risk",

@@ -83,12 +83,31 @@ snapshot ─▶ saneado ─▶ puntuación (scoring.rs) + niveles (levels.rs, Ru
 
 ## Prueba real (RTX 4070 8 GB, qwen2.5:7b, Ollama compartido con otros agentes: los tiempos tienen ruido)
 
+Servidor real en `127.0.0.1:8798`, BD temporal. «Antes» = pipeline anterior medido hoy; «después» = última pasada.
+
 | Caso | Antes | Después |
 |---|---|---|
-| AAPL quick | 47 s, 2 llamadas, 7241 in / 1776 out | 49 s, 3 llamadas (1 reintento por tesis genérica), 6664 in / 1431 out |
-| AAPL standard | 131 s (coordinador: 84 s), 5 llamadas, 17680 in / 2860 out | 85 s, 6 llamadas, 9836 in / 2307 out |
-| AAPL deep | 266 s, 8 llamadas, 31537 in / 5861 out | 69–118 s, 8–9 llamadas, 13933–19042 in / 2303–4140 out |
-| BTC quick | 72 s, 2 llamadas, 6421 in / 1622 out | (pendiente) |
-| BTC deep | 178 s, 7 llamadas, 23584 in / 4350 out | (pendiente) |
+| AAPL quick | 47 s, 2 llamadas, 7241 in / 1776 out | 39–49 s, 3–4 llamadas (reintento de tesis genérica y/o corrección), 6559 in / 1429 out |
+| AAPL standard | 131 s (coordinador: 84 s), 5 llamadas, 17680 in / 2860 out | 43–59 s, 5–6 llamadas, 9250–9833 in / 1569–2150 out |
+| AAPL deep | 266 s, 8 llamadas, 31537 in / 5861 out | 65–77 s, 8 llamadas, 14080–14289 in / 2362–2785 out |
+| BTC quick | 72 s, 2 llamadas, 6421 in / 1622 out | 47 s, 3 llamadas, 6217 in / 1715 out |
+| BTC deep | 178 s, 7 llamadas, 23584 in / 4350 out | 59–66 s, 7–8 llamadas, 11966–12576 in / 2158–2172 out |
 
-Extractos y chat con tools: se añaden al terminar.
+Entrada −40 a −55 %, salida −15 a −50 %. Los tiempos quick/standard/deep medidos hoy son ~40–50 s / ~45–60 s / ~65–80 s
+(sin contención con otros procesos de Ollama); deep ya no es mucho más lento que standard porque el coste es la
+generación, no la entrada. Ahora el análisis guarda `depth`, `durationMs`, `llmCalls`, `promptTokens`,
+`completionTokens` para que la UI muestre tiempos reales.
+
+Extracto (AAPL deep): stop 329.01 = SMA20 335.71 − 1×ATR14 (6.6929); objetivos 342.44 / 344.96 / 405 (banda de
+Bollinger superior, resistencia, máximo de analistas); recompensa/riesgo 0.6 (honesto: el recorrido es corto);
+escenarios 40/40/20 con precios 344.96 / 339.07 (punto medio) / 328.98 (banda inferior). `dataWarnings: []` (el
+snapshot estaba completo). Antes: `targets [350.0 redondo]`, `stopLoss null`, avisos tipo «no hay datos de competidores».
+Aviso honesto: `riskReward` bajo 1 y «tamaño 39 % limitado a 10 %» son lo que salen de los datos, no un fallo.
+
+Chat con tools («¿Cómo está el RSI de NVDA comparado con AMD?»): 7 s; llama a `get_indicators` para `stock:NVDA` y
+`stock:AMD`, responde con RSI14 49.6 vs 51.9 (cifras correctas); el 7B interpretó mal «sobrecompra» → se añadió al
+system prompt la regla 70/30 (no re-medido en chat).
+
+Defectos que quedan con el 7B (medidos): a veces repite ideas entre párrafos de la tesis (se eliminan frases idénticas,
+no parafraseadas); inventa porcentajes derivados («3.4 %») que se descartan/marcan con ⚠ y bajan la confianza;
+descripciones de escenarios flojas; en `quick` la tesis sigue siendo poco específica más veces de lo deseable.

@@ -736,6 +736,19 @@ pub struct Analysis {
     /// separados de `data_warnings`, que solo recoge carencias reales de los datos.
     #[serde(default)]
     pub quality_notes: Option<Vec<String>>,
+    /// Profundidad con la que se generó.
+    #[serde(default)]
+    pub depth: Option<AnalysisDepth>,
+    /// Duración total de la generación en milisegundos.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    /// Llamadas al LLM (incluidos reintentos y correcciones).
+    #[serde(default)]
+    pub llm_calls: Option<u32>,
+    #[serde(default)]
+    pub prompt_tokens: Option<u32>,
+    #[serde(default)]
+    pub completion_tokens: Option<u32>,
 }
 
 /// Un escenario del análisis profundo.

@@ -37,7 +37,8 @@ it is missing.\n\
 3. State what data is missing and how uncertain the conclusion is. Prefer \"unknown\" to guessing. \
 Past performance does not predict future returns.\n\
 4. You are not a financial advisor: your output is automated analysis, not personal advice.\n\
-5. Cite news as [N1], [N2]… exactly as numbered in the data.\n\
+5. Cite news as [N1], [N2]… exactly as numbered in the data, and only when the sentence is about that news item.\n\
+RSI14 reading: above 70 overbought, below 30 oversold, 30-70 neutral.\n\
 6. Write every text field in {}.",
         language_name(language)
     )
@@ -135,11 +136,7 @@ flujo de caja libre, capitalización bursátil, sobrecompra (RSI14 por encima de
 media móvil (SMA20 = media de 20 sesiones), tendencia alcista o bajista, caída máxima, rentabilidad por dividendo, margen operativo, \
 deuda, resultados trimestrales, recorrido al alza, corrección, ruptura, bajada de tipos, comprar por tramos, \
 stop (nivel de salida), precio objetivo, vientos en contra. Never write English words or parentheses with the English term.\n\
-Style examples (copy the STYLE, never these placeholders): BAD: \"El rendimiento de la caja del <x>% \
-sugiere acumular en trancos.\" GOOD: \"El flujo de caja libre es <FCF> USD, un <x> % de la capitalización: \
-rentabilidad baja, por eso conviene entrar por tramos.\" BAD: \"El precio podría indicar una corrección.\" \
-GOOD: \"El precio (<precio>) cotiza un <x> % sobre la SMA50 (<SMA50>) y el RSI14 marca <rsi>: \
-hay margen para un retroceso hacia el soporte de <soporte>.\" Write decimals with a point exactly as in \
+Structure each sentence as «<indicator> (<figure from the data>) <what it implies>», e.g. never write vague claims such as \"podría indicar una corrección\" without the figure behind them, and never copy wording from these instructions. Write decimals with a point exactly as in \
 the data (do not convert 12.3 to 12,3).".to_string()
 }
 

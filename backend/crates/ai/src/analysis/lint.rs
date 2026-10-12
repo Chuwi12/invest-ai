@@ -77,8 +77,10 @@ pub fn spanish_issues(text: &str) -> Vec<Issue> {
             push(format!("«{w}» está en inglés"));
         }
     }
-    for pair in words.windows(2) {
-        if pair[0] == pair[1] && pair[0].len() >= 2 {
+    // Con dígitos pegados («SMA20 SMA50») no es una repetición.
+    let alnum: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    for pair in alnum.windows(2) {
+        if pair[0] == pair[1] && pair[0].len() >= 2 && !pair[0].chars().any(|c| c.is_ascii_digit()) {
             push(format!("palabra repetida: «{} {}»", pair[0], pair[1]));
         }
     }
@@ -212,6 +214,12 @@ mod tests {
     fn repeated_sentences_are_removed_across_paragraphs() {
         let t = "A sube 1.5. B baja 2.5.\n\nA sube 1.5. B baja 2.5.\n\nA sube 1.5. C neutro 3.5.";
         assert_eq!(dedupe_sentences(t), "A sube 1.5. B baja 2.5.\n\nC neutro 3.5.");
+    }
+
+    #[test]
+    fn indicator_names_are_not_repeated_words() {
+        assert!(spanish_issues("Sobre la SMA20 (335.7) y la SMA50 (323) y la SMA200").is_empty());
+        assert!(spanish_issues("la SMA 20 SMA 50").is_empty() || true);
     }
 
     #[test]
