@@ -5,14 +5,11 @@
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use domain::{AssetClass, AssetId, Candle, Interval, MacroIndicator, MarketState, Quote, Range};
-use futures::{StreamExt, stream};
 use reqwest::Client;
 use serde_json::Value;
 use url::Url;
 
-use super::{
-    Capability, PResult, Provider, ProviderError, ProviderInfo, from_ymd, num,
-};
+use super::{Capability, PResult, Provider, ProviderError, ProviderInfo, from_ymd, num};
 use crate::{
     http::{check_status, parse_json, send},
     secret::Secret,
@@ -35,22 +32,100 @@ struct Def {
     kind: Kind,
 }
 
-const fn d(key: &'static str, name: &'static str, series: &'static str, unit: &'static str, kind: Kind) -> Def {
-    Def { key, name, series, unit, kind }
+const fn d(
+    key: &'static str,
+    name: &'static str,
+    series: &'static str,
+    unit: &'static str,
+    kind: Kind,
+) -> Def {
+    Def {
+        key,
+        name,
+        series,
+        unit,
+        kind,
+    }
 }
 
 const SERIES: &[Def] = &[
-    d("fed_funds", "Tipo efectivo de los fondos federales", "DFF", "%", Kind::Level),
-    d("us3m", "Rendimiento de la letra de EE. UU. a 3 meses", "DGS3MO", "%", Kind::Level),
-    d("us2y", "Rendimiento del bono de EE. UU. a 2 años", "DGS2", "%", Kind::Level),
-    d("us5y", "Rendimiento del bono de EE. UU. a 5 años", "DGS5", "%", Kind::Level),
-    d("us10y", "Rendimiento del bono de EE. UU. a 10 años", "DGS10", "%", Kind::Level),
-    d("us30y", "Rendimiento del bono de EE. UU. a 30 años", "DGS30", "%", Kind::Level),
-    d("curve_10y2y", "Diferencial de la curva 10 años - 2 años", "T10Y2Y", "pp", Kind::Level),
-    d("cpi_yoy", "Inflación (IPC EE. UU., interanual)", "CPIAUCSL", "%", Kind::YoY),
-    d("unemployment", "Tasa de paro de EE. UU.", "UNRATE", "%", Kind::Level),
-    d("vix", "Índice de volatilidad VIX", "VIXCLS", "puntos", Kind::Level),
-    d("ecb_rate", "Tipo de la facilidad de depósito del BCE", "ECBDFR", "%", Kind::Level),
+    d(
+        "fed_funds",
+        "Tipo efectivo de los fondos federales",
+        "DFF",
+        "%",
+        Kind::Level,
+    ),
+    d(
+        "us3m",
+        "Rendimiento de la letra de EE. UU. a 3 meses",
+        "DGS3MO",
+        "%",
+        Kind::Level,
+    ),
+    d(
+        "us2y",
+        "Rendimiento del bono de EE. UU. a 2 años",
+        "DGS2",
+        "%",
+        Kind::Level,
+    ),
+    d(
+        "us5y",
+        "Rendimiento del bono de EE. UU. a 5 años",
+        "DGS5",
+        "%",
+        Kind::Level,
+    ),
+    d(
+        "us10y",
+        "Rendimiento del bono de EE. UU. a 10 años",
+        "DGS10",
+        "%",
+        Kind::Level,
+    ),
+    d(
+        "us30y",
+        "Rendimiento del bono de EE. UU. a 30 años",
+        "DGS30",
+        "%",
+        Kind::Level,
+    ),
+    d(
+        "curve_10y2y",
+        "Diferencial de la curva 10 años - 2 años",
+        "T10Y2Y",
+        "pp",
+        Kind::Level,
+    ),
+    d(
+        "cpi_yoy",
+        "Inflación (IPC EE. UU., interanual)",
+        "CPIAUCSL",
+        "%",
+        Kind::YoY,
+    ),
+    d(
+        "unemployment",
+        "Tasa de paro de EE. UU.",
+        "UNRATE",
+        "%",
+        Kind::Level,
+    ),
+    d(
+        "vix",
+        "Índice de volatilidad VIX",
+        "VIXCLS",
+        "puntos",
+        Kind::Level,
+    ),
+    d(
+        "ecb_rate",
+        "Tipo de la facilidad de depósito del BCE",
+        "ECBDFR",
+        "%",
+        Kind::Level,
+    ),
 ];
 
 pub struct Fred {
@@ -83,7 +158,24 @@ impl Fred {
         }
     }
 
-    async fn observations(&self, series: &str, limit: usize, start: Option<&str>, asc: bool) -> PResult<Vec<Obs>> {
+    async fn fetch_indicator(&self, def: &'static Def) -> Option<MacroIndicator> {
+        let limit = if matches!(def.kind, Kind::YoY) { 14 } else { 2 };
+        match self.observations(def.series, limit, None, false).await {
+            Ok(obs) => indicator(def.key, def.name, def.unit, def.kind, &obs),
+            Err(e) => {
+                tracing::debug!(series = def.series, error = %e, "FRED: serie no disponible");
+                None
+            }
+        }
+    }
+
+    async fn observations(
+        &self,
+        series: &str,
+        limit: usize,
+        start: Option<&str>,
+        asc: bool,
+    ) -> PResult<Vec<Obs>> {
         let key = self.key.as_ref().ok_or(ProviderError::Unsupported)?;
         let mut url = Url::parse(BASE).map_err(|e| ProviderError::upstream(e.to_string()))?;
         {
@@ -98,12 +190,14 @@ impl Fred {
             }
         }
         let body = send(self.http.get(url)).await?;
-        if body.status == reqwest::StatusCode::BAD_REQUEST {
-            if let Ok(v) = serde_json::from_str::<Value>(&body.text) {
-                let msg = v["error_message"].as_str().unwrap_or("");
-                if msg.contains("does not exist") {
-                    return Err(ProviderError::NotFound(format!("serie {series} no existe en FRED")));
-                }
+        if body.status == reqwest::StatusCode::BAD_REQUEST
+            && let Ok(v) = serde_json::from_str::<Value>(&body.text)
+        {
+            let msg = v["error_message"].as_str().unwrap_or("");
+            if msg.contains("does not exist") {
+                return Err(ProviderError::NotFound(format!(
+                    "serie {series} no existe en FRED"
+                )));
             }
         }
         check_status(&body)?;
@@ -114,11 +208,16 @@ impl Fred {
 /// Observaciones válidas (FRED marca los huecos con `"."`), en el orden de la respuesta.
 pub fn parse_observations(text: &str) -> PResult<Vec<Obs>> {
     let v: Value = parse_json(text)?;
-    let arr = v["observations"].as_array().ok_or_else(|| ProviderError::upstream("FRED sin observaciones"))?;
+    let arr = v["observations"]
+        .as_array()
+        .ok_or_else(|| ProviderError::upstream("FRED sin observaciones"))?;
     Ok(arr
         .iter()
         .filter_map(|o| {
-            Some(Obs { date: o["date"].as_str()?.to_string(), value: num(&o["value"])? })
+            Some(Obs {
+                date: o["date"].as_str()?.to_string(),
+                value: num(&o["value"])?,
+            })
         })
         .collect())
 }
@@ -127,7 +226,11 @@ fn indicator(key: &str, name: &str, unit: &str, kind: Kind, obs: &[Obs]) -> Opti
     let (value, change, date) = match kind {
         Kind::Level => {
             let cur = obs.first()?;
-            (cur.value, obs.get(1).map(|p| cur.value - p.value), &cur.date)
+            (
+                cur.value,
+                obs.get(1).map(|p| cur.value - p.value),
+                &cur.date,
+            )
         }
         Kind::YoY => {
             let (cur, year_ago) = (obs.first()?, obs.get(12)?);
@@ -156,7 +259,10 @@ fn indicator(key: &str, name: &str, unit: &str, kind: Kind, obs: &[Obs]) -> Opti
 fn is_series_id(id: &AssetId) -> bool {
     id.class == AssetClass::Bond
         && !id.symbol.is_empty()
-        && id.symbol.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && id
+            .symbol
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[async_trait]
@@ -169,28 +275,20 @@ impl Provider for Fred {
         if self.key.is_none() {
             return Err(ProviderError::Unsupported);
         }
-        let results: Vec<Option<MacroIndicator>> = stream::iter(SERIES.iter())
-            .map(|def: &'static Def| async move {
-                let Def { key, name, series, unit, kind } = *def;
-                let limit = if matches!(kind, Kind::YoY) { 14 } else { 2 };
-                match self.observations(series, limit, None, false).await {
-                    Ok(obs) => indicator(key, name, unit, kind, &obs),
-                    Err(e) => {
-                        tracing::debug!(series, error = %e, "FRED: serie no disponible");
-                        None
-                    }
-                }
-            })
-            .buffer_unordered(4)
-            .collect()
-            .await;
+        let results: Vec<Option<MacroIndicator>> =
+            futures::future::join_all(SERIES.iter().map(|def| self.fetch_indicator(def))).await;
         let out: Vec<MacroIndicator> = results.into_iter().flatten().collect();
         if out.is_empty() {
             return Err(ProviderError::upstream("FRED no devolvió ninguna serie"));
         }
         // Orden estable (el de SERIES), independiente de qué petición terminó antes.
         let mut out = out;
-        out.sort_by_key(|i| SERIES.iter().position(|s| s.key == i.key).unwrap_or(usize::MAX));
+        out.sort_by_key(|i| {
+            SERIES
+                .iter()
+                .position(|s| s.key == i.key)
+                .unwrap_or(usize::MAX)
+        });
         Ok(out)
     }
 
@@ -198,8 +296,12 @@ impl Provider for Fred {
         if !is_series_id(id) {
             return Err(ProviderError::Unsupported);
         }
-        let obs = self.observations(&id.symbol.to_ascii_uppercase(), 2, None, false).await?;
-        let cur = obs.first().ok_or_else(|| ProviderError::NotFound("serie sin datos".into()))?;
+        let obs = self
+            .observations(&id.symbol.to_ascii_uppercase(), 2, None, false)
+            .await?;
+        let cur = obs
+            .first()
+            .ok_or_else(|| ProviderError::NotFound("serie sin datos".into()))?;
         let prev = obs.get(1);
         Ok(Quote {
             id: id.clone(),
@@ -215,13 +317,19 @@ impl Provider for Fred {
             market_cap: None,
             currency: Some("%".into()),
             market_state: MarketState::Closed,
-            timestamp: from_ymd(&cur.date).ok_or_else(|| ProviderError::upstream("fecha no válida"))?,
+            timestamp: from_ymd(&cur.date)
+                .ok_or_else(|| ProviderError::upstream("fecha no válida"))?,
             source: "fred".into(),
             delay_secs: None,
         })
     }
 
-    async fn history(&self, id: &AssetId, range: Range, _interval: Interval) -> PResult<Vec<Candle>> {
+    async fn history(
+        &self,
+        id: &AssetId,
+        range: Range,
+        _interval: Interval,
+    ) -> PResult<Vec<Candle>> {
         if !is_series_id(id) {
             return Err(ProviderError::Unsupported);
         }
@@ -236,13 +344,24 @@ impl Provider for Fred {
             Range::Y10 => 3653,
             Range::Max => 36_500,
         };
-        let start = (Utc::now() - Duration::days(days)).format("%Y-%m-%d").to_string();
-        let obs = self.observations(&id.symbol.to_ascii_uppercase(), 10_000, Some(&start), true).await?;
+        let start = (Utc::now() - Duration::days(days))
+            .format("%Y-%m-%d")
+            .to_string();
+        let obs = self
+            .observations(&id.symbol.to_ascii_uppercase(), 10_000, Some(&start), true)
+            .await?;
         // Serie de un solo valor por día: o = h = l = c.
         Ok(obs
             .iter()
             .filter_map(|o| {
-                Some(Candle { t: from_ymd(&o.date)?.timestamp(), o: o.value, h: o.value, l: o.value, c: o.value, v: None })
+                Some(Candle {
+                    t: from_ymd(&o.date)?.timestamp(),
+                    o: o.value,
+                    h: o.value,
+                    l: o.value,
+                    c: o.value,
+                    v: None,
+                })
             })
             .collect())
     }
@@ -259,7 +378,13 @@ mod tests {
     fn skips_missing_observations() {
         let o = parse_observations(DGS10).unwrap();
         assert_eq!(o.len(), 2);
-        assert_eq!(o[0], Obs { date: "2026-10-08".into(), value: 4.20 });
+        assert_eq!(
+            o[0],
+            Obs {
+                date: "2026-10-08".into(),
+                value: 4.20
+            }
+        );
         let ind = indicator("us10y", "x", "%", Kind::Level, &o).unwrap();
         assert_eq!(ind.value, 4.20);
         assert!((ind.change.unwrap() - 0.08).abs() < 1e-9);
@@ -271,7 +396,10 @@ mod tests {
     fn yoy_from_monthly_index() {
         // 14 observaciones, la más reciente primero: índice que sube 0.25 al mes desde 300.
         let obs: Vec<Obs> = (0..14)
-            .map(|i| Obs { date: format!("2026-{:02}-01", 12 - i.min(11)), value: 300.0 + 0.25 * (13 - i) as f64 })
+            .map(|i| Obs {
+                date: format!("2026-{:02}-01", 12 - i.min(11)),
+                value: 300.0 + 0.25 * (13 - i) as f64,
+            })
             .collect();
         let ind = indicator("cpi_yoy", "IPC", "%", Kind::YoY, &obs).unwrap();
         let expect = (obs[0].value / obs[12].value - 1.0) * 100.0;

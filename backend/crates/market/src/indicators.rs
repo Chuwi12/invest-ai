@@ -99,10 +99,18 @@ pub fn macd(closes: &[f64], fast: usize, slow: usize, signal: usize) -> Option<M
     }
     // Alinea por el final: slow_s[j] ↔ closes[slow-1+j] ↔ fast_s[slow-fast+j].
     let offset = slow - fast;
-    let line: Vec<f64> = slow_s.iter().enumerate().map(|(j, s)| fast_s[offset + j] - s).collect();
+    let line: Vec<f64> = slow_s
+        .iter()
+        .enumerate()
+        .map(|(j, s)| fast_s[offset + j] - s)
+        .collect();
     let sig = ema_series(&line, signal);
     let (m, s) = (line.last()?, sig.last()?);
-    Some(Macd { macd: *m, signal: *s, hist: m - s })
+    Some(Macd {
+        macd: *m,
+        signal: *s,
+        hist: m - s,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -121,7 +129,11 @@ pub fn bollinger(closes: &[f64], n: usize, k: f64) -> Option<Bollinger> {
     let mean = w.iter().sum::<f64>() / n as f64;
     let var = w.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64;
     let sd = var.sqrt();
-    Some(Bollinger { upper: mean + k * sd, middle: mean, lower: mean - k * sd })
+    Some(Bollinger {
+        upper: mean + k * sd,
+        middle: mean,
+        lower: mean - k * sd,
+    })
 }
 
 /// ATR con suavizado de Wilder. Necesita `n + 1` velas.
@@ -130,7 +142,9 @@ pub fn atr(candles: &[Candle], n: usize) -> Option<f64> {
         return None;
     }
     let tr = |prev: &Candle, c: &Candle| -> f64 {
-        (c.h - c.l).max((c.h - prev.c).abs()).max((c.l - prev.c).abs())
+        (c.h - c.l)
+            .max((c.h - prev.c).abs())
+            .max((c.l - prev.c).abs())
     };
     let trs: Vec<f64> = candles.windows(2).map(|w| tr(&w[0], &w[1])).collect();
     let nf = n as f64;
@@ -188,7 +202,11 @@ pub fn periods_per_year(candles: &[Candle]) -> f64 {
                 .unwrap_or(false)
         })
         .count();
-    if weekend as f64 / tail.len() as f64 > 0.1 { 365.0 } else { 252.0 }
+    if weekend as f64 / tail.len() as f64 > 0.1 {
+        365.0
+    } else {
+        252.0
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -199,7 +217,15 @@ pub fn periods_per_year(candles: &[Candle]) -> f64 {
 pub fn trend(closes: &[f64]) -> Option<Trend> {
     let price = *closes.last()?;
     let sma50 = sma(closes, 50)?;
-    let sign = |x: f64| if x > 0.0 { 1 } else if x < 0.0 { -1 } else { 0 };
+    let sign = |x: f64| {
+        if x > 0.0 {
+            1
+        } else if x < 0.0 {
+            -1
+        } else {
+            0
+        }
+    };
 
     let slope50 = (closes.len() >= 60)
         .then(|| sma(&closes[..closes.len() - 10], 50))
@@ -240,7 +266,9 @@ pub fn support_resistance(
     tol: f64,
     top: usize,
 ) -> (Vec<f64>, Vec<f64>) {
-    let Some(last) = candles.last() else { return (vec![], vec![]) };
+    let Some(last) = candles.last() else {
+        return (vec![], vec![]);
+    };
     if candles.len() < 2 * k + 1 {
         return (vec![], vec![]);
     }
@@ -275,8 +303,16 @@ pub fn support_resistance(
     let price = last.c;
     // Un nivel casi pegado al precio no sirve ni de soporte ni de resistencia.
     let near = tol / 3.0;
-    let mut sup: Vec<f64> = clusters.iter().copied().filter(|l| *l < price * (1.0 - near)).collect();
-    let mut res: Vec<f64> = clusters.iter().copied().filter(|l| *l > price * (1.0 + near)).collect();
+    let mut sup: Vec<f64> = clusters
+        .iter()
+        .copied()
+        .filter(|l| *l < price * (1.0 - near))
+        .collect();
+    let mut res: Vec<f64> = clusters
+        .iter()
+        .copied()
+        .filter(|l| *l > price * (1.0 + near))
+        .collect();
     sup.sort_by(|a, b| b.total_cmp(a));
     res.sort_by(f64::total_cmp);
     sup.truncate(top);
@@ -295,7 +331,8 @@ fn at_or_before(candles: &[Candle], ts: i64) -> Option<f64> {
 
 fn sub_months(ts: i64, months: u32) -> Option<i64> {
     let dt = DateTime::<Utc>::from_timestamp(ts, 0)?;
-    dt.checked_sub_months(Months::new(months)).map(|d| d.timestamp())
+    dt.checked_sub_months(Months::new(months))
+        .map(|d| d.timestamp())
 }
 
 /// Limpia la serie: ordena por tiempo, descarta velas inválidas y repara máximos/mínimos rotos.
@@ -304,9 +341,21 @@ fn sanitize(candles: &[Candle]) -> Vec<Candle> {
         .iter()
         .filter(|c| c.c.is_finite() && c.c > 0.0)
         .map(|c| {
-            let o = if c.o.is_finite() && c.o > 0.0 { c.o } else { c.c };
-            let h = if c.h.is_finite() && c.h > 0.0 { c.h.max(o).max(c.c) } else { o.max(c.c) };
-            let l = if c.l.is_finite() && c.l > 0.0 { c.l.min(o).min(c.c) } else { o.min(c.c) };
+            let o = if c.o.is_finite() && c.o > 0.0 {
+                c.o
+            } else {
+                c.c
+            };
+            let h = if c.h.is_finite() && c.h > 0.0 {
+                c.h.max(o).max(c.c)
+            } else {
+                o.max(c.c)
+            };
+            let l = if c.l.is_finite() && c.l > 0.0 {
+                c.l.min(o).min(c.c)
+            } else {
+                o.min(c.c)
+            };
             Candle { o, h, l, ..*c }
         })
         .collect();
@@ -320,7 +369,9 @@ fn sanitize(candles: &[Candle]) -> Vec<Candle> {
 pub fn compute(candles: &[Candle]) -> Indicators {
     let candles = sanitize(candles);
     let mut out = Indicators::default();
-    let Some(last) = candles.last().copied() else { return out };
+    let Some(last) = candles.last().copied() else {
+        return out;
+    };
     let closes: Vec<f64> = candles.iter().map(|c| c.c).collect();
 
     out.as_of = DateTime::<Utc>::from_timestamp(last.t, 0);
@@ -359,7 +410,9 @@ pub fn compute(candles: &[Candle]) -> Indicators {
     }
 
     let ret = |target: Option<i64>| {
-        target.and_then(|t| at_or_before(&candles, t)).map(|past| last.c / past - 1.0)
+        target
+            .and_then(|t| at_or_before(&candles, t))
+            .map(|past| last.c / past - 1.0)
     };
     out.return1w = ret(Some(last.t - 7 * DAY));
     out.return1m = ret(sub_months(last.t, 1));
@@ -396,7 +449,10 @@ mod tests {
     use super::*;
 
     fn approx(a: f64, b: f64, tol: f64) {
-        assert!((a - b).abs() <= tol, "esperado {b}, obtenido {a} (tol {tol})");
+        assert!(
+            (a - b).abs() <= tol,
+            "esperado {b}, obtenido {a} (tol {tol})"
+        );
     }
 
     /// Serie de la hoja de referencia de StockCharts (Wilder, 14). Sus RSI publicados (70.53 y
@@ -461,14 +517,22 @@ mod tests {
     }
 
     fn candle(t: i64, o: f64, h: f64, l: f64, c: f64) -> Candle {
-        Candle { t, o, h, l, c, v: Some(1000.0) }
+        Candle {
+            t,
+            o,
+            h,
+            l,
+            c,
+            v: Some(1000.0),
+        }
     }
 
     #[test]
     fn atr_known_values() {
         // Rango constante de 2 y sin huecos: TR = 2 siempre → ATR = 2.
-        let cs: Vec<Candle> =
-            (0..30).map(|i| candle(i * DAY, 10.0, 11.0, 9.0, 10.0)).collect();
+        let cs: Vec<Candle> = (0..30)
+            .map(|i| candle(i * DAY, 10.0, 11.0, 9.0, 10.0))
+            .collect();
         approx(atr(&cs, 14).unwrap(), 2.0, 1e-12);
         // Un hueco al alza: TR = |h - cierre previo| domina.
         let mut gap = cs.clone();
@@ -482,7 +546,9 @@ mod tests {
     #[test]
     fn matches_independent_reference_on_synthetic_series() {
         let n = 120;
-        let c: Vec<f64> = (0..n).map(|i| 100.0 + 10.0 * (i as f64 / 5.0).sin() + i as f64 * 0.1).collect();
+        let c: Vec<f64> = (0..n)
+            .map(|i| 100.0 + 10.0 * (i as f64 / 5.0).sin() + i as f64 * 0.1)
+            .collect();
         let candles: Vec<Candle> = c
             .iter()
             .enumerate()
@@ -519,17 +585,28 @@ mod tests {
         let rets: Vec<f64> = closes.windows(2).map(|w| (w[1] / w[0]).ln()).collect();
         let mean = rets.iter().sum::<f64>() / 30.0;
         let sd = (rets.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / 29.0).sqrt();
-        approx(annualized_volatility(&closes, 30, 252.0).unwrap(), sd * 252f64.sqrt(), 1e-12);
+        approx(
+            annualized_volatility(&closes, 30, 252.0).unwrap(),
+            sd * 252f64.sqrt(),
+            1e-12,
+        );
         assert!(annualized_volatility(&closes[..30], 30, 252.0).is_none());
 
         assert_eq!(max_drawdown(&[1.0, 2.0, 3.0]), Some(0.0));
-        approx(max_drawdown(&[100.0, 120.0, 60.0, 90.0, 80.0]).unwrap(), -0.5, 1e-12);
+        approx(
+            max_drawdown(&[100.0, 120.0, 60.0, 90.0, 80.0]).unwrap(),
+            -0.5,
+            1e-12,
+        );
     }
 
     #[test]
     fn calendar_returns_and_52w() {
         // 2 años de cierres diarios 1..=730 (día 0 = 2024-01-01), siempre al alza.
-        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap().timestamp();
+        let start = Utc
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .unwrap()
+            .timestamp();
         let cs: Vec<Candle> = (0..730)
             .map(|i| {
                 let c = 100.0 + i as f64;
@@ -547,7 +624,11 @@ mod tests {
         // YTD: cierre del 2024-12-31 (día 365) → el 2025-01-01 es el día 366; 2025-12-30 = 729.
         approx(ind.return_ytd.unwrap(), last / (100.0 + 365.0) - 1.0, 1e-12);
         approx(ind.high52w.unwrap(), last + 1.0, 1e-9);
-        approx(ind.dist_from_high52w.unwrap(), last / (last + 1.0) - 1.0, 1e-12);
+        approx(
+            ind.dist_from_high52w.unwrap(),
+            last / (last + 1.0) - 1.0,
+            1e-12,
+        );
         assert_eq!(ind.max_drawdown1y, Some(0.0));
         assert_eq!(ind.trend, Some(Trend::StrongUp));
         approx(ind.volume_avg20.unwrap(), 1000.0, 1e-9);
@@ -556,10 +637,15 @@ mod tests {
 
     #[test]
     fn short_history_leaves_none() {
-        let cs: Vec<Candle> = (0..10).map(|i| candle(i * DAY, 10.0, 11.0, 9.0, 10.0)).collect();
+        let cs: Vec<Candle> = (0..10)
+            .map(|i| candle(i * DAY, 10.0, 11.0, 9.0, 10.0))
+            .collect();
         let ind = compute(&cs);
         assert!(ind.sma20.is_none() && ind.rsi14.is_none() && ind.trend.is_none());
-        assert!(ind.high52w.is_none(), "no debe inventarse 52 semanas con 10 días");
+        assert!(
+            ind.high52w.is_none(),
+            "no debe inventarse 52 semanas con 10 días"
+        );
         assert_eq!(ind.last_close, Some(10.0));
         assert!(compute(&[]).last_close.is_none());
     }

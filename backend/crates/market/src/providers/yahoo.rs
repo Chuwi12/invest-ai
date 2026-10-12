@@ -37,10 +37,30 @@ const COOKIE_URL: &str = "https://fc.yahoo.com";
 /// Símbolos de Yahoo que alimentan el contexto macro cuando no hay FRED (o lo complementan).
 const MACRO_SYMBOLS: &[(&str, &str, &str, &str)] = &[
     // (clave, nombre, símbolo Yahoo, unidad)
-    ("us10y", "Rendimiento del bono de EE. UU. a 10 años", "^TNX", "%"),
-    ("us5y", "Rendimiento del bono de EE. UU. a 5 años", "^FVX", "%"),
-    ("us30y", "Rendimiento del bono de EE. UU. a 30 años", "^TYX", "%"),
-    ("us3m", "Rendimiento de la letra de EE. UU. a 3 meses", "^IRX", "%"),
+    (
+        "us10y",
+        "Rendimiento del bono de EE. UU. a 10 años",
+        "^TNX",
+        "%",
+    ),
+    (
+        "us5y",
+        "Rendimiento del bono de EE. UU. a 5 años",
+        "^FVX",
+        "%",
+    ),
+    (
+        "us30y",
+        "Rendimiento del bono de EE. UU. a 30 años",
+        "^TYX",
+        "%",
+    ),
+    (
+        "us3m",
+        "Rendimiento de la letra de EE. UU. a 3 meses",
+        "^IRX",
+        "%",
+    ),
     ("vix", "Índice de volatilidad VIX", "^VIX", "puntos"),
     ("dxy", "Índice del dólar (DXY)", "DX-Y.NYB", "puntos"),
     ("eurusd", "Euro / dólar", "EURUSD=X", "USD"),
@@ -120,7 +140,12 @@ impl Yahoo {
 
     async fn fetch_session(&self) -> PResult<Session> {
         // fc.yahoo.com responde 404, pero con la cookie de sesión en `Set-Cookie`.
-        let resp = self.http.get(COOKIE_URL).send().await.map_err(map_reqwest)?;
+        let resp = self
+            .http
+            .get(COOKIE_URL)
+            .send()
+            .await
+            .map_err(map_reqwest)?;
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Err(ProviderError::RateLimited { retry_after: None });
         }
@@ -138,7 +163,9 @@ impl Yahoo {
             return Err(ProviderError::upstream("Yahoo no entregó cookie de sesión"));
         }
         let body = send(
-            self.http.get(format!("{BASE}/v1/test/getcrumb")).header(header::COOKIE, &cookie),
+            self.http
+                .get(format!("{BASE}/v1/test/getcrumb"))
+                .header(header::COOKIE, &cookie),
         )
         .await?;
         check_status(&body)?;
@@ -160,9 +187,13 @@ impl Yahoo {
             let s = self.session().await?;
             let mut q: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
             q.push(("crumb", &s.crumb));
-            let body =
-                send(self.http.get(url.clone()).query(&q).header(header::COOKIE, &s.cookie))
-                    .await?;
+            let body = send(
+                self.http
+                    .get(url.clone())
+                    .query(&q)
+                    .header(header::COOKIE, &s.cookie),
+            )
+            .await?;
             let bad_crumb = body.status == reqwest::StatusCode::UNAUTHORIZED
                 || body.text.contains("Invalid Crumb")
                 || body.text.contains("Invalid Cookie");
@@ -174,8 +205,12 @@ impl Yahoo {
             check_status(&body)?;
             return Ok(body.text);
         }
-        let detail = last.map(|b| http::snippet(&b.text, 100)).unwrap_or_default();
-        Err(ProviderError::upstream(format!("sesión de Yahoo rechazada: {detail}")))
+        let detail = last
+            .map(|b| http::snippet(&b.text, 100))
+            .unwrap_or_default();
+        Err(ProviderError::upstream(format!(
+            "sesión de Yahoo rechazada: {detail}"
+        )))
     }
 
     async fn get_plain(&self, url: Url, query: &[(&str, String)]) -> PResult<String> {
@@ -209,9 +244,9 @@ impl Yahoo {
             .await;
         match res {
             // Para símbolos inexistentes Yahoo responde 404 con el JSON de error en el cuerpo.
-            Err(ProviderError::NotFound(_)) => {
-                Err(ProviderError::NotFound(format!("símbolo {symbol} no encontrado")))
-            }
+            Err(ProviderError::NotFound(_)) => Err(ProviderError::NotFound(format!(
+                "símbolo {symbol} no encontrado"
+            ))),
             other => parse_chart(&other?),
         }
     }
@@ -235,7 +270,9 @@ impl Yahoo {
         let mut out = Vec::new();
         for chunk in symbols.chunks(50) {
             let url = Self::url(&["v7", "finance", "quote"])?;
-            let text = self.get_with_crumb(url, &[("symbols", chunk.join(","))]).await?;
+            let text = self
+                .get_with_crumb(url, &[("symbols", chunk.join(","))])
+                .await?;
             out.extend(parse_quotes(&text, &by_symbol)?);
         }
         Ok(out)
@@ -291,7 +328,9 @@ impl Provider for Yahoo {
         // por sesión o límite, el chart no necesita crumb y sirve de respaldo.
         match self.batch_quotes(std::slice::from_ref(id)).await {
             Ok(mut v) if !v.is_empty() => Ok(v.swap_remove(0)),
-            Ok(_) => Err(ProviderError::NotFound(format!("símbolo {symbol} no encontrado"))),
+            Ok(_) => Err(ProviderError::NotFound(format!(
+                "símbolo {symbol} no encontrado"
+            ))),
             Err(ProviderError::Upstream(_) | ProviderError::RateLimited { .. }) => {
                 self.chart_quote(id, &symbol).await
             }
@@ -314,7 +353,9 @@ impl Provider for Yahoo {
                     .collect::<Vec<_>>()
                     .await;
                 if quotes.is_empty() {
-                    Err(ProviderError::upstream("Yahoo no devolvió ninguna cotización"))
+                    Err(ProviderError::upstream(
+                        "Yahoo no devolvió ninguna cotización",
+                    ))
                 } else {
                     Ok(quotes)
                 }
@@ -323,10 +364,17 @@ impl Provider for Yahoo {
         }
     }
 
-    async fn history(&self, id: &AssetId, range: Range, interval: Interval) -> PResult<Vec<Candle>> {
+    async fn history(
+        &self,
+        id: &AssetId,
+        range: Range,
+        interval: Interval,
+    ) -> PResult<Vec<Candle>> {
         let symbol = to_yahoo_symbol(id).ok_or(ProviderError::Unsupported)?;
         let interval = coerce_interval(range, interval);
-        let data = self.chart(&symbol, range.as_str(), yahoo_interval(interval)).await?;
+        let data = self
+            .chart(&symbol, range.as_str(), yahoo_interval(interval))
+            .await?;
         Ok(data.candles)
     }
 
@@ -343,7 +391,9 @@ impl Provider for Yahoo {
         };
         let symbol = to_yahoo_symbol(id).ok_or(ProviderError::Unsupported)?;
         let url = Self::url(&["v10", "finance", "quoteSummary", &symbol])?;
-        let text = self.get_with_crumb(url, &[("modules", modules.to_string())]).await?;
+        let text = self
+            .get_with_crumb(url, &[("modules", modules.to_string())])
+            .await?;
         parse_quote_summary(&text, Utc::now()).map(Some)
     }
 
@@ -514,8 +564,10 @@ pub fn parse_search(text: &str) -> PResult<(Vec<SearchHit>, Vec<NewsItem>)> {
             .or_else(|| q["shortname"].as_str())
             .unwrap_or(symbol)
             .to_string();
-        let exchange =
-            q["exchDisp"].as_str().or_else(|| q["exchange"].as_str()).map(str::to_string);
+        let exchange = q["exchDisp"]
+            .as_str()
+            .or_else(|| q["exchange"].as_str())
+            .map(str::to_string);
         let score = q["score"].as_f64().unwrap_or(0.0).max(0.0);
         let relevance = ((1.0 + score).ln() / 1_000_001f64.ln()).clamp(0.0, 1.0);
         let tier = exchange_tier(q["exchange"].as_str().unwrap_or(""));
@@ -533,7 +585,12 @@ pub fn parse_search(text: &str) -> PResult<(Vec<SearchHit>, Vec<NewsItem>)> {
             liquidity: relevance * tier,
         });
     }
-    let news = v["news"].as_array().into_iter().flatten().filter_map(news_from_value).collect();
+    let news = v["news"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(news_from_value)
+        .collect();
     Ok((hits, news))
 }
 
@@ -664,25 +721,45 @@ pub fn parse_chart(text: &str) -> PResult<ChartData> {
     let result = env
         .chart
         .result
-        .and_then(|mut r| if r.is_empty() { None } else { Some(r.swap_remove(0)) })
+        .and_then(|mut r| {
+            if r.is_empty() {
+                None
+            } else {
+                Some(r.swap_remove(0))
+            }
+        })
         .ok_or_else(|| ProviderError::NotFound("Yahoo no devolvió datos".into()))?;
     let q = result.indicators.quote.first();
     let get = |v: Option<&Vec<Option<f64>>>, i: usize| v.and_then(|v| v.get(i).copied().flatten());
     let mut candles = Vec::with_capacity(result.timestamp.len());
     for (i, &t) in result.timestamp.iter().enumerate() {
         // Una vela sin cierre es un hueco (mercado cerrado/halt): se descarta.
-        let Some(c) = get(q.map(|q| &q.close), i).filter(|c| c.is_finite()) else { continue };
+        let Some(c) = get(q.map(|q| &q.close), i).filter(|c| c.is_finite()) else {
+            continue;
+        };
         let o = get(q.map(|q| &q.open), i).unwrap_or(c);
         let h = get(q.map(|q| &q.high), i).unwrap_or(c).max(o).max(c);
         let l = get(q.map(|q| &q.low), i).unwrap_or(c).min(o).min(c);
-        candles.push(Candle { t, o, h, l, c, v: get(q.map(|q| &q.volume), i) });
+        candles.push(Candle {
+            t,
+            o,
+            h,
+            l,
+            c,
+            v: get(q.map(|q| &q.volume), i),
+        });
     }
-    Ok(ChartData { meta: result.meta, candles })
+    Ok(ChartData {
+        meta: result.meta,
+        candles,
+    })
 }
 
 fn state_from_periods(now_ts: i64, p: &TradingPeriods) -> MarketState {
-    let within =
-        |p: &Option<Period>| p.as_ref().is_some_and(|p| now_ts >= p.start && now_ts < p.end);
+    let within = |p: &Option<Period>| {
+        p.as_ref()
+            .is_some_and(|p| now_ts >= p.start && now_ts < p.end)
+    };
     if within(&p.regular) {
         MarketState::Regular
     } else if within(&p.pre) {
@@ -698,8 +775,14 @@ fn state_from_periods(now_ts: i64, p: &TradingPeriods) -> MarketState {
 pub fn quote_from_chart(id: &AssetId, data: &ChartData, now: DateTime<Utc>) -> Quote {
     let m = &data.meta;
     let last = data.candles.last();
-    let price = m.regular_market_price.or(last.map(|c| c.c)).unwrap_or(f64::NAN);
-    let prev = m.chart_previous_close.or(m.previous_close).filter(|p| *p > 0.0);
+    let price = m
+        .regular_market_price
+        .or(last.map(|c| c.c))
+        .unwrap_or(f64::NAN);
+    let prev = m
+        .chart_previous_close
+        .or(m.previous_close)
+        .filter(|p| *p > 0.0);
     let state = if id.class == AssetClass::Crypto
         || m.instrument_type.as_deref() == Some("CRYPTOCURRENCY")
     {
@@ -747,22 +830,30 @@ fn market_state_from_str(s: &str) -> MarketState {
 }
 
 /// Convierte la respuesta en cotizaciones usando el mapa símbolo de Yahoo → ids pedidos.
-pub fn parse_quotes(
-    text: &str,
-    requested: &HashMap<String, Vec<&AssetId>>,
-) -> PResult<Vec<Quote>> {
+pub fn parse_quotes(text: &str, requested: &HashMap<String, Vec<&AssetId>>) -> PResult<Vec<Quote>> {
     let v: Value = parse_json(text)?;
     if let Some(err) = v["quoteResponse"]["error"].as_object() {
-        let msg = err.get("description").and_then(Value::as_str).unwrap_or("error desconocido");
+        let msg = err
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("error desconocido");
         return Err(ProviderError::Upstream(format!("Yahoo quote: {msg}")));
     }
     let mut out = Vec::new();
-    for r in v["quoteResponse"]["result"].as_array().into_iter().flatten() {
-        let Some(sym) = r["symbol"].as_str() else { continue };
+    for r in v["quoteResponse"]["result"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        let Some(sym) = r["symbol"].as_str() else {
+            continue;
+        };
         let Some(price) = r["regularMarketPrice"].as_f64().filter(|p| p.is_finite()) else {
             continue;
         };
-        let ids = requested.get(sym).or_else(|| requested.get(&sym.to_ascii_uppercase()));
+        let ids = requested
+            .get(sym)
+            .or_else(|| requested.get(&sym.to_ascii_uppercase()));
         let Some(ids) = ids else { continue };
         let is_crypto = r["quoteType"].as_str() == Some("CRYPTOCURRENCY");
         let ts = r["regularMarketTime"]
@@ -810,7 +901,9 @@ fn raw(v: &Value) -> Option<f64> {
 }
 
 fn raw_date(v: &Value) -> Option<NaiveDate> {
-    raw(v).and_then(|t| DateTime::<Utc>::from_timestamp(t as i64, 0)).map(|d| d.date_naive())
+    raw(v)
+        .and_then(|t| DateTime::<Utc>::from_timestamp(t as i64, 0))
+        .map(|d| d.date_naive())
 }
 
 fn first_some(vals: &[Option<f64>]) -> Option<f64> {
@@ -821,7 +914,10 @@ pub fn parse_quote_summary(text: &str, now: DateTime<Utc>) -> PResult<Fundamenta
     let v: Value = parse_json(text)?;
     if let Some(err) = v["quoteSummary"]["error"].as_object() {
         let code = err.get("code").and_then(Value::as_str).unwrap_or("");
-        let msg = err.get("description").and_then(Value::as_str).unwrap_or("error desconocido");
+        let msg = err
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("error desconocido");
         return Err(if code == "Not Found" {
             ProviderError::NotFound(msg.into())
         } else {
@@ -926,19 +1022,49 @@ pub fn parse_quote_summary(text: &str, now: DateTime<Utc>) -> PResult<Fundamenta
             f.extra.insert(k.to_string(), val);
         }
     };
-    extra("recommendationKey", fd["recommendationKey"].as_str().map(|s| json!(s)));
+    extra(
+        "recommendationKey",
+        fd["recommendationKey"].as_str().map(|s| json!(s)),
+    );
     extra("ebitda", raw(&fd["ebitda"]).map(|x| json!(x)));
-    extra("operatingCashflow", raw(&fd["operatingCashflow"]).map(|x| json!(x)));
+    extra(
+        "operatingCashflow",
+        raw(&fd["operatingCashflow"]).map(|x| json!(x)),
+    );
     extra("quickRatio", raw(&fd["quickRatio"]).map(|x| json!(x)));
     extra("bookValue", raw(&ks["bookValue"]).map(|x| json!(x)));
-    extra("exDividendDate", raw_date(&sd["exDividendDate"]).map(|d| json!(d)));
+    extra(
+        "exDividendDate",
+        raw_date(&sd["exDividendDate"]).map(|d| json!(d)),
+    );
     extra("averageVolume", raw(&sd["averageVolume"]).map(|x| json!(x)));
-    extra("financialCurrency", price["currency"].as_str().map(|s| json!(s)));
-    extra("category", fund["categoryName"].as_str().or(ks["category"].as_str()).map(|s| json!(s)));
-    extra("fundFamily", fund["family"].as_str().or(ks["fundFamily"].as_str()).map(|s| json!(s)));
+    extra(
+        "financialCurrency",
+        price["currency"].as_str().map(|s| json!(s)),
+    );
+    extra(
+        "category",
+        fund["categoryName"]
+            .as_str()
+            .or(ks["category"].as_str())
+            .map(|s| json!(s)),
+    );
+    extra(
+        "fundFamily",
+        fund["family"]
+            .as_str()
+            .or(ks["fundFamily"].as_str())
+            .map(|s| json!(s)),
+    );
     extra("ytdReturn", raw(&ks["ytdReturn"]).map(|x| json!(x)));
-    extra("threeYearAverageReturn", raw(&ks["threeYearAverageReturn"]).map(|x| json!(x)));
-    extra("fiveYearAverageReturn", raw(&ks["fiveYearAverageReturn"]).map(|x| json!(x)));
+    extra(
+        "threeYearAverageReturn",
+        raw(&ks["threeYearAverageReturn"]).map(|x| json!(x)),
+    );
+    extra(
+        "fiveYearAverageReturn",
+        raw(&ks["fiveYearAverageReturn"]).map(|x| json!(x)),
+    );
     Ok(f)
 }
 
@@ -949,7 +1075,10 @@ pub fn parse_quote_summary(text: &str, now: DateTime<Utc>) -> PResult<Fundamenta
 pub fn parse_options(text: &str) -> PResult<OptionsChain> {
     let v: Value = parse_json(text)?;
     if let Some(err) = v["optionChain"]["error"].as_object() {
-        let msg = err.get("description").and_then(Value::as_str).unwrap_or("error desconocido");
+        let msg = err
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("error desconocido");
         return Err(ProviderError::Upstream(format!("Yahoo options: {msg}")));
     }
     let r = v["optionChain"]["result"]
@@ -982,7 +1111,10 @@ pub fn parse_options(text: &str) -> PResult<OptionsChain> {
     };
     let set = &r["options"][0];
     Ok(OptionsChain {
-        underlying: r["underlyingSymbol"].as_str().unwrap_or_default().to_string(),
+        underlying: r["underlyingSymbol"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         spot: r["quote"]["regularMarketPrice"].as_f64(),
         expirations: r["expirationDates"]
             .as_array()
@@ -1033,7 +1165,10 @@ mod tests {
         let s = |c, sym: &str| to_yahoo_symbol(&AssetId::new(c, sym));
         assert_eq!(s(AssetClass::Crypto, "btc").as_deref(), Some("BTC-USD"));
         assert_eq!(s(AssetClass::Forex, "EUR/USD").as_deref(), Some("EURUSD=X"));
-        assert_eq!(s(AssetClass::Forex, "EURUSD=X").as_deref(), Some("EURUSD=X"));
+        assert_eq!(
+            s(AssetClass::Forex, "EURUSD=X").as_deref(),
+            Some("EURUSD=X")
+        );
         assert_eq!(s(AssetClass::Bond, "DGS10").as_deref(), Some("^TNX"));
         assert_eq!(s(AssetClass::Bond, "T10Y2Y"), None);
         assert_eq!(s(AssetClass::Index, "^GSPC").as_deref(), Some("^GSPC"));
@@ -1043,13 +1178,19 @@ mod tests {
     #[test]
     fn parses_search_with_news() {
         let (hits, news) = parse_search(SEARCH).unwrap();
-        let aapl = hits.iter().find(|h| h.summary.symbol == "AAPL").expect("AAPL");
+        let aapl = hits
+            .iter()
+            .find(|h| h.summary.symbol == "AAPL")
+            .expect("AAPL");
         assert_eq!(aapl.summary.class, AssetClass::Stock);
         assert_eq!(aapl.summary.name, "Apple Inc.");
         assert_eq!(aapl.summary.exchange.as_deref(), Some("NASDAQ"));
         assert_eq!(aapl.summary.id.to_string(), "stock:AAPL");
         // El futuro sobre acciones debe quedar como `future` y menos líquido que la acción.
-        let fut = hits.iter().find(|h| h.summary.symbol == "SAAPL=F").expect("futuro");
+        let fut = hits
+            .iter()
+            .find(|h| h.summary.symbol == "SAAPL=F")
+            .expect("futuro");
         assert_eq!(fut.summary.class, AssetClass::Future);
         assert!(aapl.liquidity > fut.liquidity);
         assert!(!news.is_empty());
@@ -1073,9 +1214,17 @@ mod tests {
     #[test]
     fn parses_daily_history() {
         let d = parse_chart(CHART_1Y).unwrap();
-        assert!(d.candles.len() > 240 && d.candles.len() < 260, "{}", d.candles.len());
+        assert!(
+            d.candles.len() > 240 && d.candles.len() < 260,
+            "{}",
+            d.candles.len()
+        );
         assert!(d.candles.windows(2).all(|w| w[0].t < w[1].t));
-        assert!(d.candles.iter().all(|c| c.l <= c.o && c.o <= c.h && c.l <= c.c && c.c <= c.h));
+        assert!(
+            d.candles
+                .iter()
+                .all(|c| c.l <= c.o && c.o <= c.h && c.l <= c.c && c.c <= c.h)
+        );
         assert!(d.candles.iter().all(|c| c.v.is_some()));
     }
 
@@ -1094,12 +1243,18 @@ mod tests {
         assert_eq!(q.currency.as_deref(), Some("USD"));
         assert_eq!(q.high, Some(338.61));
         let closed = DateTime::<Utc>::from_timestamp(1_791_700_000, 0).unwrap();
-        assert_eq!(quote_from_chart(&id, &d, closed).market_state, MarketState::Closed);
+        assert_eq!(
+            quote_from_chart(&id, &d, closed).market_state,
+            MarketState::Closed
+        );
     }
 
     #[test]
     fn chart_not_found_is_not_found() {
-        assert!(matches!(parse_chart(CHART_404), Err(ProviderError::NotFound(_))));
+        assert!(matches!(
+            parse_chart(CHART_404),
+            Err(ProviderError::NotFound(_))
+        ));
     }
 
     #[test]
@@ -1113,7 +1268,9 @@ mod tests {
         ];
         let mut req: HashMap<String, Vec<&AssetId>> = HashMap::new();
         for id in &ids {
-            req.entry(to_yahoo_symbol(id).unwrap()).or_default().push(id);
+            req.entry(to_yahoo_symbol(id).unwrap())
+                .or_default()
+                .push(id);
         }
         let qs = parse_quotes(QUOTES, &req).unwrap();
         assert_eq!(qs.len(), 5);

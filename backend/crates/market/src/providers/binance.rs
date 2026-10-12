@@ -11,9 +11,7 @@ use reqwest::Client;
 use serde_json::Value;
 use url::Url;
 
-use super::{
-    Capability, PResult, Provider, ProviderError, ProviderInfo, from_ms, num,
-};
+use super::{Capability, PResult, Provider, ProviderError, ProviderInfo, from_ms, num};
 use crate::{
     http::{check_status, parse_json, send},
     realtime::{RawTick, WsFeed},
@@ -41,11 +39,7 @@ impl Binance {
                 name: "binance",
                 requires_key: false,
                 has_key: false,
-                capabilities: vec![
-                    Capability::Quote,
-                    Capability::Realtime,
-                    Capability::History,
-                ],
+                capabilities: vec![Capability::Quote, Capability::Realtime, Capability::History],
                 classes: vec![AssetClass::Crypto],
                 // Peso de 24hr = 2 por símbolo; el límite de Binance es 6000 de peso/min.
                 rate_per_sec: 10.0,
@@ -65,12 +59,11 @@ impl Binance {
     /// GET interpretando el error `{"code":-1121,"msg":"Invalid symbol."}` como `NotFound`.
     async fn get(&self, url: Url, query: &[(&str, String)]) -> PResult<String> {
         let body = send(self.http.get(url).query(query)).await?;
-        if body.status == reqwest::StatusCode::BAD_REQUEST {
-            if let Ok(v) = serde_json::from_str::<Value>(&body.text) {
-                if v["code"].as_i64() == Some(-1121) {
-                    return Err(ProviderError::NotFound("par no listado en Binance".into()));
-                }
-            }
+        if body.status == reqwest::StatusCode::BAD_REQUEST
+            && let Ok(v) = serde_json::from_str::<Value>(&body.text)
+            && v["code"].as_i64() == Some(-1121)
+        {
+            return Err(ProviderError::NotFound("par no listado en Binance".into()));
         }
         check_status(&body)?;
         Ok(body.text)
@@ -83,7 +76,10 @@ pub fn pair(id: &AssetId) -> Option<String> {
         return None;
     }
     let s = id.symbol.trim().to_ascii_uppercase();
-    let base = s.strip_suffix("-USD").or_else(|| s.strip_suffix("USDT")).unwrap_or(&s);
+    let base = s
+        .strip_suffix("-USD")
+        .or_else(|| s.strip_suffix("USDT"))
+        .unwrap_or(&s);
     let ok = (2..=12).contains(&base.len()) && base.chars().all(|c| c.is_ascii_alphanumeric());
     ok.then(|| format!("{base}USDT"))
 }
@@ -147,7 +143,8 @@ impl Provider for Binance {
         let mut out = Vec::new();
         for chunk in pairs.chunks(100) {
             let url = self.url(&["api", "v3", "ticker", "24hr"])?;
-            let list = serde_json::to_string(chunk).map_err(|e| ProviderError::upstream(e.to_string()))?;
+            let list =
+                serde_json::to_string(chunk).map_err(|e| ProviderError::upstream(e.to_string()))?;
             match self.get(url, &[("symbols", list)]).await {
                 Ok(text) => out.extend(parse_ticker_batch(&text)?),
                 // Un par inexistente invalida todo el lote: se reintentan uno a uno.
@@ -165,7 +162,12 @@ impl Provider for Binance {
         Ok(out)
     }
 
-    async fn history(&self, id: &AssetId, range: Range, interval: Interval) -> PResult<Vec<Candle>> {
+    async fn history(
+        &self,
+        id: &AssetId,
+        range: Range,
+        interval: Interval,
+    ) -> PResult<Vec<Candle>> {
         let symbol = pair(id).ok_or(ProviderError::Unsupported)?;
         let url = self.url(&["api", "v3", "klines"])?;
         let mut q = vec![
@@ -187,7 +189,9 @@ impl Provider for Binance {
 
 /// Quote desde un objeto de `/ticker/24hr`. `id` fuerza el identificador; sin él se deduce del par.
 pub fn quote_from_ticker(v: &Value, id: Option<&AssetId>) -> PResult<Quote> {
-    let sym = v["symbol"].as_str().ok_or_else(|| ProviderError::upstream("ticker sin símbolo"))?;
+    let sym = v["symbol"]
+        .as_str()
+        .ok_or_else(|| ProviderError::upstream("ticker sin símbolo"))?;
     let id = match id {
         Some(i) => i.clone(),
         None => AssetId::new(
@@ -195,10 +199,13 @@ pub fn quote_from_ticker(v: &Value, id: Option<&AssetId>) -> PResult<Quote> {
             base_of(sym).ok_or_else(|| ProviderError::upstream("par que no es USDT"))?,
         ),
     };
-    let price = num(&v["lastPrice"]).filter(|p| *p > 0.0).ok_or_else(|| {
-        ProviderError::upstream("ticker sin precio")
-    })?;
-    let ts = v["closeTime"].as_i64().and_then(from_ms).unwrap_or_else(Utc::now);
+    let price = num(&v["lastPrice"])
+        .filter(|p| *p > 0.0)
+        .ok_or_else(|| ProviderError::upstream("ticker sin precio"))?;
+    let ts = v["closeTime"]
+        .as_i64()
+        .and_then(from_ms)
+        .unwrap_or_else(Utc::now);
     Ok(Quote {
         id,
         price,
@@ -220,13 +227,20 @@ pub fn quote_from_ticker(v: &Value, id: Option<&AssetId>) -> PResult<Quote> {
 
 pub fn parse_ticker_batch(text: &str) -> PResult<Vec<Quote>> {
     let v: Value = parse_json(text)?;
-    let arr = v.as_array().ok_or_else(|| ProviderError::upstream("se esperaba una lista de tickers"))?;
-    Ok(arr.iter().filter_map(|t| quote_from_ticker(t, None).ok()).collect())
+    let arr = v
+        .as_array()
+        .ok_or_else(|| ProviderError::upstream("se esperaba una lista de tickers"))?;
+    Ok(arr
+        .iter()
+        .filter_map(|t| quote_from_ticker(t, None).ok())
+        .collect())
 }
 
 pub fn parse_klines(text: &str) -> PResult<Vec<Candle>> {
     let v: Value = parse_json(text)?;
-    let arr = v.as_array().ok_or_else(|| ProviderError::upstream("se esperaba una lista de velas"))?;
+    let arr = v
+        .as_array()
+        .ok_or_else(|| ProviderError::upstream("se esperaba una lista de velas"))?;
     let mut out = Vec::with_capacity(arr.len());
     for k in arr {
         let Some(k) = k.as_array() else { continue };
@@ -239,7 +253,14 @@ pub fn parse_klines(text: &str) -> PResult<Vec<Candle>> {
         ) else {
             continue;
         };
-        out.push(Candle { t: t / 1000, o, h, l, c, v: k.get(5).and_then(num) });
+        out.push(Candle {
+            t: t / 1000,
+            o,
+            h,
+            l,
+            c,
+            v: k.get(5).and_then(num),
+        });
     }
     Ok(out)
 }
@@ -255,7 +276,9 @@ pub struct BinanceFeed {
 
 impl Default for BinanceFeed {
     fn default() -> Self {
-        Self { ws_base: WS_BASE.into() }
+        Self {
+            ws_base: WS_BASE.into(),
+        }
     }
 }
 
@@ -273,8 +296,10 @@ impl WsFeed for BinanceFeed {
         symbols
             .chunks(100)
             .map(|chunk| {
-                let params: Vec<String> =
-                    chunk.iter().map(|s| format!("{}@miniTicker", s.to_ascii_lowercase())).collect();
+                let params: Vec<String> = chunk
+                    .iter()
+                    .map(|s| format!("{}@miniTicker", s.to_ascii_lowercase()))
+                    .collect();
                 serde_json::json!({
                     "method": if on { "SUBSCRIBE" } else { "UNSUBSCRIBE" },
                     "params": params,
@@ -286,9 +311,15 @@ impl WsFeed for BinanceFeed {
     }
 
     fn parse(&self, text: &str) -> Vec<RawTick> {
-        let Ok(v) = serde_json::from_str::<Value>(text) else { return Vec::new() };
+        let Ok(v) = serde_json::from_str::<Value>(text) else {
+            return Vec::new();
+        };
         // En streams combinados el evento viene envuelto en `data`.
-        let e = if v.get("data").is_some() { &v["data"] } else { &v };
+        let e = if v.get("data").is_some() {
+            &v["data"]
+        } else {
+            &v
+        };
         if e["e"].as_str() != Some("24hrMiniTicker") {
             return Vec::new();
         }

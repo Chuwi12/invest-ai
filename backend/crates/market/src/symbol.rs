@@ -32,7 +32,9 @@ pub fn validate(id: &AssetId) -> Result<(), DomainError> {
 
 /// Percent-encoding de un segmento de ruta.
 pub fn enc(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>().replace('+', "%20")
+    url::form_urlencoded::byte_serialize(s.as_bytes())
+        .collect::<String>()
+        .replace('+', "%20")
 }
 
 /// Página pública donde el usuario puede comprobar el dato de `provider` sobre `id`.
@@ -46,13 +48,16 @@ pub fn verify_url(provider: &str, id: &AssetId) -> Option<String> {
         }
         "binance" => {
             let base = sym.to_ascii_uppercase();
-            Some(format!("https://www.binance.com/en/trade/{}_USDT", enc(&base)))
+            Some(format!(
+                "https://www.binance.com/en/trade/{}_USDT",
+                enc(&base)
+            ))
         }
         "coingecko" => {
-            let coin = crate::providers::coingecko::known_coin_id(sym)
-                .map_or_else(|| format!("https://www.coingecko.com/en/search?query={}", enc(sym)), |c| {
-                    format!("https://www.coingecko.com/en/coins/{c}")
-                });
+            let coin = crate::providers::coingecko::known_coin_id(sym).map_or_else(
+                || format!("https://www.coingecko.com/en/search?query={}", enc(sym)),
+                |c| format!("https://www.coingecko.com/en/coins/{c}"),
+            );
             Some(coin)
         }
         "sec" => Some(format!(
@@ -62,7 +67,10 @@ pub fn verify_url(provider: &str, id: &AssetId) -> Option<String> {
         "finnhub" => Some(format!("https://finnhub.io/quote/{}", enc(sym))),
         "fred" => Some(format!("https://fred.stlouisfed.org/series/{}", enc(sym))),
         "twelvedata" => Some(format!("https://twelvedata.com/markets/{}", enc(sym))),
-        "fmp" => Some(format!("https://site.financialmodelingprep.com/financial-summary/{}", enc(sym))),
+        "fmp" => Some(format!(
+            "https://site.financialmodelingprep.com/financial-summary/{}",
+            enc(sym)
+        )),
         "alphavantage" => None,
         _ => None,
     }
@@ -75,14 +83,34 @@ mod tests {
 
     #[test]
     fn accepts_real_symbols() {
-        for s in ["AAPL", "SAN.MC", "BRK-B", "^GSPC", "EURUSD=X", "GC=F", "BTC", "AAPL261218C00200000"] {
+        for s in [
+            "AAPL",
+            "SAN.MC",
+            "BRK-B",
+            "^GSPC",
+            "EURUSD=X",
+            "GC=F",
+            "BTC",
+            "AAPL261218C00200000",
+        ] {
             assert!(validate_symbol(s).is_ok(), "{s}");
         }
     }
 
     #[test]
     fn rejects_injection() {
-        for s in ["", "AAPL?x=1", "a b", "../../etc", "AAPL\n", "http://evil", "a#b", "a%2fb", "é", &"A".repeat(41)] {
+        for s in [
+            "",
+            "AAPL?x=1",
+            "a b",
+            "../../etc",
+            "AAPL\n",
+            "http://evil",
+            "a#b",
+            "a%2fb",
+            "é",
+            &"A".repeat(41),
+        ] {
             assert!(validate_symbol(s).is_err(), "{s:?}");
         }
     }
@@ -90,9 +118,18 @@ mod tests {
     #[test]
     fn verify_urls_are_encoded() {
         let id = AssetId::new(AssetClass::Index, "^GSPC");
-        assert_eq!(verify_url("yahoo", &id).unwrap(), "https://finance.yahoo.com/quote/%5EGSPC");
+        assert_eq!(
+            verify_url("yahoo", &id).unwrap(),
+            "https://finance.yahoo.com/quote/%5EGSPC"
+        );
         let btc = AssetId::new(AssetClass::Crypto, "btc");
-        assert_eq!(verify_url("binance", &btc).unwrap(), "https://www.binance.com/en/trade/BTC_USDT");
-        assert_eq!(verify_url("coingecko", &btc).unwrap(), "https://www.coingecko.com/en/coins/bitcoin");
+        assert_eq!(
+            verify_url("binance", &btc).unwrap(),
+            "https://www.binance.com/en/trade/BTC_USDT"
+        );
+        assert_eq!(
+            verify_url("coingecko", &btc).unwrap(),
+            "https://www.coingecko.com/en/coins/bitcoin"
+        );
     }
 }

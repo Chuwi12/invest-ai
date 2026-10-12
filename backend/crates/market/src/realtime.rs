@@ -99,7 +99,11 @@ pub fn spawn_ws<F: WsFeed>(
 ) -> WsHandle {
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let connected = Arc::new(AtomicBool::new(false));
-    let handle = WsHandle { name: feed.name(), cmd_tx, connected: connected.clone() };
+    let handle = WsHandle {
+        name: feed.name(),
+        cmd_tx,
+        connected: connected.clone(),
+    };
     tokio::spawn(ws_worker(feed, cmd_rx, ingest, feed_idx, connected, cancel));
     handle
 }
@@ -107,7 +111,9 @@ pub fn spawn_ws<F: WsFeed>(
 /// Espera con backoff exponencial y jitter (50–100 % del valor): evita que varias conexiones
 /// caídas a la vez reconecten sincronizadas.
 pub fn backoff(attempt: u32) -> Duration {
-    let exp = BACKOFF_BASE.saturating_mul(1u32 << attempt.min(6)).min(BACKOFF_MAX);
+    let exp = BACKOFF_BASE
+        .saturating_mul(1u32 << attempt.min(6))
+        .min(BACKOFF_MAX);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
@@ -308,7 +314,8 @@ where
 pub type QuoteFn = Arc<dyn Fn(AssetId) -> BoxFuture<'static, Option<Quote>> + Send + Sync>;
 
 type ToProvider = Box<dyn Fn(&AssetId) -> Option<String> + Send + Sync>;
-type FromProvider = Box<dyn Fn(&str) -> Option<AssetId> + Send + Sync>;
+/// Un símbolo del feed puede corresponder a varias clases (`SPY` como acción o ETF).
+type FromProvider = Box<dyn Fn(&str) -> Vec<AssetId> + Send + Sync>;
 
 struct FeedSlot {
     handle: WsHandle,
@@ -344,8 +351,11 @@ pub struct Hub {
 }
 
 /// Construye el hub con sus feeds WS. Debe llamarse dentro de un runtime de Tokio.
+type Spawner =
+    Box<dyn FnOnce(usize, mpsc::Sender<(usize, RawTick)>, CancellationToken) -> WsHandle + Send>;
+
 pub struct HubBuilder {
-    feeds: Vec<(Box<dyn FnOnce(usize, mpsc::Sender<(usize, RawTick)>, CancellationToken) -> WsHandle + Send>, ToProvider, FromProvider)>,
+    feeds: Vec<(Spawner, ToProvider, FromProvider)>,
 }
 
 impl Default for HubBuilder {
@@ -365,7 +375,7 @@ impl HubBuilder {
         mut self,
         feed: F,
         to_provider: impl Fn(&AssetId) -> Option<String> + Send + Sync + 'static,
-        from_provider: impl Fn(&str) -> Option<AssetId> + Send + Sync + 'static,
+        from_provider: impl Fn(&str) -> Vec<AssetId> + Send + Sync + 'static,
     ) -> Self {
         self.feeds.push((
             Box::new(move |idx, tx, cancel| spawn_ws(feed, tx, idx, cancel)),
@@ -394,7 +404,9 @@ impl HubBuilder {
             cancel: cancel.clone(),
             poll_every: Duration::from_secs(5),
         });
-        let hub = Hub { inner: inner.clone() };
+        let hub = Hub {
+            inner: inner.clone(),
+        };
         let weak = Arc::downgrade(&inner);
         tokio::spawn(async move {
             loop {
@@ -418,27 +430,34 @@ impl Inner {
     }
 
     fn on_raw(self: &Arc<Self>, idx: usize, raw: RawTick) {
-        let Some(slot) = self.feeds.get(idx) else { return };
-        let Some(id) = (slot.from_provider)(&raw.symbol) else { return };
-        let source = slot.handle.name();
-        let reference_from_tick = raw.open24h;
-        let mut map = self.lock();
-        let Some(e) = map.get_mut(&id) else { return };
-        let reference = reference_from_tick.or(e.reference);
-        let tick = PriceTick {
-            id: id.clone(),
-            price: raw.price,
-            change_pct: reference.filter(|r| *r > 0.0).map(|r| (raw.price / r - 1.0) * 100.0),
-            volume: raw.volume,
-            ts: raw.ts,
-            source: source.into(),
+        let Some(slot) = self.feeds.get(idx) else {
+            return;
         };
-        self.emit_locked(&mut map, tick);
+        let ids = (slot.from_provider)(&raw.symbol);
+        let source = slot.handle.name();
+        let mut map = self.lock();
+        for id in ids {
+            let Some(e) = map.get_mut(&id) else { continue };
+            let reference = raw.open24h.or(e.reference);
+            let tick = PriceTick {
+                id: id.clone(),
+                price: raw.price,
+                change_pct: reference
+                    .filter(|r| *r > 0.0)
+                    .map(|r| (raw.price / r - 1.0) * 100.0),
+                volume: raw.volume,
+                ts: raw.ts,
+                source: source.into(),
+            };
+            self.emit_locked(&mut map, tick);
+        }
     }
 
     /// Emite respetando el límite de frecuencia. Debe llamarse con el mapa bloqueado.
     fn emit_locked(self: &Arc<Self>, map: &mut HashMap<AssetId, Entry>, tick: PriceTick) {
-        let Some(e) = map.get_mut(&tick.id) else { return };
+        let Some(e) = map.get_mut(&tick.id) else {
+            return;
+        };
         let now = Instant::now();
         if let Some(last) = e.last_sent {
             let since = now.duration_since(last);
@@ -495,7 +514,11 @@ impl Hub {
 
     /// Estado de cada feed WS (nombre, conectado).
     pub fn feed_status(&self) -> Vec<(&'static str, bool)> {
-        self.inner.feeds.iter().map(|f| (f.handle.name(), f.handle.is_connected())).collect()
+        self.inner
+            .feeds
+            .iter()
+            .map(|f| (f.handle.name(), f.handle.is_connected()))
+            .collect()
     }
 
     /// Número de activos con suscriptores (para métricas y tests).
@@ -514,11 +537,20 @@ impl Hub {
                 streams.push(stream::iter([t]).boxed());
             }
             streams.push(
-                BroadcastStream::new(rx).filter_map(|r| async move { r.ok() }).boxed(),
+                BroadcastStream::new(rx)
+                    .filter_map(|r| async move { r.ok() })
+                    .boxed(),
             );
         }
-        let guard = SubGuard { hub: self.inner.clone(), ids: held };
-        Guarded { inner: stream::select_all(streams).boxed(), _guard: guard }.boxed()
+        let guard = SubGuard {
+            hub: self.inner.clone(),
+            ids: held,
+        };
+        Guarded {
+            inner: stream::select_all(streams).boxed(),
+            _guard: guard,
+        }
+        .boxed()
     }
 
     fn acquire(&self, id: &AssetId) -> (broadcast::Receiver<PriceTick>, Option<PriceTick>) {
@@ -529,9 +561,11 @@ impl Hub {
             return (e.tx.subscribe(), e.last_tick.clone());
         }
         let (tx, rx) = broadcast::channel(64);
-        let feed = inner.feeds.iter().enumerate().find_map(|(i, f)| {
-            (f.to_provider)(id).map(|sym| (i, sym))
-        });
+        let feed = inner
+            .feeds
+            .iter()
+            .enumerate()
+            .find_map(|(i, f)| (f.to_provider)(id).map(|sym| (i, sym)));
         let poller = inner.cancel.child_token();
         if let Some((i, sym)) = &feed {
             let _ = inner.feeds[*i].handle.cmd_tx.send(Cmd::Sub(sym.clone()));
@@ -560,7 +594,11 @@ impl Hub {
 /// Sondeo de respaldo. Además fija el precio de referencia (cierre previo) para calcular el
 /// cambio de los ticks WS que no lo traen.
 async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
-    let every = if id.class == AssetClass::Crypto { inner.poll_every.mul_f64(0.6) } else { inner.poll_every };
+    let every = if id.class == AssetClass::Crypto {
+        inner.poll_every.mul_f64(0.6)
+    } else {
+        inner.poll_every
+    };
     let mut last: Option<(f64, DateTime<Utc>)> = None;
     let mut first = true;
     loop {
@@ -579,10 +617,10 @@ async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
             };
             if let Some(q) = q {
                 let mut map = inner.lock();
-                if let Some(e) = map.get_mut(&id) {
-                    if e.reference.is_none() {
-                        e.reference = q.prev_close.filter(|p| *p > 0.0);
-                    }
+                if let Some(e) = map.get_mut(&id)
+                    && e.reference.is_none()
+                {
+                    e.reference = q.prev_close.filter(|p| *p > 0.0);
                 }
                 let changed = last.is_none_or(|(p, t)| p != q.price || t != q.timestamp);
                 if changed && (!feed_ok || first) {
@@ -640,10 +678,18 @@ mod tests {
 
     struct DummyFeed;
     impl WsFeed for DummyFeed {
-        fn name(&self) -> &'static str { "dummy" }
-        fn url(&self) -> String { "ws://127.0.0.1:1/".into() }
-        fn subscribe_msgs(&self, _: &[String], _: bool) -> Vec<String> { vec![] }
-        fn parse(&self, _: &str) -> Vec<RawTick> { vec![] }
+        fn name(&self) -> &'static str {
+            "dummy"
+        }
+        fn url(&self) -> String {
+            "ws://127.0.0.1:1/".into()
+        }
+        fn subscribe_msgs(&self, _: &[String], _: bool) -> Vec<String> {
+            vec![]
+        }
+        fn parse(&self, _: &str) -> Vec<RawTick> {
+            vec![]
+        }
     }
 
     fn quote(sym: &str, price: f64, secs: i64) -> Quote {
@@ -680,7 +726,10 @@ mod tests {
         for a in 0..12 {
             let d = backoff(a);
             assert!(d <= BACKOFF_MAX);
-            assert!(d >= BACKOFF_BASE.saturating_mul(1 << a.min(6)).min(BACKOFF_MAX) / 2 - Duration::from_millis(1));
+            assert!(
+                d >= BACKOFF_BASE.saturating_mul(1 << a.min(6)).min(BACKOFF_MAX) / 2
+                    - Duration::from_millis(1)
+            );
         }
         assert!(backoff(5) > backoff(0));
     }
@@ -729,13 +778,19 @@ mod tests {
             .feed(
                 DummyFeed,
                 |id: &AssetId| Some(id.symbol.clone()),
-                |s: &str| Some(AssetId::new(AssetClass::Stock, s)),
+                |s: &str| vec![AssetId::new(AssetClass::Stock, s)],
             )
             .build(qf, cancel.clone());
         let id = AssetId::new(AssetClass::Stock, "AAPL");
         let mut s = hub.subscribe(std::slice::from_ref(&id));
         let ts = Utc.timestamp_opt(5, 0).unwrap();
-        let raw = |p: f64| RawTick { symbol: "AAPL".into(), price: p, open24h: Some(100.0), volume: None, ts };
+        let raw = |p: f64| RawTick {
+            symbol: "AAPL".into(),
+            price: p,
+            open24h: Some(100.0),
+            volume: None,
+            ts,
+        };
         // Ráfaga de 20 ticks en el mismo instante.
         for i in 0..20 {
             hub.inner.on_raw(0, raw(101.0 + f64::from(i)));

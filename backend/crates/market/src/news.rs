@@ -13,10 +13,42 @@ use crate::providers::plain_ticker;
 
 /// Parámetros que solo sirven para rastrear el clic y no identifican el artículo.
 const TRACKING_PARAMS: &[&str] = &[
-    "fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "igshid", "ref", "ref_src",
-    "ref_url", "cmpid", "ocid", "ncid", "soc_src", "soc_trk", "yptr", "guccounter", "taid", "spm",
-    "ito", "mkt_tok", "_hsenc", "_hsmi", "cid", "rss", "oc", "output", "amp", "outputType",
-    "guce_referrer", "guce_referrer_sig", "sref", "smid", "smtyp", "cmp", "campaign",
+    "fbclid",
+    "gclid",
+    "dclid",
+    "msclkid",
+    "mc_cid",
+    "mc_eid",
+    "igshid",
+    "ref",
+    "ref_src",
+    "ref_url",
+    "cmpid",
+    "ocid",
+    "ncid",
+    "soc_src",
+    "soc_trk",
+    "yptr",
+    "guccounter",
+    "taid",
+    "spm",
+    "ito",
+    "mkt_tok",
+    "_hsenc",
+    "_hsmi",
+    "cid",
+    "rss",
+    "oc",
+    "output",
+    "amp",
+    "outputType",
+    "guce_referrer",
+    "guce_referrer_sig",
+    "sref",
+    "smid",
+    "smtyp",
+    "cmp",
+    "campaign",
 ];
 
 /// URL sin esquema, `www.`, fragmento ni parámetros de rastreo, con los restantes ordenados.
@@ -25,7 +57,10 @@ pub fn canonical_url(raw: &str) -> String {
         return raw.trim().to_ascii_lowercase();
     };
     let host = url.host_str().unwrap_or("").to_ascii_lowercase();
-    let host = host.strip_prefix("www.").or_else(|| host.strip_prefix("amp.")).unwrap_or(&host);
+    let host = host
+        .strip_prefix("www.")
+        .or_else(|| host.strip_prefix("amp."))
+        .unwrap_or(&host);
     let mut path = url.path().to_string();
     if path.len() > 1 && path.ends_with('/') {
         path.pop();
@@ -42,7 +77,13 @@ pub fn canonical_url(raw: &str) -> String {
     let mut out = format!("{host}{path}");
     if !query.is_empty() {
         out.push('?');
-        out.push_str(&query.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&"));
+        out.push_str(
+            &query
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
     }
     out
 }
@@ -61,7 +102,8 @@ pub fn item_id(url: &str) -> String {
 fn normalized_title(title: &str, publisher: Option<&str>) -> Vec<String> {
     let mut t = title.trim().to_string();
     if let Some((head, tail)) = t.rsplit_once(" - ") {
-        let tail_is_publisher = publisher.is_some_and(|p| p.trim().eq_ignore_ascii_case(tail.trim()));
+        let tail_is_publisher =
+            publisher.is_some_and(|p| p.trim().eq_ignore_ascii_case(tail.trim()));
         // Sin publisher conocido, un sufijo corto (≤ 4 palabras) también suele ser el medio.
         if tail_is_publisher || (publisher.is_none() && tail.split_whitespace().count() <= 4) {
             t = head.to_string();
@@ -149,10 +191,50 @@ pub fn dedupe(items: Vec<NewsItem>) -> Vec<NewsItem> {
 // ---------------------------------------------------------------------------------------------
 
 const LEGAL_SUFFIXES: &[&str] = &[
-    "inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "sa",
-    "s.a", "ag", "nv", "n.v", "se", "llc", "lp", "holdings", "holding", "group", "the", "class",
-    "a", "b", "c", "adr", "ordinary", "shares", "common", "stock", "trust", "etf", "fund", "new",
-    "de", "banco", "bank", "motor", "motors", "international", "technologies", "technology", "systems", "usd",
+    "inc",
+    "incorporated",
+    "corp",
+    "corporation",
+    "co",
+    "company",
+    "ltd",
+    "limited",
+    "plc",
+    "sa",
+    "s.a",
+    "ag",
+    "nv",
+    "n.v",
+    "se",
+    "llc",
+    "lp",
+    "holdings",
+    "holding",
+    "group",
+    "the",
+    "class",
+    "a",
+    "b",
+    "c",
+    "adr",
+    "ordinary",
+    "shares",
+    "common",
+    "stock",
+    "trust",
+    "etf",
+    "fund",
+    "new",
+    "de",
+    "banco",
+    "bank",
+    "motor",
+    "motors",
+    "international",
+    "technologies",
+    "technology",
+    "systems",
+    "usd",
 ];
 
 /// Nombre comercial limpio para consultas de texto: sin sufijos legales ni signos, máx. 3
@@ -167,10 +249,17 @@ pub fn brand(name: &str) -> String {
         .collect();
     let joined = words.join(" ");
     // Recupera las mayúsculas originales palabra a palabra.
-    let orig: Vec<&str> = name.split(|c: char| !c.is_alphanumeric() && c != '&').collect();
+    let orig: Vec<&str> = name
+        .split(|c: char| !c.is_alphanumeric() && c != '&')
+        .collect();
     joined
         .split(' ')
-        .map(|w| orig.iter().find(|o| o.to_lowercase() == w).copied().unwrap_or(w))
+        .map(|w| {
+            orig.iter()
+                .find(|o| o.to_lowercase() == w)
+                .copied()
+                .unwrap_or(w)
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -199,16 +288,23 @@ impl Relevance {
                 .filter(|w| !w.is_empty())
                 .map(str::to_string)
                 .collect();
-            let core: Vec<&String> =
-                words.iter().filter(|w| !LEGAL_SUFFIXES.contains(&w.as_str())).collect();
+            let core: Vec<&String> = words
+                .iter()
+                .filter(|w| !LEGAL_SUFFIXES.contains(&w.as_str()))
+                .collect();
             if !core.is_empty() {
-                phrases.push(core.iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" "));
+                phrases.push(
+                    core.iter()
+                        .map(|w| w.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
                 if core.len() > 1 {
                     // La palabra más larga suele ser la marca («santander», «nvidia»).
-                    if let Some(longest) = core.iter().max_by_key(|w| w.chars().count()) {
-                        if longest.chars().count() >= 5 {
-                            phrases.push((*longest).clone());
-                        }
+                    if let Some(longest) = core.iter().max_by_key(|w| w.chars().count())
+                        && longest.chars().count() >= 5
+                    {
+                        phrases.push((*longest).clone());
                     }
                 }
             }
@@ -242,10 +338,10 @@ impl Relevance {
     }
 
     fn mentions(&self, text: &str) -> bool {
-        if let Some(t) = &self.ticker {
-            if contains_word(text, t, true) {
-                return true;
-            }
+        if let Some(t) = &self.ticker
+            && contains_word(text, t, true)
+        {
+            return true;
         }
         let lower = text.to_lowercase();
         self.phrases.iter().any(|p| contains_word(&lower, p, false))
@@ -282,8 +378,14 @@ fn contains_word(haystack: &str, needle: &str, case_sensitive: bool) -> bool {
 
 /// Proveedores cuya consulta ya va acotada al símbolo: sus noticias se aceptan aunque no
 /// repitan el ticker en el título.
-const SCOPED_PROVIDERS: &[&str] =
-    &["finnhub", "yahoo", "marketaux", "alphavantage", "cryptopanic", "sec"];
+const SCOPED_PROVIDERS: &[&str] = &[
+    "finnhub",
+    "yahoo",
+    "marketaux",
+    "alphavantage",
+    "cryptopanic",
+    "sec",
+];
 
 /// Une listas de varios proveedores: filtra por relevancia (si hay activo), deduplica, ordena por
 /// fecha descendente y recorta a `limit`.
@@ -335,7 +437,8 @@ mod tests {
 
     #[test]
     fn canonical_url_ignores_tracking_and_noise() {
-        let a = canonical_url("https://www.Example.com/news/a-b/?utm_source=x&id=7&fbclid=zzz#frag");
+        let a =
+            canonical_url("https://www.Example.com/news/a-b/?utm_source=x&id=7&fbclid=zzz#frag");
         let b = canonical_url("http://example.com/news/a-b?id=7");
         assert_eq!(a, b);
         assert_eq!(a, "example.com/news/a-b?id=7");
@@ -344,7 +447,10 @@ mod tests {
             "news.google.com/rss/articles/CBMi123"
         );
         // Los parámetros restantes se ordenan.
-        assert_eq!(canonical_url("https://a.com/p?b=2&a=1"), canonical_url("https://a.com/p?a=1&b=2"));
+        assert_eq!(
+            canonical_url("https://a.com/p?b=2&a=1"),
+            canonical_url("https://a.com/p?a=1&b=2")
+        );
     }
 
     #[test]
@@ -360,15 +466,38 @@ mod tests {
 
     #[test]
     fn dedupes_by_url_and_near_identical_title() {
-        let mut rich = item("Apple sube un 3% tras resultados - Reuters", "https://reuters.com/a", "finnhub", 1000);
+        let mut rich = item(
+            "Apple sube un 3% tras resultados - Reuters",
+            "https://reuters.com/a",
+            "finnhub",
+            1000,
+        );
         rich.summary = Some("Resumen".into());
-        let g = item("Apple sube un 3% tras resultados - Reuters", "https://news.google.com/rss/articles/X?oc=5", "google_news", 1010);
-        let same_url = item("Otro titular distinto", "https://www.reuters.com/a?utm_source=y", "gdelt", 990);
-        let different = item("Microsoft anuncia nuevo chip", "https://x.com/m", "gdelt", 900);
+        let g = item(
+            "Apple sube un 3% tras resultados - Reuters",
+            "https://news.google.com/rss/articles/X?oc=5",
+            "google_news",
+            1010,
+        );
+        let same_url = item(
+            "Otro titular distinto",
+            "https://www.reuters.com/a?utm_source=y",
+            "gdelt",
+            990,
+        );
+        let different = item(
+            "Microsoft anuncia nuevo chip",
+            "https://x.com/m",
+            "gdelt",
+            900,
+        );
         let out = dedupe(vec![g, rich, same_url, different]);
         assert_eq!(out.len(), 2, "{out:#?}");
         // Se queda el más completo (el de Finnhub, con resumen y enlace directo).
-        assert!(out.iter().any(|n| n.provider == "finnhub" && n.summary.is_some()));
+        assert!(
+            out.iter()
+                .any(|n| n.provider == "finnhub" && n.summary.is_some())
+        );
     }
 
     #[test]
@@ -387,11 +516,38 @@ mod tests {
         let mut tagged = item("Algo", "https://a.com/1", "finnhub", 1);
         tagged.tickers = vec!["AAPL".into()];
         assert_eq!(r.score(&tagged), 3);
-        assert_eq!(r.score(&item("Apple lanza el iPhone", "https://a.com/2", "gdelt", 1)), 2);
-        assert_eq!(r.score(&item("AAPL cae un 2%", "https://a.com/3", "gdelt", 1)), 2);
-        assert_eq!(r.score(&item("Precio de la manzana en el mercado", "https://a.com/4", "gdelt", 1)), 0);
+        assert_eq!(
+            r.score(&item(
+                "Apple lanza el iPhone",
+                "https://a.com/2",
+                "gdelt",
+                1
+            )),
+            2
+        );
+        assert_eq!(
+            r.score(&item("AAPL cae un 2%", "https://a.com/3", "gdelt", 1)),
+            2
+        );
+        assert_eq!(
+            r.score(&item(
+                "Precio de la manzana en el mercado",
+                "https://a.com/4",
+                "gdelt",
+                1
+            )),
+            0
+        );
         // «Pineapple» no cuenta: palabra completa.
-        assert_eq!(r.score(&item("Pineapple prices rise", "https://a.com/5", "gdelt", 1)), 0);
+        assert_eq!(
+            r.score(&item(
+                "Pineapple prices rise",
+                "https://a.com/5",
+                "gdelt",
+                1
+            )),
+            0
+        );
         let mut sum = item("Titular sin pistas", "https://a.com/6", "gdelt", 1);
         sum.summary = Some("La empresa Apple presentó resultados".into());
         assert_eq!(r.score(&sum), 1);
@@ -408,16 +564,60 @@ mod tests {
 
     #[test]
     fn relevance_for_spanish_stock_and_crypto() {
-        let san = Relevance::new(&AssetId::new(AssetClass::Stock, "SAN.MC"), Some("Banco Santander, S.A."));
-        assert_eq!(san.score(&item("Santander gana 3.000 millones", "https://a.com/1", "google_news", 1)), 2);
-        assert_eq!(san.score(&item("El Banco Santander amplía capital", "https://a.com/2", "google_news", 1)), 2);
+        let san = Relevance::new(
+            &AssetId::new(AssetClass::Stock, "SAN.MC"),
+            Some("Banco Santander, S.A."),
+        );
+        assert_eq!(
+            san.score(&item(
+                "Santander gana 3.000 millones",
+                "https://a.com/1",
+                "google_news",
+                1
+            )),
+            2
+        );
+        assert_eq!(
+            san.score(&item(
+                "El Banco Santander amplía capital",
+                "https://a.com/2",
+                "google_news",
+                1
+            )),
+            2
+        );
         let btc = Relevance::new(&AssetId::new(AssetClass::Crypto, "BTC"), Some("Bitcoin"));
-        assert_eq!(btc.score(&item("Bitcoin supera los 80.000", "https://a.com/3", "gdelt", 1)), 2);
-        assert_eq!(btc.score(&item("BTC rebota", "https://a.com/4", "gdelt", 1)), 2);
+        assert_eq!(
+            btc.score(&item(
+                "Bitcoin supera los 80.000",
+                "https://a.com/3",
+                "gdelt",
+                1
+            )),
+            2
+        );
+        assert_eq!(
+            btc.score(&item("BTC rebota", "https://a.com/4", "gdelt", 1)),
+            2
+        );
         // Tickers de una letra no se usan como término de búsqueda.
-        let ford = Relevance::new(&AssetId::new(AssetClass::Stock, "F"), Some("Ford Motor Company"));
-        assert_eq!(ford.score(&item("Plan F del gobierno", "https://a.com/5", "gdelt", 1)), 0);
-        assert_eq!(ford.score(&item("Ford retira 100.000 coches", "https://a.com/6", "gdelt", 1)), 2);
+        let ford = Relevance::new(
+            &AssetId::new(AssetClass::Stock, "F"),
+            Some("Ford Motor Company"),
+        );
+        assert_eq!(
+            ford.score(&item("Plan F del gobierno", "https://a.com/5", "gdelt", 1)),
+            0
+        );
+        assert_eq!(
+            ford.score(&item(
+                "Ford retira 100.000 coches",
+                "https://a.com/6",
+                "gdelt",
+                1
+            )),
+            2
+        );
     }
 
     #[test]
@@ -432,13 +632,35 @@ mod tests {
         ];
         let b = vec![
             // Proveedor acotado al símbolo: pasa aunque el título no mencione el ticker.
-            item("Resultados trimestrales", "https://b.com/1", "finnhub", 7_000),
+            item(
+                "Resultados trimestrales",
+                "https://b.com/1",
+                "finnhub",
+                7_000,
+            ),
             // Fecha futura (>1 día): se descarta.
-            item("Apple del futuro", "https://b.com/2", "gdelt", 10_000 + 3 * 86_400),
+            item(
+                "Apple del futuro",
+                "https://b.com/2",
+                "gdelt",
+                10_000 + 3 * 86_400,
+            ),
         ];
         let out = merge(vec![a, b], Some(&r), 10, now);
         let titles: Vec<_> = out.iter().map(|n| n.title.as_str()).collect();
-        assert_eq!(titles, ["Resultados trimestrales", "Apple reciente", "Apple vieja"]);
-        assert_eq!(merge(vec![vec![item("x", "https://a.com/9", "gdelt", 1)]], None, 0, now).len(), 0);
+        assert_eq!(
+            titles,
+            ["Resultados trimestrales", "Apple reciente", "Apple vieja"]
+        );
+        assert_eq!(
+            merge(
+                vec![vec![item("x", "https://a.com/9", "gdelt", 1)]],
+                None,
+                0,
+                now
+            )
+            .len(),
+            0
+        );
     }
 }

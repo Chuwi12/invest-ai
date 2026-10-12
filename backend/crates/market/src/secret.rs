@@ -55,7 +55,10 @@ mod tests {
         let s = Secret::new("abc123SECRET").unwrap();
         assert_eq!(format!("{s:?}"), "Secret(***)");
         assert_eq!(format!("{s}"), "***");
-        assert_eq!(redact("fallo con abc123SECRET en la url", &[s]), "fallo con *** en la url");
+        assert_eq!(
+            redact("fallo con abc123SECRET en la url", &[s]),
+            "fallo con *** en la url"
+        );
     }
 
     #[test]

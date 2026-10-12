@@ -65,18 +65,23 @@ pub async fn send(req: RequestBuilder) -> PResult<Body> {
     let resp = req.send().await.map_err(map_reqwest)?;
     let status = resp.status();
     if status == StatusCode::TOO_MANY_REQUESTS {
-        return Err(ProviderError::RateLimited { retry_after: retry_after(resp.headers()) });
+        return Err(ProviderError::RateLimited {
+            retry_after: retry_after(resp.headers()),
+        });
     }
-    if let Some(len) = resp.content_length() {
-        if len as usize > MAX_BODY_BYTES {
-            return Err(ProviderError::upstream("respuesta demasiado grande"));
-        }
+    if let Some(len) = resp.content_length()
+        && len as usize > MAX_BODY_BYTES
+    {
+        return Err(ProviderError::upstream("respuesta demasiado grande"));
     }
     let bytes = resp.bytes().await.map_err(map_reqwest)?;
     if bytes.len() > MAX_BODY_BYTES {
         return Err(ProviderError::upstream("respuesta demasiado grande"));
     }
-    Ok(Body { status, text: String::from_utf8_lossy(&bytes).into_owned() })
+    Ok(Body {
+        status,
+        text: String::from_utf8_lossy(&bytes).into_owned(),
+    })
 }
 
 /// `send` exigiendo 2xx. 404 → `NotFound`; 401/403 → error de acceso; resto → `Upstream`.
@@ -116,5 +121,9 @@ pub fn snippet(text: &str, n: usize) -> String {
     let one_line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut it = one_line.chars();
     let head: String = it.by_ref().take(n).collect();
-    if it.next().is_some() { format!("{head}…") } else { head }
+    if it.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
+    }
 }

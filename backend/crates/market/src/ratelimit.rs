@@ -25,7 +25,10 @@ impl RateLimiter {
         Self {
             rate: per_sec.max(0.001),
             burst,
-            state: Mutex::new(State { tokens: burst, last: Instant::now() }),
+            state: Mutex::new(State {
+                tokens: burst,
+                last: Instant::now(),
+            }),
         }
     }
 

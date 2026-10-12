@@ -25,8 +25,11 @@ pub struct GoogleNews {
 
 impl GoogleNews {
     pub fn new(http: Client, languages: Vec<String>) -> Self {
-        let mut languages: Vec<String> =
-            languages.into_iter().map(|l| l.to_ascii_lowercase()).filter(|l| edition(l).is_some()).collect();
+        let mut languages: Vec<String> = languages
+            .into_iter()
+            .map(|l| l.to_ascii_lowercase())
+            .filter(|l| edition(l).is_some())
+            .collect();
         if languages.is_empty() {
             languages.push("en".into());
         }
@@ -60,7 +63,12 @@ fn edition(lang: &str) -> Option<(&'static str, &'static str, &'static str)> {
 /// caracteres de operador), nunca texto libre del usuario.
 pub fn build_query(q: &NewsQuery, lang: &str) -> String {
     let Some(id) = &q.id else {
-        return if lang == "es" { "mercados financieros bolsa" } else { "stock market" }.to_string();
+        return if lang == "es" {
+            "mercados financieros bolsa"
+        } else {
+            "stock market"
+        }
+        .to_string();
     };
     let ticker = q.ticker().unwrap_or_default();
     let name = q.name.as_deref().map(brand).filter(|b| !b.is_empty());
@@ -69,7 +77,9 @@ pub fn build_query(q: &NewsQuery, lang: &str) -> String {
         parts.push(n.clone());
     }
     if !ticker.is_empty()
-        && ticker.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && ticker
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
         && (name.is_none() || id.class != AssetClass::Stock || ticker.len() >= 3 || name.is_some())
     {
         let t = ticker.to_ascii_uppercase();
@@ -128,7 +138,9 @@ impl Provider for GoogleNews {
 /// «Titular - Medio» → («Titular», Some(«Medio»)). Google añade siempre el medio al título.
 pub fn split_publisher(title: &str) -> (String, Option<String>) {
     match title.rsplit_once(" - ") {
-        Some((head, tail)) if !head.trim().is_empty() && !tail.trim().is_empty() && tail.len() <= 60 => {
+        Some((head, tail))
+            if !head.trim().is_empty() && !tail.trim().is_empty() && tail.len() <= 60 =>
+        {
             (head.trim().to_string(), Some(tail.trim().to_string()))
         }
         _ => (title.trim().to_string(), None),
@@ -136,21 +148,25 @@ pub fn split_publisher(title: &str) -> (String, Option<String>) {
 }
 
 pub fn parse_rss(xml: &str, lang: &str) -> PResult<Vec<NewsItem>> {
-    let feed = feed_rs::parser::parse(xml.as_bytes())
-        .map_err(|e| ProviderError::Upstream(format!("RSS no válido: {e} ({})", snippet(xml, 40))))?;
+    let feed = feed_rs::parser::parse(xml.as_bytes()).map_err(|e| {
+        ProviderError::Upstream(format!("RSS no válido: {e} ({})", snippet(xml, 40)))
+    })?;
     let now = Utc::now();
     let mut out = Vec::with_capacity(feed.entries.len());
     for e in feed.entries {
-        let (Some(title), Some(link)) =
-            (e.title.as_ref().map(|t| t.content.as_str()), e.links.first().map(|l| l.href.clone()))
-        else {
+        let (Some(title), Some(link)) = (
+            e.title.as_ref().map(|t| t.content.as_str()),
+            e.links.first().map(|l| l.href.clone()),
+        ) else {
             continue;
         };
         // Solo http(s): un feed manipulado no debe poder colar otros esquemas.
         if !(link.starts_with("https://") || link.starts_with("http://")) {
             continue;
         }
-        let Some(published) = e.published.or(e.updated) else { continue };
+        let Some(published) = e.published.or(e.updated) else {
+            continue;
+        };
         let (title, publisher) = split_publisher(title);
         if title.is_empty() || published > now + chrono::Duration::days(1) {
             continue;
@@ -190,7 +206,11 @@ mod tests {
         assert_eq!(first.title, "Why Apple (AAPL) Stock Is Trading Lower Today");
         assert_eq!(first.publisher.as_deref(), Some("Yahoo Finance"));
         assert_eq!(first.published_at.to_rfc3339(), "2026-10-09T23:15:10+00:00");
-        assert!(first.url.starts_with("https://news.google.com/rss/articles/"));
+        assert!(
+            first
+                .url
+                .starts_with("https://news.google.com/rss/articles/")
+        );
         assert_eq!(first.provider, "google_news");
         assert_eq!(first.id.len(), 24);
     }
@@ -223,15 +243,25 @@ mod tests {
             limit: 10,
         };
         let qs = build_query(&evil, "en");
-        assert!(!qs.contains('"') && !qs.contains('(') && !qs.contains("site:"), "{qs}");
-        let btc = NewsQuery { id: Some(AssetId::new(AssetClass::Crypto, "BTC")), name: None, limit: 5 };
+        assert!(
+            !qs.contains('"') && !qs.contains('(') && !qs.contains("site:"),
+            "{qs}"
+        );
+        let btc = NewsQuery {
+            id: Some(AssetId::new(AssetClass::Crypto, "BTC")),
+            name: None,
+            limit: 5,
+        };
         assert_eq!(build_query(&btc, "en"), "BTC crypto when:7d");
         assert_eq!(build_query(&NewsQuery::default(), "en"), "stock market");
     }
 
     #[test]
     fn splits_publisher() {
-        assert_eq!(split_publisher("A - B - Reuters"), ("A - B".into(), Some("Reuters".into())));
+        assert_eq!(
+            split_publisher("A - B - Reuters"),
+            ("A - B".into(), Some("Reuters".into()))
+        );
         assert_eq!(split_publisher("Sin medio"), ("Sin medio".into(), None));
     }
 }

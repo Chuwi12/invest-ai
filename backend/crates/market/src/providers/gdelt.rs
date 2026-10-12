@@ -46,7 +46,11 @@ pub fn build_query(q: &NewsQuery) -> String {
     let Some(id) = &q.id else {
         return format!("(\"stock market\" OR \"financial markets\" OR \"Wall Street\"){lang}");
     };
-    let name = q.name.as_deref().map(brand).filter(|b| b.chars().count() >= 3);
+    let name = q
+        .name
+        .as_deref()
+        .map(brand)
+        .filter(|b| b.chars().count() >= 3);
     let ticker = q
         .ticker()
         .filter(|t| t.len() >= 3 && t.chars().all(|c| c.is_ascii_alphanumeric()))
@@ -57,7 +61,11 @@ pub fn build_query(q: &NewsQuery) -> String {
     }
     if let Some(t) = &ticker {
         // Un ticker suelto es ambiguo (p. ej. «ARM»): se acompaña del contexto bursátil.
-        terms.push(if id.class == AssetClass::Crypto { t.clone() } else { format!("\"{t} stock\"") });
+        terms.push(if id.class == AssetClass::Crypto {
+            t.clone()
+        } else {
+            format!("\"{t} stock\"")
+        });
     }
     if terms.is_empty() {
         terms.push("\"stock market\"".into());
@@ -88,11 +96,16 @@ impl Provider for Gdelt {
 pub fn parse_artlist(text: &str) -> PResult<Vec<NewsItem>> {
     let trimmed = text.trim_start();
     if trimmed.starts_with("Please limit requests") {
-        return Err(ProviderError::RateLimited { retry_after: Some(std::time::Duration::from_secs(5)) });
+        return Err(ProviderError::RateLimited {
+            retry_after: Some(std::time::Duration::from_secs(5)),
+        });
     }
     if !trimmed.starts_with('{') {
         // Errores de consulta (palabra demasiado corta, etc.) llegan como texto plano.
-        return Err(ProviderError::Upstream(format!("GDELT: {}", snippet(trimmed, 100))));
+        return Err(ProviderError::Upstream(format!(
+            "GDELT: {}",
+            snippet(trimmed, 100)
+        )));
     }
     let v: Value = serde_json::from_str(trimmed)
         .map_err(|e| ProviderError::Upstream(format!("GDELT JSON no válido: {e}")))?;
@@ -100,15 +113,19 @@ pub fn parse_artlist(text: &str) -> PResult<Vec<NewsItem>> {
     let now = Utc::now();
     let mut out = Vec::new();
     for a in v["articles"].as_array().into_iter().flatten() {
-        let (Some(url), Some(title), Some(seen)) =
-            (text_of(&a["url"]), text_of(&a["title"]), text_of(&a["seendate"]))
-        else {
+        let (Some(url), Some(title), Some(seen)) = (
+            text_of(&a["url"]),
+            text_of(&a["title"]),
+            text_of(&a["seendate"]),
+        ) else {
             continue;
         };
         if !(url.starts_with("https://") || url.starts_with("http://")) {
             continue;
         }
-        let Ok(naive) = NaiveDateTime::parse_from_str(&seen, "%Y%m%dT%H%M%SZ") else { continue };
+        let Ok(naive) = NaiveDateTime::parse_from_str(&seen, "%Y%m%dT%H%M%SZ") else {
+            continue;
+        };
         let published = naive.and_utc();
         if published > now + chrono::Duration::days(1) {
             continue;
@@ -157,7 +174,10 @@ mod tests {
 
     #[test]
     fn rate_limit_text_is_rate_limited_error() {
-        assert!(matches!(parse_artlist(RATE_LIMITED), Err(ProviderError::RateLimited { .. })));
+        assert!(matches!(
+            parse_artlist(RATE_LIMITED),
+            Err(ProviderError::RateLimited { .. })
+        ));
     }
 
     #[test]
@@ -171,7 +191,10 @@ mod tests {
         ]}"#;
         let items = parse_artlist(body).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].published_at.to_rfc3339(), "2026-10-11T12:00:00+00:00");
+        assert_eq!(
+            items[0].published_at.to_rfc3339(),
+            "2026-10-11T12:00:00+00:00"
+        );
         assert_eq!(items[0].publisher.as_deref(), Some("example.com"));
         assert_eq!(items[0].language.as_deref(), Some("en"));
         assert_eq!(parse_artlist("{}").unwrap().len(), 0);
@@ -179,7 +202,10 @@ mod tests {
 
     #[test]
     fn plain_text_error_is_upstream_error() {
-        assert!(matches!(parse_artlist("The specified phrase is too short."), Err(ProviderError::Upstream(_))));
+        assert!(matches!(
+            parse_artlist("The specified phrase is too short."),
+            Err(ProviderError::Upstream(_))
+        ));
     }
 
     #[test]
@@ -189,14 +215,20 @@ mod tests {
             name: Some("Apple Inc.".into()),
             limit: 10,
         };
-        assert_eq!(build_query(&q), "(\"Apple\" OR \"AAPL stock\") sourcelang:english");
+        assert_eq!(
+            build_query(&q),
+            "(\"Apple\" OR \"AAPL stock\") sourcelang:english"
+        );
         let evil = NewsQuery {
             id: Some(AssetId::new(AssetClass::Stock, "AAPL")),
             name: Some("x\") OR domain:evil.com (\"".into()),
             limit: 10,
         };
         let s = build_query(&evil);
-        assert!(!s.contains("domain:evil") || !s.contains(':') || s.matches(':').count() == 1, "{s}");
+        assert!(
+            !s.contains("domain:evil") || !s.contains(':') || s.matches(':').count() == 1,
+            "{s}"
+        );
         assert_eq!(s.matches('"').count() % 2, 0, "{s}");
     }
 }

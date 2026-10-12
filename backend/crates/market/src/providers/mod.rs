@@ -254,6 +254,38 @@ pub fn from_ymd(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     Some(d.and_hms_opt(0, 0, 0)?.and_utc())
 }
 
+/// Etiqueta de sentimiento a partir de una puntuación -1…1.
+pub fn sentiment_from_score(score: f32, method: &str) -> domain::Sentiment {
+    use domain::SentimentLabel::*;
+    let score = score.clamp(-1.0, 1.0);
+    let label = match score {
+        s if s <= -0.5 => VeryNegative,
+        s if s < -0.15 => Negative,
+        s if s <= 0.15 => Neutral,
+        s if s < 0.5 => Positive,
+        _ => VeryPositive,
+    };
+    domain::Sentiment {
+        score,
+        label,
+        method: method.to_string(),
+    }
+}
+
+/// Símbolo para proveedores solo-EE. UU.: sin sufijo de bolsa (`.MC`) y con `.` en clases de
+/// acciones (`BRK-B` → `BRK.B`). `None` si no parece un valor estadounidense.
+pub fn us_symbol(id: &AssetId) -> Option<String> {
+    if !matches!(id.class, AssetClass::Stock | AssetClass::Etf) {
+        return None;
+    }
+    let s = id.symbol.trim().to_ascii_uppercase();
+    let ok = !s.is_empty()
+        && s.len() <= 10
+        && !s.contains(['.', '^', '=', '/'])
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    ok.then(|| s.replace('-', "."))
+}
+
 /// Número desde JSON aceptando también cadenas numéricas (`"123.4"`), habituales en APIs.
 pub fn num(v: &serde_json::Value) -> Option<f64> {
     match v {
@@ -264,7 +296,10 @@ pub fn num(v: &serde_json::Value) -> Option<f64> {
 }
 
 pub fn text(v: &serde_json::Value) -> Option<String> {
-    v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+    v.as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// Elimina etiquetas HTML y decodifica las entidades más comunes (resúmenes de RSS/APIs).

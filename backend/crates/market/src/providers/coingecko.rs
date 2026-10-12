@@ -72,7 +72,10 @@ impl CoinGecko {
             http,
             key,
             base: BASE.into(),
-            ids: Cache::builder().max_capacity(2_000).time_to_live(Duration::from_secs(86_400)).build(),
+            ids: Cache::builder()
+                .max_capacity(2_000)
+                .time_to_live(Duration::from_secs(86_400))
+                .build(),
             info: ProviderInfo {
                 name: "coingecko",
                 requires_key: false,
@@ -131,7 +134,9 @@ impl CoinGecko {
                 self.ids.insert(sym, arc.clone()).await;
                 Ok(arc)
             }
-            None => Err(ProviderError::NotFound(format!("{sym} no está en CoinGecko"))),
+            None => Err(ProviderError::NotFound(format!(
+                "{sym} no está en CoinGecko"
+            ))),
         }
     }
 
@@ -147,7 +152,11 @@ pub fn parse_search_ids(text: &str, symbol: &str) -> Option<String> {
     v["coins"]
         .as_array()?
         .iter()
-        .filter(|c| c["symbol"].as_str().is_some_and(|s| s.eq_ignore_ascii_case(symbol)))
+        .filter(|c| {
+            c["symbol"]
+                .as_str()
+                .is_some_and(|s| s.eq_ignore_ascii_case(symbol))
+        })
         .min_by_key(|c| c["market_cap_rank"].as_u64().unwrap_or(u64::MAX))
         .and_then(|c| c["id"].as_str().map(str::to_string))
 }
@@ -165,7 +174,9 @@ impl Provider for CoinGecko {
         for h in &hits {
             // Aprovecha para recordar ids sin coste adicional.
             if let Some(coin) = parse_search_ids(&text, &h.summary.symbol) {
-                self.ids.insert(h.summary.symbol.to_ascii_uppercase(), Arc::from(coin)).await;
+                self.ids
+                    .insert(h.summary.symbol.to_ascii_uppercase(), Arc::from(coin))
+                    .await;
             }
         }
         Ok(hits)
@@ -190,7 +201,12 @@ impl Provider for CoinGecko {
         quote_from_simple(&text, &coin, id)
     }
 
-    async fn history(&self, id: &AssetId, range: Range, _interval: Interval) -> PResult<Vec<Candle>> {
+    async fn history(
+        &self,
+        id: &AssetId,
+        range: Range,
+        _interval: Interval,
+    ) -> PResult<Vec<Candle>> {
         let coin = self.coin_id(id).await?;
         // OHLC de CoinGecko: la granularidad la decide `days` (30 min / 4 h / 4 d), no el intervalo.
         let days = match range {
@@ -204,7 +220,9 @@ impl Provider for CoinGecko {
             Range::Y2 | Range::Y5 | Range::Y10 | Range::Max => "365",
         };
         let url = self.url(&["coins", &coin, "ohlc"])?;
-        let text = self.get(url, &[("vs_currency", "usd".into()), ("days", days.into())]).await?;
+        let text = self
+            .get(url, &[("vs_currency", "usd".into()), ("days", days.into())])
+            .await?;
         parse_ohlc(&text)
     }
 
@@ -233,10 +251,14 @@ impl Provider for CoinGecko {
 
 pub fn parse_search(text: &str) -> PResult<Vec<SearchHit>> {
     let v: Value = parse_json(text)?;
-    let coins = v["coins"].as_array().ok_or_else(|| ProviderError::upstream("búsqueda sin lista de monedas"))?;
+    let coins = v["coins"]
+        .as_array()
+        .ok_or_else(|| ProviderError::upstream("búsqueda sin lista de monedas"))?;
     let mut out = Vec::new();
     for c in coins {
-        let (Some(sym), Some(name)) = (c["symbol"].as_str(), c["name"].as_str()) else { continue };
+        let (Some(sym), Some(name)) = (c["symbol"].as_str(), c["name"].as_str()) else {
+            continue;
+        };
         let sym = sym.to_ascii_uppercase();
         if crate::symbol::validate_symbol(&sym).is_err() {
             continue;
@@ -264,11 +286,14 @@ pub fn parse_search(text: &str) -> PResult<Vec<SearchHit>> {
 pub fn quote_from_simple(text: &str, coin: &str, id: &AssetId) -> PResult<Quote> {
     let v: Value = parse_json(text)?;
     let c = &v[coin];
-    let price = num(&c["usd"]).filter(|p| *p > 0.0).ok_or_else(|| {
-        ProviderError::NotFound(format!("CoinGecko sin precio para {coin}"))
-    })?;
+    let price = num(&c["usd"])
+        .filter(|p| *p > 0.0)
+        .ok_or_else(|| ProviderError::NotFound(format!("CoinGecko sin precio para {coin}")))?;
     let change_pct = num(&c["usd_24h_change"]);
-    let ts = c["last_updated_at"].as_i64().and_then(from_secs).unwrap_or_else(Utc::now);
+    let ts = c["last_updated_at"]
+        .as_i64()
+        .and_then(from_secs)
+        .unwrap_or_else(Utc::now);
     Ok(Quote {
         id: id.clone(),
         price,
@@ -290,7 +315,9 @@ pub fn quote_from_simple(text: &str, coin: &str, id: &AssetId) -> PResult<Quote>
 
 pub fn parse_ohlc(text: &str) -> PResult<Vec<Candle>> {
     let v: Value = parse_json(text)?;
-    let arr = v.as_array().ok_or_else(|| ProviderError::upstream("OHLC no es una lista"))?;
+    let arr = v
+        .as_array()
+        .ok_or_else(|| ProviderError::upstream("OHLC no es una lista"))?;
     let mut out: Vec<Candle> = Vec::with_capacity(arr.len());
     for k in arr {
         let Some(k) = k.as_array() else { continue };
@@ -304,13 +331,22 @@ pub fn parse_ohlc(text: &str) -> PResult<Vec<Candle>> {
             continue;
         };
         // El OHLC de CoinGecko no trae volumen.
-        out.push(Candle { t: t / 1000, o, h, l, c, v: None });
+        out.push(Candle {
+            t: t / 1000,
+            o,
+            h,
+            l,
+            c,
+            v: None,
+        });
     }
     Ok(out)
 }
 
 fn date_of(v: &Value) -> Option<NaiveDate> {
-    DateTime::parse_from_rfc3339(v.as_str()?).ok().map(|d| d.date_naive())
+    DateTime::parse_from_rfc3339(v.as_str()?)
+        .ok()
+        .map(|d| d.date_naive())
 }
 
 pub fn parse_coin(text: &str) -> PResult<Fundamentals> {
@@ -330,7 +366,10 @@ pub fn parse_coin(text: &str) -> PResult<Fundamentals> {
             .as_array()
             .and_then(|a| a.iter().find_map(|h| h.as_str().filter(|s| !s.is_empty())))
             .map(str::to_string),
-        country: v["country_origin"].as_str().filter(|s| !s.is_empty()).map(str::to_string),
+        country: v["country_origin"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         market_cap: usd("market_cap"),
         fully_diluted_valuation: usd("fully_diluted_valuation"),
         circulating_supply: num(&m["circulating_supply"]),
@@ -343,7 +382,12 @@ pub fn parse_coin(text: &str) -> PResult<Fundamentals> {
             .as_str()
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|d| d.with_timezone(&Utc))
-            .or_else(|| v["last_updated"].as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|d| d.with_timezone(&Utc))),
+            .or_else(|| {
+                v["last_updated"]
+                    .as_str()
+                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                    .map(|d| d.with_timezone(&Utc))
+            }),
         ..Fundamentals::default()
     };
     let mut put = |k: &str, val: Option<Value>| {
@@ -351,14 +395,37 @@ pub fn parse_coin(text: &str) -> PResult<Fundamentals> {
             f.extra.insert(k.to_string(), val);
         }
     };
-    put("marketCapRank", v["market_cap_rank"].as_u64().map(Into::into));
-    put("hashingAlgorithm", v["hashing_algorithm"].as_str().map(Into::into));
+    put(
+        "marketCapRank",
+        v["market_cap_rank"].as_u64().map(Into::into),
+    );
+    put(
+        "hashingAlgorithm",
+        v["hashing_algorithm"].as_str().map(Into::into),
+    );
     put("genesisDate", v["genesis_date"].as_str().map(Into::into));
-    put("categories", v["categories"].as_array().map(|c| Value::Array(c.iter().take(8).cloned().collect())));
-    put("athChangePct", num(&m["ath_change_percentage"]["usd"]).map(Into::into));
-    put("priceChange7dPct", num(&m["price_change_percentage_7d"]).map(Into::into));
-    put("priceChange30dPct", num(&m["price_change_percentage_30d"]).map(Into::into));
-    put("priceChange1yPct", num(&m["price_change_percentage_1y"]).map(Into::into));
+    put(
+        "categories",
+        v["categories"]
+            .as_array()
+            .map(|c| Value::Array(c.iter().take(8).cloned().collect())),
+    );
+    put(
+        "athChangePct",
+        num(&m["ath_change_percentage"]["usd"]).map(Into::into),
+    );
+    put(
+        "priceChange7dPct",
+        num(&m["price_change_percentage_7d"]).map(Into::into),
+    );
+    put(
+        "priceChange30dPct",
+        num(&m["price_change_percentage_30d"]).map(Into::into),
+    );
+    put(
+        "priceChange1yPct",
+        num(&m["price_change_percentage_1y"]).map(Into::into),
+    );
     put("totalVolume24h", usd("total_volume").map(Into::into));
     put("atl", usd("atl").map(Into::into));
     Ok(f)
@@ -385,7 +452,10 @@ mod tests {
         assert_eq!(hits[0].summary.name, "Bitcoin");
         assert!(hits[0].liquidity > hits[1].liquidity);
         assert_eq!(parse_search_ids(SEARCH, "btc").as_deref(), Some("bitcoin"));
-        assert_eq!(parse_search_ids(SEARCH, "BCH").as_deref(), Some("bitcoin-cash"));
+        assert_eq!(
+            parse_search_ids(SEARCH, "BCH").as_deref(),
+            Some("bitcoin-cash")
+        );
         assert!(parse_search_ids(SEARCH, "NOPE").is_none());
     }
 

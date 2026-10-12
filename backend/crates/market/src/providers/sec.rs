@@ -11,7 +11,10 @@ use moka::future::Cache;
 use reqwest::{Client, header};
 use serde_json::Value;
 
-use super::{Capability, NewsQuery, PResult, Provider, ProviderError, ProviderInfo, from_ymd, text as json_text};
+use super::{
+    Capability, NewsQuery, PResult, Provider, ProviderError, ProviderInfo, from_ymd,
+    text as json_text,
+};
 use crate::http::{parse_json, send_ok};
 
 const TICKERS_URL: &str = "https://www.sec.gov/files/company_tickers.json";
@@ -41,7 +44,10 @@ impl Sec {
         Self {
             http,
             user_agent,
-            tickers: Cache::builder().time_to_live(Duration::from_secs(86_400)).max_capacity(1).build(),
+            tickers: Cache::builder()
+                .time_to_live(Duration::from_secs(86_400))
+                .max_capacity(1)
+                .build(),
             info: ProviderInfo {
                 name: "sec",
                 requires_key: false,
@@ -56,7 +62,12 @@ impl Sec {
     }
 
     async fn get(&self, url: String) -> PResult<String> {
-        send_ok(self.http.get(url).header(header::USER_AGENT, &self.user_agent)).await
+        send_ok(
+            self.http
+                .get(url)
+                .header(header::USER_AGENT, &self.user_agent),
+        )
+        .await
     }
 
     async fn company(&self, id: &AssetId) -> PResult<Company> {
@@ -68,7 +79,9 @@ impl Sec {
             })
             .await
             .map_err(|e: Arc<ProviderError>| match &*e {
-                ProviderError::RateLimited { retry_after } => ProviderError::RateLimited { retry_after: *retry_after },
+                ProviderError::RateLimited { retry_after } => ProviderError::RateLimited {
+                    retry_after: *retry_after,
+                },
                 other => ProviderError::Upstream(other.to_string()),
             })?;
         map.get(&id.symbol.to_ascii_uppercase())
@@ -82,7 +95,12 @@ impl Sec {
             return Err(ProviderError::Unsupported);
         }
         let co = self.company(id).await?;
-        let text = self.get(format!("https://data.sec.gov/submissions/CIK{:010}.json", co.cik)).await?;
+        let text = self
+            .get(format!(
+                "https://data.sec.gov/submissions/CIK{:010}.json",
+                co.cik
+            ))
+            .await?;
         parse_submissions(&text, limit, Utc::now())
     }
 }
@@ -103,12 +121,19 @@ impl Provider for Sec {
 
 pub fn parse_tickers(text: &str) -> PResult<HashMap<String, Company>> {
     let v: Value = parse_json(text)?;
-    let obj = v.as_object().ok_or_else(|| ProviderError::upstream("company_tickers no es un objeto"))?;
+    let obj = v
+        .as_object()
+        .ok_or_else(|| ProviderError::upstream("company_tickers no es un objeto"))?;
     let mut out = HashMap::with_capacity(obj.len());
     for e in obj.values() {
-        let (Some(cik), Some(t)) = (e["cik_str"].as_u64(), e["ticker"].as_str()) else { continue };
+        let (Some(cik), Some(t)) = (e["cik_str"].as_u64(), e["ticker"].as_str()) else {
+            continue;
+        };
         out.entry(t.to_ascii_uppercase())
-            .or_insert_with(|| Company { cik, name: e["title"].as_str().unwrap_or(t).to_string() });
+            .or_insert_with(|| Company {
+                cik,
+                name: e["title"].as_str().unwrap_or(t).to_string(),
+            });
     }
     Ok(out)
 }
@@ -117,7 +142,8 @@ fn safe_path(s: &str) -> bool {
     !s.is_empty()
         && s.len() < 200
         && !s.contains("..")
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c))
 }
 
 pub fn parse_submissions(text: &str, limit: usize, now: DateTime<Utc>) -> PResult<Vec<NewsItem>> {
@@ -129,22 +155,27 @@ pub fn parse_submissions(text: &str, limit: usize, now: DateTime<Utc>) -> PResul
         .ok_or_else(|| ProviderError::upstream("submissions sin cik"))?;
     let r = &v["filings"]["recent"];
     let col = |k: &str| r[k].as_array();
-    let (Some(acc), Some(date), Some(form)) = (col("accessionNumber"), col("filingDate"), col("form"))
+    let (Some(acc), Some(date), Some(form)) =
+        (col("accessionNumber"), col("filingDate"), col("form"))
     else {
         return Err(ProviderError::upstream("submissions sin filings recientes"));
     };
     let mut out = Vec::new();
-    for i in 0..acc.len() {
-        let (Some(acc_no), Some(form), Some(date_s)) =
-            (acc[i].as_str(), form.get(i).and_then(Value::as_str), date.get(i).and_then(Value::as_str))
-        else {
+    for (i, acc_v) in acc.iter().enumerate() {
+        let (Some(acc_no), Some(form), Some(date_s)) = (
+            acc_v.as_str(),
+            form.get(i).and_then(Value::as_str),
+            date.get(i).and_then(Value::as_str),
+        ) else {
             continue;
         };
         if !FORMS.contains(&form) {
             continue;
         }
         let get = |k: &str| col(k).and_then(|a| a.get(i)).and_then(json_text);
-        let Some(doc) = get("primaryDocument").filter(|d| safe_path(d)) else { continue };
+        let Some(doc) = get("primaryDocument").filter(|d| safe_path(d)) else {
+            continue;
+        };
         let acc_clean = acc_no.replace('-', "");
         if !acc_clean.chars().all(|c| c.is_ascii_digit()) {
             continue;
@@ -153,7 +184,9 @@ pub fn parse_submissions(text: &str, limit: usize, now: DateTime<Utc>) -> PResul
             .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
             .map(|d| d.with_timezone(&Utc))
             .or_else(|| from_ymd(date_s));
-        let Some(published) = published.filter(|p| *p <= now + chrono::Duration::days(1)) else { continue };
+        let Some(published) = published.filter(|p| *p <= now + chrono::Duration::days(1)) else {
+            continue;
+        };
         let url = format!("https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{doc}");
         let desc = get("primaryDocDescription").unwrap_or_else(|| form.to_string());
         let items = get("items");
@@ -205,17 +238,28 @@ mod tests {
 
     #[test]
     fn parses_filings_with_acceptance_time() {
-        let now = DateTime::parse_from_rfc3339("2026-10-12T00:00:00Z").unwrap().with_timezone(&Utc);
+        let now = DateTime::parse_from_rfc3339("2026-10-12T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
         let items = parse_submissions(SUBS, 10, now).unwrap();
         assert!(!items.is_empty() && items.len() <= 10);
         for n in &items {
-            assert!(n.url.starts_with("https://www.sec.gov/Archives/edgar/data/320193/"), "{}", n.url);
+            assert!(
+                n.url
+                    .starts_with("https://www.sec.gov/Archives/edgar/data/320193/"),
+                "{}",
+                n.url
+            );
             assert_eq!(n.provider, "sec");
             assert!(n.title.starts_with("Apple Inc."));
             assert!(n.tickers.contains(&"AAPL".to_string()));
         }
         // Más recientes primero (como en el JSON de la SEC).
-        assert!(items.windows(2).all(|w| w[0].published_at >= w[1].published_at));
+        assert!(
+            items
+                .windows(2)
+                .all(|w| w[0].published_at >= w[1].published_at)
+        );
         // Se filtra el ruido: el fixture empieza por formularios 4.
         assert!(!items.iter().any(|n| n.title.contains("formulario 4 ")));
     }
