@@ -18,6 +18,36 @@ Lo esencial: **el servidor no valida `Host` ni `Origin`**. Toda la defensa actua
 
 ---
 
+## Estado de los arreglos (2026-10-12)
+
+Verificación común: `cargo test -p domain -p market -p server` en verde (tests nuevos en `backend/crates/server/tests/security.rs`, `server/src/{guard,config}.rs`, `market/src/http.rs`, `domain/src/lib.rs`) y servidor real en `127.0.0.1:8795` atacado con `curl` (resultados abajo). Commit: pendiente (no se ha hecho commit).
+
+| Id | Estado | Cómo se verificó |
+|---|---|---|
+| S-01 | Arreglado (commit pendiente) | `guard.rs`. Test `s01_dns_rebinding_host_is_rejected` y `s01_s04_websocket_origin_and_host`; curl con `Host: evil.example:8795` -> 403 (HTTP y WS); `localhost`, `127.0.0.1`, `[::1]` y host de `FRONTEND_ORIGIN` -> 200. Limitación: se acepta cualquier puerto para esos nombres (Settings no conoce el puerto de `BIND_ADDR`; ver "Para el coordinador"). `DELETE /models/{id}` restringido a instalados: **no hecho** (fuera de área, `routes/models.rs`). |
+| S-02 | Arreglado (commit pendiente) | POST/PUT/PATCH/DELETE con `Origin` ajeno o `Sec-Fetch-Site: cross-site` -> 403 (tests `s02_*`, curl: pull 403, `text/plain` con Origin ajeno 403). `OptionalJson` exige JSON: `text/plain` con cuerpo -> 415 (curl 415); cuerpo vacío sigue valiendo. curl sin Origin 200, Vite (Host=Origin=localhost:5180) 200. |
+| S-03 | Arreglado (commit pendiente) | `security_headers.rs`; curl a `/` muestra CSP + nosniff + no-referrer + COOP + CORP + `X-Frame-Options: DENY` + `frame-ancestors 'none'`; `/api/*` lleva `Cache-Control: no-store`; inmutable solo en `/assets/<nombre>-<hash8>.<ext>` (el resto `no-cache`). Test `csp_style_hash_matches_dist` recalcula el sha256 del `<style>` de lightweight-charts desde `frontend/dist` (coincide con `3pRED1t…`) y falla si cambia (se salta con aviso si no hay `dist`). **No** se ha vuelto a probar la CSP en un navegador real (se reutiliza la del informe, probada en Chrome 131). |
+| S-04 | Arreglado (commit pendiente) | Eliminada la rama "cualquier puerto de loopback"; `Origin: http://localhost:9999` al WS -> 403 (test). |
+| S-05 | Arreglado (commit pendiente) | `Config::from_env` rechaza no-loopback salvo `INVEST_AI_ALLOW_REMOTE=1` (aviso grande en el log). Salida real: `Error: BIND_ADDR=0.0.0.0:8795 no es loopback: ...`. Lanzador: `env_get` ahora lee `export BIND_ADDR=` (`bash -n` ok y grep comprobado). Nota: el informe proponía `INVEST_AI_ALLOW_NON_LOOPBACK`; se usa `INVEST_AI_ALLOW_REMOTE` por petición del coordinador. |
+| S-06 | Arreglado (commit pendiente) | `limits.rs`: 64 WebSockets (429 inmediato, permiso liberado al cerrar), 100 suscripciones/socket (ya existía, ahora con test), chats simultáneos 4 (429, permiso retenido hasta fin del stream SSE), análisis 2 (permiso en el líder del single-flight, puesto por el agente de IA; test `s06_analysis_limit_counts_generations_not_requests`: 4 peticiones del mismo activo = 1 generación, 3 activos con límite 2 -> un 429). La poda periódica de BD **no** se ha hecho. |
+| S-07 | Arreglado (commit pendiente) | `market/src/http.rs` lee por trozos y aborta al pasar 16 MiB ya descomprimidos. Tests `chunked_body_over_limit_is_aborted` y `gzip_bomb_is_limited_after_decoding` (1 MiB de ceros en gzip < 4 KiB, tope 64 KiB). |
+| S-08 | Arreglado (commit pendiente) | Política de redirecciones: máx. 3, solo https, nunca a localhost/IP privada/loopback/link-local/CGNAT/ULA. Tests `redirect_targets` y `redirect_to_plain_http_or_private_is_not_followed` (una 302 a `http://127.0.0.1` ya no se sigue). No resuelve DNS: un dominio público que resuelva a IP privada no se detecta. Las claves en query siguen existiendo. |
+| S-09 | Arreglado (commit pendiente) | `domain::valid_symbol` (`[A-Za-z0-9.^=\-_]{1,32}`) en `AssetId::from_str` (también Deserialize). Test `asset_symbol_whitelist` (acepta `^GSPC`, `GC=F`, `EURUSD=X`, `BRK-B`, `DX-Y.NYB`...) y `s09_hostile_symbols_are_rejected`; curl `stock%3Aa%0d%0ab` -> 400 y el error ya no refleja la entrada. |
+| S-10 | Sin cambios | Riesgo residual aceptado. |
+| I-01 | **Abierto** | `cargo audit` no está instalado (`cargo: no such command: audit`); no se ha instalado. Sin análisis RustSec. Sigue pendiente unificar las tres versiones de tungstenite. |
+| I-02 | Parcial | Solo `export BIND_ADDR=` (ver S-05). `cmd_stop` y `ollama pull` con `-` siguen igual. |
+| I-03, I-04 | Sin cambios | |
+
+### Para el coordinador
+
+- `Settings` no tiene el puerto de `BIND_ADDR`, y `main.rs` es de otro agente: `guard` valida el nombre de `Host` pero acepta cualquier puerto. Para exigir el puerto configurado: añadir `bind_port: Option<u16>` a `Settings` y rellenarlo en `main.rs`.
+- Falta `DELETE /models/{id}` solo para modelos instalados (`routes/models.rs`).
+- Falta documentar `INVEST_AI_ALLOW_REMOTE` en `.env.example`/README y, si se quiere, que el lanzador lo respete (hoy el lanzador sigue rechazando no-loopback, lo que es coherente).
+- Si se despliega detrás de un proxy con otro dominio: añadirlo a `FRONTEND_ORIGIN` (el `Host` se compara con su authority).
+- `tests/api.rs`: se ajustó solo la aserción de `stock:BRK/B` (ahora 400 `invalid_input`).
+
+---
+
 ## Hallazgos
 
 ### S-01 — ALTA — Sin validación de `Host`: DNS rebinding da lectura y escritura completa de la API  (VERIFICADO)

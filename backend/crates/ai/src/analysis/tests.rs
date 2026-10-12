@@ -420,3 +420,15 @@ fn parse_json_tolerates_fences_and_noise() {
     assert!(parse_json::<T>("").is_err());
     assert!(parse_json::<T>("{\"b\": 1}").is_err());
 }
+
+#[test]
+fn thesis_fields_are_joined_into_three_paragraphs() {
+    let j: JudgeOut = serde_json::from_value(json!({
+        "verdict": "hold", "confidence": 0.5, "horizon": "short", "summary": "x",
+        "thesis_valuation": "A 1.5.", "thesis_technical": " B 2.5. ", "thesis_balance": "C 3.5."
+    }))
+    .unwrap();
+    assert_eq!(j.full_thesis(), "A 1.5.\n\nB 2.5.\n\nC 3.5.");
+    let old: JudgeOut = serde_json::from_value(json!({"verdict": "hold", "confidence": 0.5, "horizon": "short", "summary": "x", "thesis": "Única"})).unwrap();
+    assert_eq!(old.full_thesis(), "Única");
+}

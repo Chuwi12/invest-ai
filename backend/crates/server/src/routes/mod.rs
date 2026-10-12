@@ -93,7 +93,6 @@ fn api(state: AppState) -> Router {
     // Generar un análisis puede tardar un minuto: sin timeout de 30 s.
     let generation = Router::new()
         .route("/assets/{id}/analysis", post(analysis::generate))
-        .layer(middleware::from_fn_with_state(state.limits.analyses.clone(), crate::limits::limit))
         .layer(CompressionLayer::new());
 
     // Chat (SSE): tope de generaciones simultáneas; el permiso dura lo que el stream.

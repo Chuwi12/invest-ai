@@ -130,15 +130,11 @@ pub fn style_guide(language: &str) -> String {
     }
     "\n\nSPANISH STYLE (mandatory). Write natural, precise Spanish, like a financial newspaper \
 (Expansión, Cinco Días): short sentences, no filler, never mix other languages or alphabets. Use the \
-standard Spanish term; if you are not sure a word exists, use a simpler one. Glossary: P/E = PER \
-(ratio precio/beneficio); EPS = BPA (beneficio por acción); free cash flow = flujo de caja libre; \
-market cap = capitalización bursátil; overbought = sobrecompra (RSI14 above 70); oversold = \
-sobreventa (RSI14 below 30); moving average = media móvil (SMA20 = media de 20 sesiones); \
-uptrend/downtrend = tendencia alcista/bajista; drawdown = caída máxima; dividend yield = \
-rentabilidad por dividendo; operating margin = margen operativo; debt = deuda; earnings = resultados \
-trimestrales; upside = recorrido al alza; pullback = corrección; breakout = ruptura; rate cut = bajada \
-de tipos; buy in tranches = comprar de forma escalonada (por tramos); stop = stop (nivel de salida); \
-target price = precio objetivo; headwinds = vientos en contra.\n\
+standard Spanish term; if you are not sure a word exists, use a simpler one. Use these Spanish terms, never their English equivalents: PER (ratio precio/beneficio), BPA (beneficio por acción), \
+flujo de caja libre, capitalización bursátil, sobrecompra (RSI14 por encima de 70), sobreventa (RSI14 por debajo de 30), \
+media móvil (SMA20 = media de 20 sesiones), tendencia alcista o bajista, caída máxima, rentabilidad por dividendo, margen operativo, \
+deuda, resultados trimestrales, recorrido al alza, corrección, ruptura, bajada de tipos, comprar por tramos, \
+stop (nivel de salida), precio objetivo, vientos en contra. Never write English words or parentheses with the English term.\n\
 Style examples (copy the STYLE, never these placeholders): BAD: \"El rendimiento de la caja del <x>% \
 sugiere acumular en trancos.\" GOOD: \"El flujo de caja libre es <FCF> USD, un <x> % de la capitalización: \
 rentabilidad baja, por eso conviene entrar por tramos.\" BAD: \"El precio podría indicar una corrección.\" \
@@ -174,7 +170,7 @@ Produce the final analysis as JSON:\n\
 - confidence: 0-1, CALIBRATED: 0.5 is a coin flip; stay at or below the provisional confidence plus 0.15; lower it when data is missing, signals contradict, or the data is stale.\n\
 - horizon: short (days-weeks), medium (months), long (years). horizon_note: one sentence on why, citing volatility, trend or a dated catalyst.\n\
 - summary: 2-3 sentences: the verdict and the two strongest figures behind it.\n\
-- thesis: EXACTLY three paragraphs separated by a blank line: (1) valuation and fundamentals, (2) trend, momentum and levels, (3) risks, macro, news and what tips the balance. EVERY paragraph must cite at least three concrete figures copied from the data (price, RSI14, P/E, margins, returns, ATR, distance to a level…) and say what each one implies. No filler like «podría indicar» or «fundamentales sólidos» without a figure.\n\
+- thesis_valuation, thesis_technical, thesis_balance: the thesis in three paragraphs (2-3 sentences each): (1) valuation and fundamentals, (2) trend, momentum and levels, (3) risks, macro, news and what tips the balance. EVERY paragraph must cite at least three concrete figures copied from the data (price, RSI14, P/E, margins, returns, ATR, distance to a level…) and say what each one implies. No filler like «podría indicar» or «fundamentales sólidos» without a figure; never repeat the same idea.\n\
 - bull_case, bear_case: 3-4 items each; risks: 3-5 items. Each item is ONE sentence with at least one figure; cite news as [N#].\n\
 - catalysts: only events present in the data (e.g. the earnings date, news); date as YYYY-MM-DD when known.\n\
 - entry_strategy and exit_strategy: at most two sentences each, using the system's levels (entry zone, stop, targets), invalidation condition included. Do not state a position size (the system computes it).\n\
@@ -190,7 +186,7 @@ Never promise returns. Do not give personalised financial advice.{}",
 pub fn specificity_request(problem: &str, min_figures: usize) -> String {
     format!(
         "Your thesis is too generic: {problem}. Reply again with the COMPLETE JSON, rewriting summary, thesis, bull_case, bear_case and risks so that \
-the thesis has three paragraphs, each citing at least three concrete figures from the data (at least {min_figures} distinct figures overall), \
+the thesis has three paragraphs (thesis_valuation, thesis_technical, thesis_balance), each citing at least three concrete figures from the data (at least {min_figures} distinct figures overall), \
 each figure followed by what it implies. Keep the verdict unless the figures contradict it. No filler phrases."
     )
 }

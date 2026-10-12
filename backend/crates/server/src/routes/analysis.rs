@@ -9,6 +9,7 @@ use std::{
 
 use axum::{
     Json,
+    http::StatusCode,
     extract::State,
     response::sse::{Event, KeepAlive, Sse},
 };
@@ -19,7 +20,7 @@ use tokio::sync::broadcast;
 
 use crate::{
     db::new_id,
-    error::ApiResult,
+    error::{ApiError, ApiResult},
     extract::{AppQuery, AssetPath},
     repo,
     resolve::cache_summaries,
@@ -160,6 +161,9 @@ pub async fn generate(
         };
         match ev {
             AnalysisEvent::Done { analysis } => return Ok(Json(analysis)),
+            AnalysisEvent::Error { code, message } if code == "rate_limited" => {
+                return Err(ApiError::Http { status: StatusCode::TOO_MANY_REQUESTS, code: "rate_limited", message });
+            }
             AnalysisEvent::Error { code, message } => return Err(DomainError::from_code(&code, message).into()),
             AnalysisEvent::Stage { .. } => {}
         }
@@ -211,6 +215,11 @@ async fn run_analysis(
     depth: Option<AnalysisDepth>,
     entry: Arc<Entry>,
 ) -> Result<Analysis, DomainError> {
+    // Límite de análisis simultáneos: solo lo consume quien lanza la generación (el líder del
+    // single-flight); los que se suman no. El permiso vive hasta terminar, aunque el cliente se vaya.
+    let _permit = state.limits.analyses.clone().try_acquire_owned().map_err(|_| {
+        DomainError::RateLimited { provider: "análisis simultáneos de IA: espera a que termine alguno".into() }
+    })?;
     let snapshot: AssetSnapshot = state.market.snapshot(&id).await?;
     cache_summaries(&state, std::slice::from_ref(&snapshot.summary)).await;
 

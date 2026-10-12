@@ -314,8 +314,8 @@ pub fn sizing(plan: &LevelPlan, snap: &AssetSnapshot, card: &Scorecard, verdict:
     let pct = ((raw.min(cap)) * 2.0).floor() / 2.0;
     let rationale = tr!(
         lang,
-        "Arriesgando como mucho {:.0} % de la cartera por operación, con {} a {:.1} % de la entrada la posición saldría en torno a {:.1} % de la cartera; tope {:.0} % por el riesgo del activo (puntuación de riesgo {:.0}/100). Orientativo, no es asesoramiento.",
-        "Risking at most {:.0}% of the portfolio per trade, with {} {:.1}% from entry the position would be about {:.1}% of the portfolio; capped at {:.0}% for the asset's risk (risk score {:.0}/100). Indicative, not advice.",
+        "Con un riesgo máximo de {:.0} % de la cartera por operación y {} a {:.1} % de la entrada, el cálculo daría {:.1} % de la cartera; se limita a {:.0} % por el riesgo del activo (puntuación de riesgo {:.0}/100). Orientativo, no es asesoramiento.",
+        "With a maximum risk of {:.0}% of the portfolio per trade and {} {:.1}% from entry, the calculation gives {:.1}% of the portfolio; it is capped at {:.0}% for the asset's risk (risk score {:.0}/100). Indicative, not advice.",
         RISK_PER_TRADE_PCT,
         if has_stop { lang.t("el stop", "the stop") } else { lang.t("una distancia de 2×ATR", "a 2×ATR distance") },
         stop_dist_pct,

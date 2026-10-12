@@ -20,6 +20,15 @@ Cualquier error responde con JSON `{ "error": { "code": string, "message": strin
 | Unavailable    | 503  | unavailable    |
 | Internal       | 500  | internal       |
 
+Errores de HTTP que no vienen del dominio:
+
+| HTTP | code | Cuándo |
+|------|------|--------|
+| 403  | forbidden | `Host` no es loopback ni `FRONTEND_ORIGIN` (anti DNS rebinding); `Origin` no permitido o `Sec-Fetch-Site: cross-site` en POST/PUT/PATCH/DELETE y en el WebSocket |
+| 413  | payload_too_large | cuerpo > 256 KiB |
+| 415  | unsupported_media_type | cuerpo no vacío sin `Content-Type: application/json` |
+| 429  | rate_limited | tope de WebSockets (64), de chats simultáneos (4) o de análisis simultáneos (2) |
+
 ## Sistema
 
 | Método | Ruta              | Respuesta |
@@ -54,6 +63,9 @@ si no se conocen; nunca se inventa una URL):
 | `Indicators` | `source` (proveedor de las velas usadas en el cálculo), `sourceUrl` |
 | `ProviderStatus` | `latencyMs` (última petición), `blockedSecs` (pausa restante tras un 429) |
 
+- **Convención de nulos**: los `Option` sin valor se serializan SIEMPRE como `null` (nunca se omiten, no hay
+  `skip_serializing_if`); los campos nuevos siguen la misma regla y el frontend los declara `?: T | null`
+  para tolerar backends antiguos que no los envíen (`#[serde(default)]` en el dominio).
 - `timestampOrigin = "provider"`: `timestamp`/`asOf` es la hora que dio el proveedor. `"local"`: el
   proveedor no la da y es la hora de la consulta (Yahoo/Finnhub en `Fundamentals.asOf`; Binance/CoinGecko
   si faltara el campo).

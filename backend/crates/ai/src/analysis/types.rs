@@ -66,6 +66,15 @@ pub struct JudgeOut {
     #[serde(default)]
     pub horizon_note: String,
     pub summary: String,
+    /// Tesis en tres campos (un párrafo cada uno): fuerza la estructura en modelos pequeños.
+    #[serde(default)]
+    pub thesis_valuation: String,
+    #[serde(default)]
+    pub thesis_technical: String,
+    #[serde(default)]
+    pub thesis_balance: String,
+    /// Tesis en un solo texto (modelos antiguos o respuestas parciales).
+    #[serde(default)]
     pub thesis: String,
     #[serde(default)]
     pub bull_case: Vec<Claim>,
@@ -85,6 +94,18 @@ pub struct JudgeOut {
     pub uncertainty: String,
     #[serde(default)]
     pub scenarios: Vec<ScenarioOut>,
+}
+
+impl JudgeOut {
+    /// Tesis final: los tres párrafos, o el texto único si el modelo lo dio así.
+    pub fn full_thesis(&self) -> String {
+        let parts: Vec<&str> = [&self.thesis_valuation, &self.thesis_technical, &self.thesis_balance]
+            .into_iter()
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .collect();
+        if parts.is_empty() { self.thesis.trim().to_string() } else { parts.join("\n\n") }
+    }
 }
 
 fn s() -> Value {
@@ -134,7 +155,9 @@ pub fn judge_schema(deep: bool) -> Value {
         "horizon": {"type": "string", "enum": ["short", "medium", "long"]},
         "horizon_note": s(),
         "summary": s(),
-        "thesis": s(),
+        "thesis_valuation": s(),
+        "thesis_technical": s(),
+        "thesis_balance": s(),
         "bull_case": list_of(claim_schema(false), 4),
         "bear_case": list_of(claim_schema(false), 4),
         "risks": list_of(claim_schema(false), 5),
@@ -149,7 +172,7 @@ pub fn judge_schema(deep: bool) -> Value {
         "uncertainty": s()
     });
     let mut required = vec![
-        "verdict", "confidence", "horizon", "horizon_note", "summary", "thesis", "bull_case", "bear_case", "risks",
+        "verdict", "confidence", "horizon", "horizon_note", "summary", "thesis_valuation", "thesis_technical", "thesis_balance", "bull_case", "bear_case", "risks",
         "entry_strategy", "exit_strategy", "would_change_if", "uncertainty",
     ];
     if deep {

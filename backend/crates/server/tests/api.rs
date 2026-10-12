@@ -19,7 +19,7 @@ fn error_of(body: &Value) -> (&str, &str) {
 fn btc_summary() -> Value {
     json!({
         "id": "crypto:BTC", "symbol": "BTC", "name": "Bitcoin", "class": "crypto",
-        "exchange": null, "currency": "USD", "country": null, "source": "fake"
+        "exchange": null, "currency": "USD", "country": null, "source": "fake", "sourceUrl": null
     })
 }
 
@@ -46,6 +46,7 @@ async fn health_and_status() {
     );
     assert_keys(&body["providers"][0], &[
         "name", "enabled", "requiresKey", "hasKey", "capabilities", "assetClasses", "lastError", "lastOk",
+        "latencyMs", "blockedSecs",
     ]);
 }
 
@@ -74,7 +75,7 @@ async fn search_returns_summaries_and_validates_params() {
         body,
         json!([{
             "id": "stock:AAPL", "symbol": "AAPL", "name": "Apple Inc.", "class": "stock",
-            "exchange": "NASDAQ", "currency": "USD", "country": null, "source": "fake"
+            "exchange": "NASDAQ", "currency": "USD", "country": null, "source": "fake", "sourceUrl": null
         }])
     );
 
@@ -117,10 +118,13 @@ async fn asset_detail_decodes_percent_encoded_ids() {
 
     // Un `/` codificado dentro del símbolo sigue siendo un único segmento de ruta.
     let (status, body) = app.get("/api/assets/stock%3ABRK%2FB/quote").await;
+    // S-09: el símbolo se valida con lista blanca; `/` no está permitido, así que es 400 (no llega al proveedor).
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (code, _) = error_of(&body);
+    assert_eq!(code, "invalid_input");
+    // El símbolo real de Yahoo, con guion, sigue siendo válido (404 porque el fake no lo conoce).
+    let (status, _) = app.get("/api/assets/stock%3ABRK-B/quote").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (code, message) = error_of(&body);
-    assert_eq!(code, "not_found");
-    assert!(message.contains("stock:BRK/B"), "{message}");
 
     // Sin codificar también vale (curl, tests...).
     let (status, _) = app.get("/api/assets/crypto:BTC/quote").await;
@@ -159,7 +163,7 @@ async fn quote_and_quotes_json_shape() {
     let (_, quote) = app.get("/api/assets/stock%3AAAPL/quote").await;
     assert_keys(&quote, &[
         "id", "price", "change", "changePct", "open", "high", "low", "prevClose", "volume", "marketCap",
-        "currency", "marketState", "timestamp", "source", "delaySecs",
+        "currency", "marketState", "timestamp", "source", "delaySecs", "sourceUrl", "timestampOrigin",
     ]);
     assert_eq!(quote["id"], "stock:AAPL");
     assert_eq!(quote["price"], 190.0);
@@ -239,7 +243,7 @@ async fn indicators_fundamentals_news_macro() {
 
     let (_, macro_ctx) = app.get("/api/macro").await;
     assert_keys(&macro_ctx, &["indicators", "asOf"]);
-    assert_keys(&macro_ctx["indicators"][0], &["key", "name", "value", "change", "unit", "asOf", "source"]);
+    assert_keys(&macro_ctx["indicators"][0], &["key", "name", "value", "change", "unit", "asOf", "source", "sourceUrl", "timestampOrigin"]);
 
     // Fallo del proveedor → 502 con el código del contrato.
     app.market.fail_news.store(true, Ordering::SeqCst);
@@ -495,7 +499,7 @@ async fn views_are_counted_and_ranked_by_recency() {
     let day = 24 * 3600 * 1000;
     let summary = |sym: &str| json!({
         "id": format!("stock:{sym}"), "symbol": sym, "name": sym, "class": "stock",
-        "exchange": null, "currency": null, "country": null, "source": "fake"
+        "exchange": null, "currency": null, "country": null, "source": "fake", "sourceUrl": null
     }).to_string();
     for (sym, views, score, last) in [("OLD", 50, 50.0, now - 60 * day), ("NEW", 1, 1.0, now - 3_600_000)] {
         sqlx::query("INSERT INTO asset_views (asset_id, views, score, first_viewed_at, last_viewed_at, summary) VALUES (?1, ?2, ?3, ?4, ?4, ?5)")

@@ -89,3 +89,24 @@ async fn analysis_is_saved_even_if_the_client_disconnects() {
     let (_, latest) = app.get("/api/assets/stock%3AAAPL/analysis").await;
     assert_eq!(latest["asset"], "stock:AAPL", "el análisis se guardó sin cliente");
 }
+
+#[tokio::test]
+async fn without_a_permit_post_is_429_and_sse_sends_a_rate_limited_error() {
+    let app = TestApp::new().await;
+    let held: Vec<_> = (0..server::limits::MAX_ANALYSES)
+        .map(|_| app.state.limits.analyses.clone().try_acquire_owned().unwrap())
+        .collect();
+    let (status, body) = app.send(Method::POST, "/api/assets/stock%3AAAPL/analysis", None).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(body["error"]["code"], "rate_limited");
+    let (status, _, body) = app.raw(Method::POST, URI, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let events = sse_events(&body);
+    assert_eq!(events.last().unwrap()["type"], "error");
+    assert_eq!(events.last().unwrap()["code"], "rate_limited");
+    drop(held);
+    // Liberados los permisos, vuelve a funcionar y el permiso se devuelve al terminar.
+    let (status, _) = app.send(Method::POST, "/api/assets/stock%3AAAPL/analysis", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(app.state.limits.analyses.available_permits(), server::limits::MAX_ANALYSES);
+}

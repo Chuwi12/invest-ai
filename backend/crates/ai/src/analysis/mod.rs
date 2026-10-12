@@ -401,7 +401,7 @@ impl AnalysisEngine {
         let mut judged = self.structured_from::<JudgeOut>(&caps, msgs.clone(), &schema, judge_max, &usage).await;
         if let Ok((j, raw)) = &judged {
             let min = min_figures(depth);
-            let spec = lint::specificity(&j.thesis);
+            let spec = lint::specificity(&j.full_thesis());
             if spec.is_generic(min) {
                 tracing::info!(figures = spec.figures, boilerplate = spec.boilerplate.len(), "tesis genérica: se pide reescribirla");
                 let mut retry = msgs;
@@ -411,7 +411,7 @@ impl AnalysisEngine {
                     Err(CallError::Fatal(e)) => return Err(e),
                     Err(CallError::Invalid(_)) => generic_penalty = 1,
                     Ok((j2, raw2)) => {
-                        let spec2 = lint::specificity(&j2.thesis);
+                        let spec2 = lint::specificity(&j2.full_thesis());
                         if spec2.figures >= spec.figures {
                             if spec2.is_generic(min) {
                                 generic_penalty = 1;
@@ -592,7 +592,7 @@ fn numbers_of(t: &str) -> Vec<String> {
 
 /// Todos los textos redactados por el juez, en un orden estable.
 fn judge_texts_mut(j: &mut JudgeOut) -> Vec<&mut String> {
-    let mut v: Vec<&mut String> = vec![&mut j.summary, &mut j.thesis, &mut j.horizon_note, &mut j.entry_strategy, &mut j.exit_strategy, &mut j.uncertainty];
+    let mut v: Vec<&mut String> = vec![&mut j.summary, &mut j.thesis, &mut j.thesis_valuation, &mut j.thesis_technical, &mut j.thesis_balance, &mut j.horizon_note, &mut j.entry_strategy, &mut j.exit_strategy, &mut j.uncertainty];
     v.extend(j.bull_case.iter_mut().map(|c| &mut c.text));
     v.extend(j.bear_case.iter_mut().map(|c| &mut c.text));
     v.extend(j.risks.iter_mut().map(|c| &mut c.text));
@@ -618,8 +618,8 @@ fn levels_block(now: Option<&LevelPlan>, wait: Option<&LevelPlan>, lang: Lang) -
         ));
     }
     s.push_str(lang.t(
-        "Con reducir o evitar no hay entrada, stop ni objetivos.\n",
-        "With reduce or avoid there is no entry, stop or targets.\n",
+        "Con reducir o evitar no hay entrada, stop ni objetivos.\nUmbrales de referencia: RSI14 sobrecompra 70, sobreventa 30.\n",
+        "With reduce or avoid there is no entry, stop or targets.\nReference thresholds: RSI14 overbought 70, oversold 30.\n",
     ));
     s
 }
@@ -759,7 +759,7 @@ fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifie
     let risks = claims(&j.risks, v);
 
     let summary = v.prose(&j.summary, lang.t("resumen", "summary"));
-    let mut thesis = v.prose_cited(&j.thesis, lang.t("tesis", "thesis"));
+    let mut thesis = v.prose_cited(&j.full_thesis(), lang.t("tesis", "thesis"));
     if !j.uncertainty.trim().is_empty() {
         let u = v.prose(&j.uncertainty, lang.t("incertidumbre", "uncertainty"));
         thesis.push_str(&format!("\n\n{}: {u}", lang.t("Incertidumbre", "Uncertainty")));

@@ -9,6 +9,9 @@ use crate::fidelity::extract_numbers;
 
 /// Calcos y errores conocidos: (fragmento en minúsculas, sugerencia).
 const BAD_PHRASES: &[(&str, &str)] = &[
+    ("en por ", "preposición sobrante: «en por tramos» → «por tramos»"),
+    ("(de forma escalonada)", "no repitas el término entre paréntesis"),
+    ("(buy in tranches)", "texto en inglés"),
     ("trancos", "«por tramos» / «de forma escalonada»"),
     ("rendimiento de la caja", "«flujo de caja libre»"),
     ("la data ", "«los datos»"),
