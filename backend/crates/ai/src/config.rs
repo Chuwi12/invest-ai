@@ -28,6 +28,12 @@ pub struct AiConfig {
     /// Si se activa el razonamiento en modelos que lo soportan (qwen3, gpt-oss…). Alarga mucho
     /// la latencia en una GPU de 8 GB, así que por defecto está apagado.
     pub think: bool,
+    /// Peticiones simultáneas que se envían a Ollama en las etapas independientes del análisis.
+    /// Debe coincidir con `OLLAMA_NUM_PARALLEL` del servidor de Ollama (1 por defecto: si es
+    /// mayor de lo que Ollama admite, las peticiones esperan en su cola y se alarga la latencia).
+    pub parallel: usize,
+    /// Directorio de modelos de Ollama (solo para medir el disco libre). `None` = autodetectar.
+    pub models_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for AiConfig {
@@ -44,13 +50,15 @@ impl Default for AiConfig {
             max_tool_rounds: 6,
             max_output_tokens: Some(2048),
             think: false,
+            parallel: 1,
+            models_dir: None,
         }
     }
 }
 
 impl AiConfig {
     /// Lee `LLM_BASE_URL`, `LLM_MODEL`, `LLM_NUM_CTX`, `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECS`,
-    /// `LLM_LANGUAGE` (y, opcionales, `LLM_KEEP_ALIVE`, `LLM_MAX_OUTPUT_TOKENS`, `LLM_THINK`).
+    /// `LLM_LANGUAGE` (y, opcionales, `LLM_KEEP_ALIVE`, `LLM_MAX_OUTPUT_TOKENS`, `LLM_THINK`, `LLM_PARALLEL`, `OLLAMA_MODELS`).
     /// Los valores vacíos o ilegibles se ignoran y se usa el valor por defecto.
     pub fn from_env() -> Self {
         Self::from_lookup(|k| std::env::var(k).ok())
@@ -89,6 +97,12 @@ impl AiConfig {
                 v.to_ascii_lowercase().as_str(),
                 "1" | "true" | "yes" | "on" | "si" | "sí"
             );
+        }
+        if let Some(v) = text("LLM_PARALLEL").and_then(|v| v.parse::<usize>().ok()) {
+            c.parallel = v.clamp(1, 8);
+        }
+        if let Some(v) = text("OLLAMA_MODELS") {
+            c.models_dir = Some(v.into());
         }
         c
     }

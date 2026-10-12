@@ -238,6 +238,22 @@ pub fn coerce_interval(range: Range, interval: Interval) -> Interval {
     order[idx]
 }
 
+/// Instante desde milisegundos Unix (marca de tiempo que da el proveedor).
+pub fn from_ms(ms: i64) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+}
+
+/// Instante desde segundos Unix.
+pub fn from_secs(s: i64) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(s, 0)
+}
+
+/// Fecha `YYYY-MM-DD` a medianoche UTC (series diarias de FRED, Alpha Vantage...).
+pub fn from_ymd(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let d = chrono::NaiveDate::parse_from_str(s.get(..10)?, "%Y-%m-%d").ok()?;
+    Some(d.and_hms_opt(0, 0, 0)?.and_utc())
+}
+
 /// Número desde JSON aceptando también cadenas numéricas (`"123.4"`), habituales en APIs.
 pub fn num(v: &serde_json::Value) -> Option<f64> {
     match v {

@@ -8,7 +8,7 @@ Para cada tag de `CURATED`:
      existe (404) el script FALLA: no se admiten tags sin verificar;
   2. suma el tamaño de todas las capas (= lo que descarga `ollama pull`);
   3. lee el blob de configuración (parámetros, cuantización, familia);
-  4. mira la plantilla: si usa `.Tools` el modelo admite tool calling; si menciona «think» razona;
+  4. mira la plantilla: si usa `.Tools` el modelo admite tool calling (si no, se descarta); si menciona «think» razona;
   5. lee la cabecera GGUF del blob del modelo (petición Range, unos KB) para obtener capas, cabezas
      KV y dimensión de cabeza, con los que `ai::models` estima el KV cache.
 Solo la descripción, el nivel y los parámetros activos de los MoE son editoriales.
@@ -97,6 +97,10 @@ def main():
         else:
             full, swa = blocks, 0
         per_layer = kv_heads * (key_len + val_len) * 2  # bytes por token y capa en f16
+        if ".Tools" not in tmpl:
+            # Sin soporte de tools verificable en la plantilla: no entra en el catálogo.
+            print(f"SALTADO {tag}: su plantilla no declara tool calling", file=sys.stderr)
+            continue
         models.append({
             "id": tag,
             "name": name,

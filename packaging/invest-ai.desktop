@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=invest-ai
+GenericName=Análisis de inversión con IA
+Comment=Abre invest-ai (arranca Ollama y el servidor si hace falta)
+Exec=@ROOT@/invest-ai open
+Icon=invest-ai
+Terminal=false
+Categories=Office;Finance;
+StartupNotify=false
+Actions=stop;
+
+[Desktop Action stop]
+Name=Detener invest-ai
+Exec=@ROOT@/invest-ai stop

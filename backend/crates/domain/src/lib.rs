@@ -788,6 +788,138 @@ pub trait Analyst: Send + Sync + 'static {
     /// Respuesta de chat en streaming, con tool calling sobre `req.market`.
     fn chat(&self, req: ChatRequest) -> BoxStream<'static, ChatEvent>;
     async fn status(&self) -> LlmStatus;
+    /// Como `analyze`, con profundidad explícita (`?depth=` de la API). `None` = la que
+    /// corresponda al modelo activo. Por defecto ignora la profundidad.
+    async fn analyze_with(&self, snapshot: &AssetSnapshot, depth: Option<AnalysisDepth>) -> Result<Analysis> {
+        let _ = depth;
+        self.analyze(snapshot).await
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Modelos de IA elegibles por el usuario (Ajustes). Añadido por el área `ai`.
+// ---------------------------------------------------------------------------------------------
+
+/// Profundidad del análisis: más etapas del pipeline = más calidad y más tiempo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisDepth {
+    Quick,
+    Standard,
+    Deep,
+}
+
+impl FromStr for AnalysisDepth {
+    type Err = DomainError;
+    fn from_str(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "quick" => Ok(Self::Quick),
+            "standard" => Ok(Self::Standard),
+            "deep" => Ok(Self::Deep),
+            _ => Err(DomainError::InvalidInput(format!("profundidad desconocida: {s} (quick|standard|deep)"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelTier {
+    Light,
+    Balanced,
+    Heavy,
+    Max,
+}
+
+/// Requisitos estimados (GiB = 2^30 bytes) para el `num_ctx` configurado. Ver `docs/notes/ai.md`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRequirements {
+    pub min_vram_gb: f32,
+    pub recommended_vram_gb: f32,
+    pub min_ram_gb: f32,
+    pub disk_gb: f32,
+    pub cpu_only_ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmModel {
+    /// Tag de Ollama, p. ej. "qwen3:8b".
+    pub id: String,
+    pub name: String,
+    pub family: String,
+    /// "8.2B".
+    pub parameters: String,
+    /// Parámetros activos por token (MoE).
+    pub active_parameters: Option<String>,
+    pub quantization: String,
+    pub context_window: u32,
+    pub tier: Option<ModelTier>,
+    pub supports_tools: bool,
+    pub reasoning: bool,
+    pub description: String,
+    pub requirements: Option<ModelRequirements>,
+    pub curated: bool,
+    pub installed: bool,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuInfo {
+    pub name: String,
+    pub vendor: String,
+    pub vram_total_gb: f32,
+    pub vram_free_gb: Option<f32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HardwareInfo {
+    pub cpu_model: String,
+    pub cpu_threads: u32,
+    pub ram_total_gb: f32,
+    pub ram_available_gb: f32,
+    pub gpus: Vec<GpuInfo>,
+    pub disk_free_gb: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelsResponse {
+    pub active: String,
+    pub ollama_reachable: bool,
+    pub models: Vec<LlmModel>,
+    pub hardware: HardwareInfo,
+}
+
+/// Evento del SSE de `POST /models/{id}/pull`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PullEvent {
+    Progress { status: String, completed: Option<u64>, total: Option<u64> },
+    Done,
+    Error { message: String },
+}
+
+/// Gestión de modelos del LLM. La implementa `ai`; las rutas `/models` la consumen.
+#[async_trait]
+pub trait ModelService: Send + Sync + 'static {
+    async fn list(&self) -> ModelsResponse;
+    /// Cambia el modelo activo (persistente). `InvalidInput` si no existe o no está instalado.
+    async fn set_active(&self, id: &str) -> Result<()>;
+    /// Descarga un modelo del catálogo curado. `InvalidInput` si no es curado; `Unavailable`
+    /// si ya se está descargando. Soltar el stream cancela la descarga.
+    async fn pull(&self, id: &str) -> Result<BoxStream<'static, PullEvent>>;
+    /// Borra un modelo instalado. `InvalidInput` si es el activo.
+    async fn delete(&self, id: &str) -> Result<()>;
+}
+
+/// Almacén clave-valor de ajustes persistentes (tabla `settings` de SQLite en `server`).
+#[async_trait]
+pub trait SettingsStore: Send + Sync + 'static {
+    async fn get(&self, key: &str) -> Result<Option<String>>;
+    async fn set(&self, key: &str, value: &str) -> Result<()>;
 }
 
 #[cfg(test)]

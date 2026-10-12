@@ -155,6 +155,26 @@ const LEGAL_SUFFIXES: &[&str] = &[
     "de", "banco", "bank", "motor", "motors", "international", "technologies", "technology", "systems", "usd",
 ];
 
+/// Nombre comercial limpio para consultas de texto: sin sufijos legales ni signos, máx. 3
+/// palabras (`"Apple Inc."` → `"Apple"`, `"Banco Santander, S.A."` → `"Santander"`).
+/// Solo deja letras, dígitos y `&`: es seguro meterlo en una consulta de proveedor.
+pub fn brand(name: &str) -> String {
+    let lower = name.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric() && c != '&')
+        .filter(|w| w.chars().count() > 1 && !LEGAL_SUFFIXES.contains(w))
+        .take(3)
+        .collect();
+    let joined = words.join(" ");
+    // Recupera las mayúsculas originales palabra a palabra.
+    let orig: Vec<&str> = name.split(|c: char| !c.is_alphanumeric() && c != '&').collect();
+    joined
+        .split(' ')
+        .map(|w| orig.iter().find(|o| o.to_lowercase() == w).copied().unwrap_or(w))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Términos con los que se reconoce que una noticia habla de un activo.
 #[derive(Debug, Clone, Default)]
 pub struct Relevance {
@@ -262,7 +282,8 @@ fn contains_word(haystack: &str, needle: &str, case_sensitive: bool) -> bool {
 
 /// Proveedores cuya consulta ya va acotada al símbolo: sus noticias se aceptan aunque no
 /// repitan el ticker en el título.
-const SCOPED_PROVIDERS: &[&str] = &["finnhub", "yahoo", "marketaux", "alphavantage", "cryptopanic"];
+const SCOPED_PROVIDERS: &[&str] =
+    &["finnhub", "yahoo", "marketaux", "alphavantage", "cryptopanic", "sec"];
 
 /// Une listas de varios proveedores: filtra por relevancia (si hay activo), deduplica, ordena por
 /// fecha descendente y recorta a `limit`.
@@ -374,6 +395,15 @@ mod tests {
         let mut sum = item("Titular sin pistas", "https://a.com/6", "gdelt", 1);
         sum.summary = Some("La empresa Apple presentó resultados".into());
         assert_eq!(r.score(&sum), 1);
+    }
+
+    #[test]
+    fn brand_strips_legal_suffixes() {
+        assert_eq!(brand("Apple Inc."), "Apple");
+        assert_eq!(brand("Banco Santander, S.A."), "Santander");
+        assert_eq!(brand("NVIDIA CORP"), "NVIDIA");
+        assert_eq!(brand("Bitcoin"), "Bitcoin");
+        assert_eq!(brand("Alphabet Inc. \"; DROP"), "Alphabet DROP");
     }
 
     #[test]

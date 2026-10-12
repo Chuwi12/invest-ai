@@ -18,6 +18,7 @@ tracing.workspace = true
 uuid.workspace = true
 # Flujos con `stream!`: al soltar el stream se sueltan también las peticiones HTTP en vuelo.
 async-stream = "0.3"
+bytes = "1"
 
 [dev-dependencies]
 # Servidor Ollama simulado para los tests (puerto efímero, sin red real).

@@ -1,0 +1,621 @@
+#!/usr/bin/env bash
+# invest-ai: un solo comando para levantar toda la aplicación (Ollama + backend + frontend).
+# Uso: ./invest-ai [--fake] [--no-browser] [run|dev|stop|status|logs|open|install|uninstall|help]
+set -Eeuo pipefail
+
+ROOT="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd -P)"
+readonly ROOT
+readonly ENV_FILE="$ROOT/.env"
+readonly ENV_EXAMPLE="$ROOT/.env.example"
+readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/invest-ai"
+readonly BIN="$ROOT/backend/target/release/invest-ai"
+readonly BIN_DEBUG="$ROOT/backend/target/debug/invest-ai"
+readonly SERVER_LOG="$STATE_DIR/server.log"
+readonly OLLAMA_LOG="$STATE_DIR/ollama.log"
+readonly RUN_PID="$STATE_DIR/run.pid"
+readonly OLLAMA_PID="$STATE_DIR/ollama.pid"
+readonly LOCK_FILE="$STATE_DIR/run.lock"
+readonly UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+readonly APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+readonly ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+readonly SERVICE="invest-ai.service"
+readonly OLLAMA_SERVICE="invest-ai-ollama.service"
+readonly DEV_PORT=5180
+
+NO_BROWSER=0
+FAKE=0
+SERVER_PGID=""
+VITE_PGID=""
+OLLAMA_STARTED_PID=""
+CLEANED=0
+BIND_ADDR="" BIND_HOST="" BIND_PORT="" APP_URL="" LLM_BASE_URL="" LLM_MODEL=""
+OLLAMA_HOSTPORT="" OLLAMA_LOCAL=0 DATA_DIR=""
+
+# ---------- utilidades ----------
+if [[ -t 1 ]]; then
+  C_B=$'\033[1m'; C_G=$'\033[32m'; C_Y=$'\033[33m'; C_R=$'\033[31m'; C_0=$'\033[0m'
+else
+  C_B=""; C_G=""; C_Y=""; C_R=""; C_0=""
+fi
+info() { printf '%s==>%s %s\n' "$C_B" "$C_0" "$*"; }
+ok() { printf '%s ok%s %s\n' "$C_G" "$C_0" "$*"; }
+warn() { printf '%saviso:%s %s\n' "$C_Y" "$C_0" "$*" >&2; }
+die() { printf '%serror:%s %s\n' "$C_R" "$C_0" "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+now() { printf '%s' "${EPOCHREALTIME/,/.}"; }
+elapsed() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }'; }
+
+# Lee CLAVE del entorno o de .env (sin cargar el fichero como código) o usa el valor por defecto.
+env_get() {
+  local key=$1 def=${2-} val="" line
+  if [[ -n ${!key-} ]]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
+  if [[ -r $ENV_FILE ]]; then
+    line=$(grep -E "^[[:space:]]*${key}=" "$ENV_FILE" | tail -n 1 || true)
+    if [[ -n $line ]]; then
+      val=${line#*=}
+      val=${val#"${val%%[![:space:]]*}"}
+      val=${val%"${val##*[![:space:]]}"}
+      if [[ $val =~ ^\"(.*)\"$ || $val =~ ^\'(.*)\'$ ]]; then val=${BASH_REMATCH[1]}; fi
+    fi
+  fi
+  printf '%s' "${val:-$def}"
+}
+
+is_loopback() {
+  [[ $1 == localhost || $1 == "[::1]" || $1 == "::1" || $1 =~ ^127\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+load_settings() {
+  BIND_ADDR="$(env_get BIND_ADDR 127.0.0.1:8787)"
+  BIND_HOST="${BIND_ADDR%:*}"
+  BIND_PORT="${BIND_ADDR##*:}"
+  is_loopback "$BIND_HOST" || die "BIND_ADDR=$BIND_ADDR no es loopback: por seguridad el servidor solo puede escuchar en 127.0.0.1/::1."
+  [[ $BIND_PORT =~ ^[0-9]+$ ]] || die "BIND_ADDR=$BIND_ADDR no tiene un puerto válido."
+  APP_URL="http://$BIND_HOST:$BIND_PORT"
+  LLM_BASE_URL="$(env_get LLM_BASE_URL http://127.0.0.1:11434)"
+  LLM_BASE_URL="${LLM_BASE_URL%/}"
+  LLM_MODEL="$(env_get LLM_MODEL qwen2.5:7b)"
+  local hostport=${LLM_BASE_URL#*://}
+  hostport=${hostport%%/*}
+  OLLAMA_HOSTPORT=$hostport
+  OLLAMA_LOCAL=0
+  if is_loopback "${hostport%:*}"; then OLLAMA_LOCAL=1; fi
+  if [[ $(env_get INVEST_AI_NO_BROWSER 0) == 1 ]]; then NO_BROWSER=1; fi
+  if [[ $(env_get INVEST_AI_FAKE 0) =~ ^(1|true|TRUE|yes)$ ]]; then FAKE=1; fi
+  local db
+  db="$(env_get DATABASE_URL sqlite://data/invest-ai.db)"
+  db=${db#sqlite://}
+  db=${db#sqlite:}
+  db=${db%%\?*}
+  DATA_DIR="$(dirname -- "$db")"
+  [[ $DATA_DIR == /* ]] || DATA_DIR="$ROOT/$DATA_DIR"
+  if [[ $DATA_DIR == "$ROOT/." ]]; then DATA_DIR="$ROOT/data"; fi
+  return 0
+}
+
+app_up() { curl -fsS --max-time 2 -o /dev/null "$APP_URL/api/health" 2>/dev/null; }
+ollama_up() { curl -fsS --max-time 2 -o /dev/null "$LLM_BASE_URL/api/version" 2>/dev/null; }
+vite_up() { curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:$DEV_PORT/" 2>/dev/null; }
+
+wait_for() { # wait_for SEGUNDOS COMANDO... ; devuelve 0 en cuanto el comando tenga éxito
+  local secs=$1 end
+  shift
+  end=$(( SECONDS + secs ))
+  while (( SECONDS < end )); do
+    if "$@"; then return 0; fi
+    sleep 0.2
+  done
+  "$@"
+}
+
+pid_alive() { [[ -n ${1-} ]] && kill -0 "$1" 2>/dev/null; }
+
+# Termina un grupo de procesos (creado con setsid): TERM, espera, KILL.
+kill_group() {
+  local pgid=$1 grace=${2:-12} end
+  pid_alive "$pgid" || return 0
+  kill -TERM -- "-$pgid" 2>/dev/null || kill -TERM "$pgid" 2>/dev/null || true
+  end=$(( SECONDS + grace ))
+  while pid_alive "$pgid" && (( SECONDS < end )); do sleep 0.2; done
+  if pid_alive "$pgid"; then
+    warn "el proceso $pgid no terminó a tiempo: SIGKILL"
+    kill -KILL -- "-$pgid" 2>/dev/null || kill -KILL "$pgid" 2>/dev/null || true
+  fi
+  return 0
+}
+
+exe_is() { [[ $(readlink -f "/proc/$1/exe" 2>/dev/null || true) == "$2" ]]; }
+
+server_pids() { # PIDs de binarios invest-ai (release o debug) de este repo
+  local p
+  for p in $(pgrep -u "$UID" -x invest-ai || true); do
+    if exe_is "$p" "$BIN" || exe_is "$p" "$BIN_DEBUG"; then printf '%s\n' "$p"; fi
+  done
+}
+
+port_busy() { ss -ltn 2>/dev/null | awk -v p=":$1\$" '$4 ~ p { f = 1 } END { exit !f }'; }
+
+open_url() {
+  if (( NO_BROWSER )); then
+    info "Abre $1"
+  elif have xdg-open; then
+    (setsid xdg-open "$1" >/dev/null 2>&1 9>&- &)
+  else
+    warn "no hay xdg-open: abre $1 a mano"
+  fi
+}
+
+service_installed() { [[ -f $UNIT_DIR/$SERVICE ]]; }
+service_active() { have systemctl && systemctl --user is-active --quiet "$SERVICE" 2>/dev/null; }
+
+# ---------- preparación ----------
+check_prereqs() {
+  local missing=0
+  if ! have cargo; then
+    printf '  falta cargo: sudo pacman -S rust   (o rustup: https://rustup.rs)\n' >&2; missing=1
+  fi
+  if ! have node || ! have npm; then
+    printf '  falta node/npm: sudo pacman -S nodejs npm\n' >&2; missing=1
+  fi
+  if (( ! FAKE )) && ! have ollama; then
+    printf '  falta ollama: sudo pacman -S ollama   (con GPU NVIDIA: ollama-cuda)\n' >&2; missing=1
+  fi
+  have curl || { printf '  falta curl: sudo pacman -S curl\n' >&2; missing=1; }
+  have flock || { printf '  falta flock: sudo pacman -S util-linux\n' >&2; missing=1; }
+  (( missing == 0 )) || die "instala los prerequisitos anteriores (el script no usa sudo)."
+}
+
+prepare_files() {
+  mkdir -p -- "$STATE_DIR"
+  chmod 700 -- "$STATE_DIR"
+  if [[ ! -f $ENV_FILE ]]; then
+    [[ -f $ENV_EXAMPLE ]] || die "falta $ENV_EXAMPLE"
+    install -m 600 -- "$ENV_EXAMPLE" "$ENV_FILE"
+    ok ".env creado desde .env.example (permisos 600); edítalo para añadir claves de API (opcionales)"
+  elif [[ $(stat -c %a -- "$ENV_FILE") != 600 ]]; then
+    chmod 600 -- "$ENV_FILE"
+    warn ".env tenía permisos abiertos: ahora 600"
+  fi
+  load_settings
+  mkdir -p -- "$DATA_DIR"
+  chmod 700 -- "$DATA_DIR"
+  # El log del servidor no crece sin límite.
+  if [[ -f $SERVER_LOG ]] && (( $(stat -c %s -- "$SERVER_LOG") > 10485760 )); then
+    tail -c 1048576 -- "$SERVER_LOG" >"$SERVER_LOG.tmp" && mv -f -- "$SERVER_LOG.tmp" "$SERVER_LOG"
+  fi
+  return 0
+}
+
+# Huella barata de un conjunto de ficheros: ruta + tamaño + mtime.
+fingerprint() { # fingerprint DIR [filtros de find...]
+  local dir=$1
+  shift
+  find "$dir" -type f "$@" -printf '%P %s %T@\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1
+}
+backend_fp() { fingerprint "$ROOT/backend" -not -path '*/target/*'; }
+frontend_fp() { fingerprint "$ROOT/frontend" -not -path '*/node_modules/*' -not -path '*/dist/*' -not -name '*.tsbuildinfo'; }
+
+stamp_is() { [[ -f $STATE_DIR/$1 && $(<"$STATE_DIR/$1") == "$2" ]]; }
+
+ensure_ollama() {
+  if (( FAKE )); then return 0; fi
+  if ollama_up; then
+    ok "Ollama ya responde en $LLM_BASE_URL"
+    return 0
+  fi
+  (( OLLAMA_LOCAL )) || die "Ollama no responde en $LLM_BASE_URL (no es local: arráncalo tú)."
+  [[ $(env_get INVEST_AI_OLLAMA_AUTOSTART 1) == 1 ]] || die "Ollama no responde en $LLM_BASE_URL y INVEST_AI_OLLAMA_AUTOSTART=0."
+  have ollama || die "falta ollama (sudo pacman -S ollama)."
+  info "Arrancando Ollama (ollama serve)"
+  if [[ -n $(systemctl list-unit-files ollama.service --no-legend 2>/dev/null || true) ]]; then
+    warn "existe ollama.service del sistema pero está parado; arrancarlo exige sudo (sudo systemctl enable --now ollama). Uso un 'ollama serve' propio."
+  fi
+  : >>"$OLLAMA_LOG"
+  chmod 600 -- "$OLLAMA_LOG"
+  OLLAMA_HOST="$OLLAMA_HOSTPORT" setsid ollama serve >>"$OLLAMA_LOG" 2>&1 9>&- &
+  OLLAMA_STARTED_PID=$!
+  printf '%s\n' "$OLLAMA_STARTED_PID" >"$OLLAMA_PID"
+  wait_for 60 ollama_up || die "Ollama no respondió en 60 s; mira ./invest-ai logs ollama"
+  ok "Ollama listo (arrancado por este script)"
+}
+
+ensure_model() {
+  if (( FAKE )); then return 0; fi
+  local model=$LLM_MODEL tags
+  [[ $model == *:* ]] || model="$model:latest"
+  tags=$(curl -fsS --max-time 5 "$LLM_BASE_URL/api/tags" 2>/dev/null || true)
+  if grep -qF "\"name\":\"$model\"" <<<"$tags"; then
+    ok "modelo $model disponible"
+    return 0
+  fi
+  info "Descargando el modelo $model (solo la primera vez)"
+  if ! OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama pull "$LLM_MODEL"; then
+    warn "no se pudo descargar $LLM_MODEL: el análisis con IA no funcionará hasta que lo hagas (ollama pull $LLM_MODEL)"
+  fi
+  return 0
+}
+
+ensure_frontend() { # ensure_frontend [1=compilar | 0=solo dependencias]
+  local lock_hash fp
+  lock_hash=$(cat -- "$ROOT/frontend/package.json" "$ROOT/frontend/package-lock.json" | sha256sum | cut -d' ' -f1)
+  if [[ ! -d $ROOT/frontend/node_modules ]] || ! stamp_is npm.stamp "$lock_hash"; then
+    info "Instalando dependencias del frontend (npm ci)"
+    (cd -- "$ROOT/frontend" && npm ci --no-audit --no-fund)
+    printf '%s' "$lock_hash" >"$STATE_DIR/npm.stamp"
+  fi
+  if (( ! ${1:-1} )); then return 0; fi
+  fp=$(frontend_fp)
+  if [[ ! -f $ROOT/frontend/dist/index.html ]] || ! stamp_is frontend.stamp "$fp"; then
+    info "Compilando el frontend (vite build)"
+    if (cd -- "$ROOT/frontend" && npm run build --silent); then
+      printf '%s' "$fp" >"$STATE_DIR/frontend.stamp"
+    elif [[ -f $ROOT/frontend/dist/index.html ]]; then
+      warn "el frontend no compila: sirvo el dist anterior (npm run build en frontend/ para ver el error)"
+    else
+      die "el frontend no compila (npm run build en frontend/)."
+    fi
+  else
+    ok "frontend al día"
+  fi
+}
+
+ensure_backend() { # ensure_backend [release|debug]
+  local profile=${1:-release} fp bin stamp args=()
+  if [[ $profile == release ]]; then
+    bin=$BIN; stamp=backend.stamp; args=(--release)
+  else
+    bin=$BIN_DEBUG; stamp=backend-debug.stamp
+  fi
+  fp=$(backend_fp)
+  if [[ ! -x $bin ]] || ! stamp_is "$stamp" "$fp"; then
+    info "Compilando el backend ($profile; la primera vez tarda minutos)"
+    (cd -- "$ROOT/backend" && cargo build "${args[@]}" -p server --bin invest-ai) \
+      || die "el backend no compila: corrige los errores de cargo y vuelve a lanzar."
+    printf '%s' "$fp" >"$STATE_DIR/$stamp"
+  else
+    ok "backend al día ($profile)"
+  fi
+}
+
+# ---------- ejecución y limpieza ----------
+cleanup() {
+  if (( CLEANED )); then return 0; fi
+  CLEANED=1
+  trap - INT TERM HUP
+  local started=0
+  if [[ -n $SERVER_PGID || -n $VITE_PGID || -n $OLLAMA_STARTED_PID ]]; then started=1; fi
+  if (( started )); then printf '\n'; fi
+  if [[ -n $VITE_PGID ]]; then kill_group "$VITE_PGID" 5; fi
+  if [[ -n $SERVER_PGID ]]; then
+    info "Parando el servidor"
+    kill_group "$SERVER_PGID" 14
+  fi
+  if [[ -n $OLLAMA_STARTED_PID ]]; then
+    info "Parando el Ollama que arrancó este script"
+    kill_group "$OLLAMA_STARTED_PID" 8
+    rm -f -- "${OLLAMA_PID:?}"
+  fi
+  rm -f -- "${RUN_PID:?}"
+  if (( started )); then ok "parado limpiamente"; fi
+  return 0
+}
+
+install_traps() {
+  trap cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM HUP
+}
+
+acquire_lock() {
+  mkdir -p -- "$STATE_DIR"
+  exec 9>"$LOCK_FILE"
+  if ! flock -n 9; then
+    info "Otra instancia está arrancando; espero a que esté lista"
+    wait_for 120 app_up || die "la otra instancia no llegó a responder"
+    open_url "$APP_URL"
+    exit 0
+  fi
+}
+
+already_running() { # si la app ya responde: abre el navegador y sale
+  if app_up; then
+    ok "invest-ai ya está en marcha en $APP_URL"
+    open_url "$APP_URL"
+    exit 0
+  fi
+  return 0
+}
+
+start_server() { # start_server BINARIO
+  if port_busy "$BIND_PORT"; then
+    die "el puerto $BIND_PORT está ocupado por otro proceso que no es invest-ai (ss -ltnp | grep $BIND_PORT)."
+  fi
+  : >>"$SERVER_LOG"
+  chmod 600 -- "$SERVER_LOG"
+  if (( FAKE )); then export INVEST_AI_FAKE=1; fi
+  export NO_COLOR=1
+  (cd -- "$ROOT" && exec setsid "$1" >>"$SERVER_LOG" 2>&1 9>&-) &
+  SERVER_PGID=$!
+  if ! wait_for 60 app_up; then
+    if ! pid_alive "$SERVER_PGID"; then
+      tail -n 15 -- "$SERVER_LOG" >&2
+      die "el servidor se cerró al arrancar (log: $SERVER_LOG)"
+    fi
+    die "el servidor no respondió en /api/health en 60 s (log: $SERVER_LOG)"
+  fi
+}
+
+supervise() { # espera al servidor; Ctrl+C o SIGTERM lo paran vía trap
+  while pid_alive "$SERVER_PGID"; do
+    wait "$SERVER_PGID" 2>/dev/null || true
+    sleep 0.1
+  done
+  warn "el servidor terminó por su cuenta; mira ./invest-ai logs"
+  exit 1
+}
+
+cmd_run() {
+  local t0 suffix=""
+  t0=$(now)
+  load_settings
+  already_running
+  check_prereqs
+  acquire_lock
+  already_running
+  prepare_files
+  install_traps
+  printf '%s\n' "$$" >"$RUN_PID"
+  ensure_ollama
+  ensure_model
+  ensure_frontend 1
+  ensure_backend release
+  if (( FAKE )); then suffix=" (datos simulados)"; fi
+  info "Arrancando el servidor en $APP_URL$suffix"
+  start_server "$BIN"
+  ok "listo en $(elapsed "$t0") s -> $APP_URL   (Ctrl+C para parar; ./invest-ai logs -f)"
+  open_url "$APP_URL"
+  supervise
+}
+
+cmd_dev() {
+  local t0 vite="$ROOT/frontend/node_modules/.bin/vite"
+  t0=$(now)
+  load_settings
+  already_running
+  check_prereqs
+  acquire_lock
+  already_running
+  prepare_files
+  install_traps
+  printf '%s\n' "$$" >"$RUN_PID"
+  if port_busy "$DEV_PORT"; then die "el puerto $DEV_PORT (Vite) está ocupado."; fi
+  ensure_ollama
+  ensure_model
+  ensure_frontend 0
+  ensure_backend debug
+  info "Arrancando el backend (debug) en $APP_URL"
+  start_server "$BIN_DEBUG"
+  info "Arrancando Vite con HMR en http://localhost:$DEV_PORT"
+  : >>"$STATE_DIR/vite.log"
+  chmod 600 -- "$STATE_DIR/vite.log"
+  (cd -- "$ROOT/frontend" && exec setsid "$vite" --host 127.0.0.1 >>"$STATE_DIR/vite.log" 2>&1 9>&-) &
+  VITE_PGID=$!
+  wait_for 30 vite_up || die "Vite no respondió (log: $STATE_DIR/vite.log)"
+  ok "listo en $(elapsed "$t0") s -> http://localhost:$DEV_PORT   (Ctrl+C para parar todo)"
+  open_url "http://localhost:$DEV_PORT"
+  supervise
+}
+
+# ---------- parar, estado, logs ----------
+cmd_stop() {
+  load_settings
+  local pid p stopped=0 end
+  if service_active; then
+    info "Parando $SERVICE"
+    systemctl --user stop "$SERVICE"
+    stopped=1
+  fi
+  pid=$(cat -- "$RUN_PID" 2>/dev/null || true)
+  if pid_alive "$pid" && [[ $(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true) == *invest-ai* ]]; then
+    info "Parando la instancia $pid"
+    kill -TERM "$pid"
+    end=$(( SECONDS + 30 ))
+    while pid_alive "$pid" && (( SECONDS < end )); do sleep 0.2; done
+    if pid_alive "$pid"; then warn "la instancia $pid no terminó en 30 s"; fi
+    stopped=1
+  fi
+  for p in $(server_pids); do
+    info "Parando servidor huérfano $p"
+    kill -TERM "$p" 2>/dev/null || true
+    end=$(( SECONDS + 12 ))
+    while pid_alive "$p" && (( SECONDS < end )); do sleep 0.2; done
+    kill -KILL "$p" 2>/dev/null || true
+    stopped=1
+  done
+  pid=$(cat -- "$OLLAMA_PID" 2>/dev/null || true)
+  if pid_alive "$pid" && [[ $(readlink -f "/proc/$pid/exe" 2>/dev/null || true) == */ollama ]]; then
+    info "Parando el Ollama que arrancó este script ($pid)"
+    kill_group "$pid" 8
+    stopped=1
+  fi
+  rm -f -- "${OLLAMA_PID:?}" "${RUN_PID:?}"
+  if (( stopped )); then ok "parado"; else ok "no había nada en marcha"; fi
+}
+
+cmd_status() {
+  load_settings
+  local pid mode
+  if app_up; then
+    pid=$(cat -- "$RUN_PID" 2>/dev/null || true)
+    if service_active; then mode="servicio systemd"
+    elif pid_alive "$pid"; then mode="./invest-ai, pid $pid"
+    else mode="externo"; fi
+    printf 'app:      %sEN MARCHA%s  %s  [%s] servidor pid: %s\n' "$C_G" "$C_0" "$APP_URL" "$mode" "$(server_pids | tr '\n' ' ')"
+    printf '          health: %s\n' "$(curl -fsS --max-time 2 "$APP_URL/api/health" 2>/dev/null | head -c 200)"
+  else
+    printf 'app:      %sparada%s  (%s)\n' "$C_Y" "$C_0" "$APP_URL"
+  fi
+  if ollama_up; then
+    pid=$(cat -- "$OLLAMA_PID" 2>/dev/null || true)
+    mode=""
+    if pid_alive "$pid"; then mode=" (lo arrancó invest-ai, pid $pid)"; fi
+    printf 'ollama:   %sresponde%s en %s%s\n' "$C_G" "$C_0" "$LLM_BASE_URL" "$mode"
+    printf 'modelo:   %s\n' "$LLM_MODEL"
+    if have ollama; then OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama ps 2>/dev/null | sed 's/^/          /' || true; fi
+  else
+    printf 'ollama:   %sno responde%s en %s\n' "$C_Y" "$C_0" "$LLM_BASE_URL"
+  fi
+  if service_installed; then
+    printf 'servicio: instalado, activo=%s, autoarranque=%s\n' "$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)" "$(systemctl --user is-enabled "$SERVICE" 2>/dev/null || true)"
+  else
+    printf 'servicio: no instalado (./invest-ai install)\n'
+  fi
+  if [[ -x $BIN && -f $ROOT/frontend/dist/index.html ]]; then
+    if stamp_is backend.stamp "$(backend_fp)"; then printf 'backend:  binario al día\n'; else printf 'backend:  hay cambios sin compilar (se recompila al arrancar)\n'; fi
+    if stamp_is frontend.stamp "$(frontend_fp)"; then printf 'frontend: dist al día\n'; else printf 'frontend: hay cambios sin compilar (se recompila al arrancar)\n'; fi
+  else
+    printf 'build:    sin compilar todavía\n'
+  fi
+  printf 'logs:     %s\n' "$STATE_DIR"
+}
+
+cmd_logs() {
+  local follow=() which=server a
+  for a in "$@"; do
+    case $a in
+      -f|--follow) follow=(-f) ;;
+      server|ollama|vite) which=$a ;;
+      *) die "uso: ./invest-ai logs [-f] [server|ollama|vite]" ;;
+    esac
+  done
+  if [[ $which == server ]] && service_active; then
+    exec journalctl --user -u "$SERVICE" -n 100 --no-pager "${follow[@]}"
+  fi
+  local f="$STATE_DIR/$which.log"
+  [[ -f $f ]] || die "todavía no hay $f"
+  exec tail -n 100 "${follow[@]}" -- "$f"
+}
+
+# ---------- servicio systemd de usuario + lanzador de KDE ----------
+render() { # render PLANTILLA DESTINO : sustituye @ROOT@, @DATA@ y @OLLAMA@
+  local ollama_bin
+  ollama_bin="$(command -v ollama || printf /usr/bin/ollama)"
+  sed -e "s|@ROOT@|$ROOT|g" -e "s|@DATA@|$DATA_DIR|g" -e "s|@OLLAMA@|$ollama_bin|g" -- "$1" >"$2"
+}
+
+cmd_install() {
+  local autostart=0 a
+  for a in "$@"; do
+    case $a in
+      --autostart) autostart=1 ;;
+      *) die "uso: ./invest-ai install [--autostart]" ;;
+    esac
+  done
+  have systemctl || die "no hay systemd"
+  check_prereqs
+  prepare_files
+  [[ $ROOT != *[[:space:]%\$\"\'\\\|]* && $DATA_DIR != *[[:space:]%\$\"\'\\\|]* ]] \
+    || die "la ruta del proyecto o de los datos tiene caracteres que los ficheros de unidad no admiten; muévelos."
+  ensure_frontend 1
+  ensure_backend release
+  mkdir -p -- "$UNIT_DIR" "$APP_DIR" "$ICON_DIR"
+  render "$ROOT/packaging/invest-ai.service" "$UNIT_DIR/$SERVICE"
+  render "$ROOT/packaging/invest-ai-ollama.service" "$UNIT_DIR/$OLLAMA_SERVICE"
+  render "$ROOT/packaging/invest-ai.desktop" "$APP_DIR/invest-ai.desktop"
+  install -m 644 -- "$ROOT/packaging/invest-ai.svg" "$ICON_DIR/invest-ai.svg"
+  chmod 644 -- "$UNIT_DIR/$SERVICE" "$UNIT_DIR/$OLLAMA_SERVICE" "$APP_DIR/invest-ai.desktop"
+  systemctl --user daemon-reload
+  if (( autostart )); then
+    systemctl --user enable "$SERVICE"
+    ok "autoarranque activado (al iniciar sesión)"
+  fi
+  if have update-desktop-database; then update-desktop-database "$APP_DIR" 2>/dev/null || true; fi
+  ok "instalado: $UNIT_DIR/$SERVICE y entrada 'invest-ai' en el menú de KDE"
+  printf '  iniciar:      systemctl --user start %s   (o el icono del menú)\n' "$SERVICE"
+  printf '  autoarranque: ./invest-ai install --autostart\n'
+  printf '  endurecimiento: systemd-analyze --user security %s\n' "$SERVICE"
+}
+
+cmd_uninstall() {
+  have systemctl || die "no hay systemd"
+  systemctl --user disable --now "$SERVICE" 2>/dev/null || true
+  systemctl --user stop "$OLLAMA_SERVICE" 2>/dev/null || true
+  rm -f -- "${UNIT_DIR:?}/$SERVICE" "${UNIT_DIR:?}/$OLLAMA_SERVICE" "${APP_DIR:?}/invest-ai.desktop" "${ICON_DIR:?}/invest-ai.svg"
+  systemctl --user daemon-reload
+  if have update-desktop-database; then update-desktop-database "$APP_DIR" 2>/dev/null || true; fi
+  ok "desinstalado (los datos de data/ y .env no se tocan)"
+}
+
+# Abre la app: si no corre, arranca el servicio (si está instalado) o el modo normal. Lo usa el .desktop.
+cmd_open() {
+  load_settings
+  if app_up; then open_url "$APP_URL"; return 0; fi
+  if service_installed; then
+    systemctl --user start "$SERVICE"
+    wait_for 120 app_up || die "el servicio no respondió (journalctl --user -u $SERVICE)"
+    open_url "$APP_URL"
+  else
+    cmd_run
+  fi
+}
+
+# Previo al servicio (ExecStartPre): valida, espera a Ollama y descarga el modelo si falta.
+cmd_prestart() {
+  load_settings
+  if (( FAKE )); then return 0; fi
+  if ! ollama_up; then
+    info "esperando a Ollama en $LLM_BASE_URL"
+    wait_for 90 ollama_up || die "Ollama no responde en $LLM_BASE_URL"
+  fi
+  ensure_model
+}
+
+usage() {
+  cat <<'USO'
+Uso: ./invest-ai [opciones] [comando]
+
+Comandos:
+  (ninguno) | run   compila lo que haga falta, arranca Ollama + app y abre el navegador
+  dev               backend (debug) + Vite con HMR en :5180; un solo Ctrl+C
+  stop              para la app (y el Ollama que arrancó este script)
+  status            estado de app, Ollama, modelo, servicio y compilación
+  logs [-f] [server|ollama|vite]
+  open              abre el navegador; arranca la app si no corre (lo usa el icono de KDE)
+  install [--autostart]   servicio systemd de usuario + entrada en el menú de KDE
+  uninstall         quita servicio y entrada del menú
+
+Opciones:
+  --fake            datos simulados (sin red ni Ollama)
+  --no-browser      no abrir el navegador
+USO
+}
+
+main() {
+  local cmd="" args=() a
+  for a in "$@"; do
+    case $a in
+      --fake) FAKE=1 ;;
+      --no-browser) NO_BROWSER=1 ;;
+      -h|--help) usage; exit 0 ;;
+      *) if [[ -z $cmd ]]; then cmd=$a; else args+=("$a"); fi ;;
+    esac
+  done
+  case ${cmd:-run} in
+    run) cmd_run ;;
+    dev) cmd_dev ;;
+    stop) cmd_stop ;;
+    status) cmd_status ;;
+    logs) mkdir -p -- "$STATE_DIR"; load_settings; cmd_logs ${args[@]+"${args[@]}"} ;;
+    open) cmd_open ;;
+    install) cmd_install ${args[@]+"${args[@]}"} ;;
+    uninstall) cmd_uninstall ;;
+    _prestart) cmd_prestart ;;
+    help) usage ;;
+    *) usage >&2; exit 2 ;;
+  esac
+}
+
+main "$@"
