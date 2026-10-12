@@ -464,7 +464,14 @@ cmd_status() {
     if pid_alive "$pid"; then mode=" (lo arrancó invest-ai, pid $pid)"; fi
     printf 'ollama:   %sresponde%s en %s%s\n' "$C_G" "$C_0" "$LLM_BASE_URL" "$mode"
     printf 'modelo:   %s\n' "$LLM_MODEL"
-    if have ollama; then OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama ps 2>/dev/null | sed 's/^/          /' || true; fi
+    if have ollama; then
+      local ps_out
+      ps_out=$(OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama ps 2>/dev/null || true)
+      sed 's/^/          /' <<<"$ps_out"
+      if grep -q 'CPU' <<<"$ps_out"; then
+        warn "el modelo corre (en parte) en CPU: sin 'ollama-cuda' (sudo pacman -S ollama-cuda) Ollama no usa la GPU"
+      fi
+    fi
   else
     printf 'ollama:   %sno responde%s en %s\n' "$C_Y" "$C_0" "$LLM_BASE_URL"
   fi
