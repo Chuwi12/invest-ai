@@ -11,10 +11,11 @@
 
 ## Pendiente / limitaciones conocidas
 - **Opciones**: la API no expone cadenas de opciones (`docs/API.md`), así que no hay pestaña de opciones.
-- El histórico (`/history`) y los indicadores no devuelven proveedor: la procedencia se deduce de `quote.source`/`summary.source` y se rotula como tal («cálculo propio sobre velas diarias»). Conviene que el backend incluya `source` en esas respuestas.
+- Si un backend antiguo no manda cabeceras `X-Data-Source*` ni `Indicators.source`, la procedencia se deduce de `quote.source`/`summary.source` y se rotula «proveedor deducido, el backend no lo indicó».
 - Chat: no se pueden añadir activos de contexto desde la propia pantalla (solo `?asset=` y los de la conversación) ni renombrar conversaciones.
-- Las etapas de la barra de progreso del análisis son orientativas (el backend no emite progreso).
-- No verificado: contraste AA medido con herramienta (solo diseño con tokens elegidos para AA), lectores de pantalla reales, Safari/Firefox, backend real (todo visto con `npm run dev:mock`).
+- Con el fallback al `POST /analysis` (backend sin `/analysis/stream`) no hay etapas: el panel lo indica tras 6 s y el navegador registra el 404 del stream como error de recurso en consola (solo en ese caso).
+- Diferencia real/mock sin resolver: Binance da la cotización en USDT y la ficha en USD; el panel muestra «USDT» en la tira de mercado y «$» en «Más vistos».
+- No verificado: contraste AA medido con herramienta (solo diseño con tokens elegidos para AA), lectores de pantalla reales, Safari/Firefox, (el backend real SÍ se ha probado, ver abajo).
 
 ## Decisiones
 - CSS plano con tokens (sin Tailwind): menos dependencias y bundle inicial menor. Tipografía: Geist (UI y cifras tabulares) y Newsreader (prosa del análisis y titulares), para que el análisis se lea como una nota de analista; el veredicto se dibuja como una escala de 6 pasos.
@@ -50,3 +51,13 @@
     ✓ built in 157ms
 
 Carga inicial: `index` (React, router, query, shell) + CSS; las páginas y el gráfico llegan por ruta. Fuentes woff2 con subconjuntos por `unicode-range`: solo se descargan los usados.
+
+## Procedencia, progreso real y prueba contra el backend real
+- `api/types.ts`: `sourceUrl`/`timestampOrigin`/`Indicators.source`/`latencyMs`/`blockedSecs` (opcionales y `| null`), `HistoryResult`, `AnalysisStreamEvent`. `Api.history` devuelve `HistoryResult` (velas + cabeceras `X-Data-*`, vía `requestWithHeaders`).
+- `Provenance`: enlace «verificar en la fuente ↗» solo con URL real http(s) del backend; «hora de consulta» si `timestampOrigin = local`. Aplicado a cotización, velas, indicadores, fundamentales y macro (por fila). El menú de estado muestra latencia y «en pausa N s».
+- Análisis: `Api.streamAnalysis` (SSE `stage`/`done`/`error`, `streamAnalysisEvents`) con AbortController y fallback al `POST /analysis` si el stream da 404/405; `useGenerateAnalysis` expone `stages`; el panel pinta las etapas reales («paso 3 de 4»). Simulado en `mock/index.ts`. Contra el backend real (qwen2.5:7b, quick) llegaron las etapas y el análisis terminó.
+- Números en español: nuevo `formatSigned` («impacto +0,4») y `formatNumber` en el sentimiento de noticias.
+- Corregido por diferencias real/mock: `LivePrice` ya no formatea índices ni bonos como moneda (el real manda `currency: "USD"` para ^GSPC; el bono sale como «5,24 %»).
+- Proxy de Vite: `BACKEND_URL=http://127.0.0.1:8799 npx vite --port 5181` (por defecto sigue 8787). Vite escucha en `localhost` (IPv6): usar `http://localhost:5181`.
+- Prueba real con puppeteer-core (Chrome headless): panel, AAPL (cabecera, indicadores, fundamentales, noticias, macro), BTC con WS (el precio cambió entre lecturas), menú de estado, chat (respuesta con tool call), Ajustes → Modelos y generación de análisis. Resultado: 0 errores/avisos de consola y 0 peticiones fallidas (salvo el 404 del stream mientras el backend no lo tenía). Capturas en `/tmp/claude-1000/-home-chuwi/4d633c05-8d50-4a5d-b60f-b5bff5fd31d2/scratchpad/shots/`: 01-panel, 02-aapl, 03-aapl-{indicators,fundamentals,news,macro}, 04-btc, 05-estado, 06-chat, 07-modelos, 08-analisis-progreso, 09-analisis-resultado (.png).
+- Tests: 16 ficheros, 123 pruebas (nuevos: `analysisStream.test.ts`, `Provenance.test.tsx`, `formatSigned`).

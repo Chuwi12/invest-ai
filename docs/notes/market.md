@@ -57,7 +57,7 @@ Estado de proveedores tras la prueba: yahoo, coingecko, google_news, sec con `la
 - Los filings de la SEC se exponen como `NewsItem` con `provider = "sec"` (el dominio no tiene tipo de filing).
 - Los bonos (`bond`) usan series FRED (`DGS10`) si hay clave y Yahoo (`^TNX`) si no.
 
-## Cambios propuestos al dominio
+## Cambios propuestos al dominio (1-3 YA HECHOS, ver «Procedencia verificable»)
 1. **URL de verificación**: añadir `source_url: Option<String>` a `Quote`, `Fundamentals`, `AssetSummary` y `MacroIndicator` (o un `SourceRef`). Mientras tanto, `MarketService::source_url(provider, &AssetId) -> Option<String>` devuelve la página pública (Yahoo, Binance, CoinGecko, SEC, FRED…) y se puede montar en el servidor a partir de `quote.source`.
 2. **Latencia en `ProviderStatus`**: `latency_ms: Option<u64>` y `blocked_secs: Option<u64>`. Hoy están en `MarketService::provider_health()`.
 3. **Origen del `as_of`** en `Quote`/`Fundamentals`: un `time_source: "provider" | "local"` evitaría ambigüedad (ahora siempre es el del proveedor salvo lo dicho arriba).
@@ -78,3 +78,12 @@ Firmas públicas:
 - Errores: `InvalidInput` para símbolos/consultas no válidos, `NotFound` si el activo no existe, `Upstream{provider,..}`/`RateLimited{provider}` cuando fallan todos los proveedores; `snapshot` solo falla con `NotFound`/`InvalidInput`.
 - `.env.example` ya tiene todas las variables salvo las opcionales `MARKET_HTTP_TIMEOUT_SECS` y `MARKET_REALTIME`; `SEC_USER_AGENT` por defecto lleva `example.com` y el servicio avisa por log: conviene poner un contacto real.
 - Test de humo: `cargo test -p market --test live -- --ignored --nocapture --test-threads=1` (usa red real; `--test-threads=1` para respetar los límites de Yahoo/CoinGecko/GDELT).
+
+## Procedencia verificable (hecho)
+- Dominio (solo campos `Option` con `#[serde(default)]`, serializados como `null`): `source_url` en `AssetSummary`, `Quote`, `Fundamentals`, `MacroIndicator`, `Indicators`; `timestamp_origin: provider|local` (enum `TimestampOrigin`) en `Quote`, `Fundamentals`, `MacroIndicator`; `Indicators.source`; `ProviderStatus.latency_ms/blocked_secs`. `NewsItem.url` ya es el enlace original. Los literales de otros crates (ai, server/fake.rs, resolve.rs) se completaron con `None` con permiso del coordinador.
+- `MarketService`: `route_named` sabe qué proveedor respondió; quotes (también en lote) y fichas llevan `source_url` (`symbol::verify_url`; `None` si el proveedor no tiene página por activo, p. ej. Alpha Vantage); macro: URL de la serie FRED o de la cotización Yahoo; fundamentales: URL del primer proveedor y `timestamp_origin = local` para Yahoo/Finnhub (fecha de consulta), `provider` para el resto.
+- `timestamp_origin` en quotes: `provider` si el proveedor dio la hora (Yahoo `regularMarketTime`, Binance `closeTime`, CoinGecko `last_updated_at`, Finnhub/Twelve Data/FMP `timestamp`, FRED/Alpha Vantage fecha de sesión); `local` si se usó `Utc::now()`.
+- Histórico: la caché guarda velas + proveedor; `market::provenance` (tabla estática acotada, TTL 30 min) anota proveedor/URL/última vela por (activo, rango, intervalo). Es global porque `MarketData::history` devuelve `Vec<Candle>` y no se toca el trait. `/history` la lee y pone `X-Data-Source`, `X-Data-Source-Url`, `X-Data-As-Of`. Con `FakeMarket` no hay cabeceras. CORS: no hace falta exponerlas (mismo origen / proxy de Vite).
+- Tests: +3 de procedencia en `service.rs`, +1 en `provenance.rs`, `server/tests/provenance.rs` (cabeceras presentes/ausentes) y claves nuevas en `server/tests/api.rs`.
+- Verificado contra el backend real (12-oct-2026): `/history` devuelve `x-data-source: yahoo`, `x-data-source-url: https://finance.yahoo.com/quote/AAPL`; quotes/fichas/macro con URL; Fundamentals `timestampOrigin: local`; `/status` con `latencyMs` (yahoo 61 ms; gdelt timeout 6004 ms).
+- No verificado: URLs de FMP/TwelveData/Finnhub (formato propio sin probar), `blockedSecs` con un 429 real.

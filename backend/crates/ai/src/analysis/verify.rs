@@ -57,6 +57,43 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    /// ¿Respalda la noticia `n` lo que dice `text`? Sí si alguna cifra del texto sale de esa noticia,
+    /// o si comparte al menos dos palabras significativas con su titular/resumen (sin contar el
+    /// nombre del propio activo). Un modelo pequeño pega `[N2]` por costumbre: eso no es una fuente.
+    fn news_supports(&self, n: usize, text: &str) -> bool {
+        let tag = format!("N{n}");
+        let Some(item) = self.registry.get(&tag) else { return false };
+        let nums: Vec<_> = extract_numbers(text).into_iter().filter(|x| !x.exempt).collect();
+        if nums.iter().any(|x| self.idx.find(x).contains(&Segment::News(tag.clone()))) {
+            return true;
+        }
+        let own = format!("{} {}", self.snap.summary.name, self.snap.summary.symbol).to_lowercase();
+        let words = |t: &str| -> Vec<String> {
+            t.to_lowercase()
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| w.chars().count() >= 4 && !own.contains(*w))
+                .map(str::to_string)
+                .collect()
+        };
+        let body = format!("{} {}", item.title, item.summary.as_deref().unwrap_or(""));
+        let news_words = words(&body);
+        let mut shared: Vec<String> = words(text).into_iter().filter(|w| news_words.contains(w)).collect();
+        shared.sort();
+        shared.dedup();
+        shared.len() >= 2
+    }
+
+    /// Quita las citas `[N#]` (una sola noticia por corchete) que la noticia no respalda.
+    pub fn clean_citations(&self, text: &str) -> String {
+        let mut out = text.to_string();
+        for n in extract_citations(text) {
+            if !self.news_supports(n, text) {
+                out = out.replace(&format!(" [N{n}]"), "").replace(&format!("[N{n}]"), "");
+            }
+        }
+        out
+    }
+
     /// Comprueba una afirmación. `None` = descartada (y anotada en `warnings`).
     pub fn claim(&mut self, c: &Claim) -> Option<Checked> {
         let text = truncate_chars(c.text.trim(), MAX_CLAIM_CHARS);
@@ -73,6 +110,7 @@ impl<'a> Verifier<'a> {
                 return None;
             }
         }
+        let text = self.clean_citations(&text);
         let mut segs = match self.idx.check_figures(&c.figures) {
             Ok(s) => s,
             Err(bad) => return self.reject(&text, &bad),
@@ -117,7 +155,7 @@ impl<'a> Verifier<'a> {
     /// Prosa libre (resumen, tesis, estrategia): se conserva, pero cada cifra sin verificar se
     /// marca con ⚠ y se avisa una vez.
     pub fn prose(&mut self, text: &str, field: &str) -> String {
-        let text = truncate_chars(text.trim(), MAX_PROSE_CHARS);
+        let text = self.clean_citations(&truncate_chars(text.trim(), MAX_PROSE_CHARS));
         let (marked, bad) = self.idx.mark_unverified(&text);
         if !bad.is_empty() {
             self.marked += bad.len();
@@ -137,7 +175,7 @@ impl<'a> Verifier<'a> {
     /// Prosa por párrafos: como `prose`, y cada párrafo termina con las fuentes de las cifras que
     /// usa (proveedor y hora), para que la tesis sea comprobable igual que las afirmaciones.
     pub fn prose_cited(&mut self, text: &str, field: &str) -> String {
-        let text = truncate_chars(text.trim(), MAX_PROSE_CHARS);
+        let text = self.clean_citations(&truncate_chars(text.trim(), MAX_PROSE_CHARS));
         let mut out = Vec::new();
         for para in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
             let (marked, bad) = self.idx.mark_unverified(para);
@@ -380,6 +418,18 @@ mod tests {
         assert_eq!(v.dropped, 3);
         assert_eq!(v.warnings.len(), 3);
         assert!(v.claim(&claim("Cualitativa sin números", &[])).is_some());
+    }
+
+    #[test]
+    fn habitual_news_citations_without_support_are_removed() {
+        let f = fx();
+        let v = Verifier::new(&f.text, &f.snap, &f.reg, Lang::Es);
+        // Sin relación con la noticia N1: se quita la cita; con cifra de la noticia o texto que la cita bien, se queda.
+        let t0 = f.reg.get("N1").unwrap().title.clone();
+        assert_eq!(v.clean_citations("La caída máxima es del 13.8 por ciento [N1]."), "La caída máxima es del 13.8 por ciento.");
+        let words: Vec<&str> = t0.split_whitespace().filter(|w| w.chars().count() >= 5).take(3).collect();
+        let supported = format!("{} [N1]", words.join(" "));
+        assert!(v.clean_citations(&supported).contains("[N1]"), "{supported}");
     }
 
     #[test]

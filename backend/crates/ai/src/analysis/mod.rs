@@ -829,21 +829,30 @@ fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifie
 }
 
 fn build_scenarios(j: &JudgeOut, v: &mut Verifier<'_>, lang: Lang) -> Option<Vec<Scenario>> {
-    let mut out: Vec<(String, f32, String)> = Vec::new();
-    for kind in ["bullish", "base", "bearish"] {
-        let s = j.scenarios.iter().find(|s| s.kind == kind)?;
-        out.push((kind.to_string(), s.probability, s.description.clone()));
+    const KINDS: [&str; 3] = ["bullish", "base", "bearish"];
+    if j.scenarios.len() < 3 {
+        tracing::warn!(n = j.scenarios.len(), "el juez no dio los tres escenarios");
+        return None;
     }
-    let probs = normalize_probabilities(&out.iter().map(|o| o.1).collect::<Vec<_>>());
+    // Lo normal es una de cada tipo; si el modelo repite o inventa el tipo, se asigna por orden.
+    let distinct = KINDS.iter().all(|k| j.scenarios.iter().filter(|s| s.kind == *k).count() == 1);
+    let picked: Vec<(&str, &types::ScenarioOut)> = if distinct {
+        KINDS.iter().map(|k| (*k, j.scenarios.iter().find(|s| s.kind == *k).expect("tipo presente"))).collect()
+    } else {
+        KINDS.iter().copied().zip(j.scenarios.iter()).collect()
+    };
+    let probs = normalize_probabilities(&picked.iter().map(|(_, s)| s.probability).collect::<Vec<_>>());
     if probs.len() != 3 {
+        tracing::warn!("probabilidades de escenarios no válidas");
         return None;
     }
     Some(
-        out.into_iter()
+        picked
+            .into_iter()
             .zip(probs)
-            .map(|((kind, _, desc), probability)| Scenario {
-                description: v.prose(&desc, lang.t("escenario", "scenario")),
-                kind,
+            .map(|((kind, s), probability)| Scenario {
+                description: v.prose(&s.description, lang.t("escenario", "scenario")),
+                kind: kind.to_string(),
                 probability,
                 target_price: None,
                 target_basis: None,

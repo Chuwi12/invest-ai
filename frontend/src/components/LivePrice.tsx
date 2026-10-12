@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import type { AssetClass, Quote } from '@/api/types'
-import { formatChange, formatPrice, toneOf } from '@/lib/format'
+import { NBSP, formatChange, formatPrice, toneOf } from '@/lib/format'
 import { mergeLive } from '@/lib/quote'
 import { useLivePrice } from '@/realtime/hooks'
 import { Delta } from './Delta'
@@ -24,12 +24,15 @@ export const LivePrice = memo(function LivePrice({ quote, assetClass, currency, 
   const id = quote?.id
   const tick = useLivePrice(id)
   const m = mergeLive(quote, tick)
-  const cur = currency ?? quote?.currency ?? undefined
+  const cls = assetClass ?? (id?.slice(0, id.indexOf(':')) as AssetClass | undefined)
+  // Un índice se mide en puntos y un bono en rendimiento (%): no son importes en moneda.
+  const noMoney = cls === 'index' || cls === 'bond'
+  const cur = noMoney ? undefined : (currency ?? quote?.currency ?? undefined)
   const flash = tick && tick.dir !== 'flat' ? `flash-${tick.dir}` : ''
   return (
     <span className={`num ${className}`} style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.5em', flexWrap: 'wrap' }}>
       <span key={tick?.seq ?? 0} className={`tick ${flash}`} data-testid="live-price">
-        {formatPrice(m.price, { class: assetClass, currency: cur })}
+        {formatPrice(m.price, { class: cls, currency: cur })}{cls === 'bond' ? `${NBSP}%` : ''}
       </span>
       <span className={toneOf(m.changePct)} style={{ fontSize: '0.8em' }}>
         {showAbs ? <span className="num">{formatChange(m.change, assetClass)} </span> : null}
