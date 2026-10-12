@@ -8,13 +8,12 @@ import './styles/app.css'
 import { createQueryClient } from '@/api/queryClient'
 import { App } from '@/app/App'
 import { initTheme } from '@/app/theme'
-import { IS_MOCK } from '@/lib/env'
 
 async function boot() {
   initTheme()
-  // El mock vive en un import dinámico bajo una constante que el build resuelve a `false`:
-  // en producción ni siquiera entra en el bundle.
-  if (IS_MOCK) {
+  // La condición usa `import.meta.env` directamente para que el build la resuelva a `false`
+  // y el mock no entre en el bundle de producción.
+  if (import.meta.env.VITE_MOCK === '1' || import.meta.env.VITE_MOCK === 'true') {
     const { installMock } = await import('@/mock')
     installMock()
   }

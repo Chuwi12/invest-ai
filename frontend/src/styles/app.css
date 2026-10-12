@@ -413,3 +413,11 @@ textarea { resize: vertical; width: 100%; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .warn-text { color: var(--warn); }
+.seg { max-width: 100%; overflow-x: auto; }
+.seg button { flex: none; }
+@media (max-width: 880px) {
+  .foot .long { display: none; }
+  .big-price { font-size: 2.1rem; }
+  .asset-head h1 { font-size: 1.6rem; }
+  .chart-box { height: 20rem; }
+}

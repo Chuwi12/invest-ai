@@ -1,6 +1,7 @@
 import { History, LayoutDashboard, MessageSquare, Monitor, Moon, Search, Settings, Star, Sun } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
+import { SkeletonRows } from '@/components/states'
 import { IS_MOCK } from '@/lib/env'
 import { StatusMenu } from './StatusMenu'
 import { nextTheme, useTheme } from './theme'
@@ -77,11 +78,13 @@ export function Shell() {
             Modo demostración: todos los datos, precios y análisis son simulados.
           </div>
         ) : null}
-        <Outlet />
+        <Suspense fallback={<div className="page"><SkeletonRows rows={4} h="3rem" /></div>}>
+          <Outlet />
+        </Suspense>
       </main>
 
       <footer className="foot">
-        <span>Información generada automáticamente. No constituye asesoramiento financiero.</span>
+        <span className="trunc"><span className="long">Información generada automáticamente. </span>No constituye asesoramiento financiero.</span>
       </footer>
 
       <nav className="mobile-nav" aria-label="Principal (móvil)">

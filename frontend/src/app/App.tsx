@@ -1,6 +1,5 @@
-import { lazy, Suspense } from 'react'
+import { lazy } from 'react'
 import { Link, Navigate, Route, Routes } from 'react-router'
-import { SkeletonRows } from '@/components/states'
 import { Shell } from './Shell'
 
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
@@ -25,8 +24,7 @@ function NotFound() {
 
 export function App() {
   return (
-    <Suspense fallback={<div className="page" style={{ padding: '1.5rem' }}><SkeletonRows rows={4} h="3rem" /></div>}>
-      <Routes>
+    <Routes>
         <Route element={<Shell />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
@@ -39,7 +37,6 @@ export function App() {
           <Route path="settings/models" element={<ModelsPage />} />
           <Route path="*" element={<NotFound />} />
         </Route>
-      </Routes>
-    </Suspense>
+    </Routes>
   )
 }
