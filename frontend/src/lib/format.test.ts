@@ -4,6 +4,9 @@ import {
   formatChange,
   formatCompact,
   formatCompactCurrency,
+  currencyNote,
+  currencySymbol,
+  formatFull,
   formatCurrency,
   formatDate,
   formatDelay,
@@ -79,6 +82,27 @@ describe('formatCompact', () => {
   it('con moneda', () => {
     expect(formatCompactCurrency(3.4e12, 'USD')).toBe(`3,4${NBSP}B${NBSP}$`)
   })
+  it('conserva 3 cifras significativas', () => {
+    expect(formatCompact(4_967_129_153_536)).toBe(`4,97${NBSP}B`)
+    expect(formatCompact(4_967_129_153_536 / 1e3)).toBe(`4,97${NBSP}mil M`)
+    expect(formatCompact(1_234_567)).toBe(`1,23${NBSP}M`)
+    expect(formatCompact(12_345_678)).toBe(`12,3${NBSP}M`)
+    expect(formatCompact(123_456_789)).toBe(`123${NBSP}M`)
+    expect(formatCompact(5e12)).toBe(`5${NBSP}B`)
+    expect(formatCompact(1.2e12)).toBe(`1,2${NBSP}B`)
+  })
+  it('el redondeo que llega a 1000 sube de escala', () => {
+    expect(formatCompact(999_600)).toBe(`1${NBSP}M`)
+    expect(formatCompact(999.6e9)).toBe(`1${NBSP}B`)
+  })
+  it('con moneda USDT sale literal', () => {
+    expect(formatCompactCurrency(4_967_129_153_536, 'USD')).toBe(`4,97${NBSP}B${NBSP}$`)
+    expect(formatCompactCurrency(2.5e9, 'USDT')).toBe(`2,5${NBSP}mil M${NBSP}USDT`)
+  })
+  it('formatFull da el valor completo para el tooltip', () => {
+    expect(formatFull(4_967_129_153_536, 'USD')).toBe(`4.967.129.153.536${NBSP}$`)
+    expect(formatFull(200_000_000)).toBe('200.000.000')
+  })
 })
 
 describe('porcentajes', () => {
@@ -145,5 +169,18 @@ describe('formatSigned', () => {
     expect(formatSigned(-0.35, 2)).toMatch(/^[-−]0,35$/)
     expect(formatSigned(0)).toBe('0,0')
     expect(formatSigned(null)).toBe('—')
+  })
+})
+
+describe('moneda de la cotización', () => {
+  it('USDT se rotula literal, nunca como $', () => {
+    expect(formatPrice(67123.4, { currency: 'USDT' })).toBe(`67.123,40${NBSP}USDT`)
+    expect(formatPrice(67123.4, { currency: 'USD' })).toBe(`67.123,40${NBSP}$`)
+    expect(currencySymbol('USDT')).toBe('USDT')
+  })
+  it('nota de Tether solo para USDT', () => {
+    expect(currencyNote('USDT')).toBe('Tether (stablecoin ≈ USD), cotización de Binance')
+    expect(currencyNote('USD')).toBeUndefined()
+    expect(currencyNote(null)).toBeUndefined()
   })
 })

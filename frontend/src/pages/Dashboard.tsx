@@ -18,7 +18,7 @@ const Tile = memo(function Tile({ q }: { q: Quote }) {
   return (
     <Link to={assetHref(q.id)} className="market-tile" title={`${q.source} · ${q.timestamp}${f.stale ? ' · retrasado' : ''}`}>
       <span className="lbl">{MARKET_LABEL[sym] ?? sym}{f.stale ? <span className="stale-badge" style={{ marginLeft: 6 }}>retrasado</span> : null}</span>
-      <LivePrice quote={q} currency={q.currency} className="px" dot={false} />
+      <LivePrice quote={q} className="px" dot={false} />
     </Link>
   )
 })

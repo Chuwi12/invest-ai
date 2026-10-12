@@ -3,22 +3,22 @@ import type { AssetSummary, Fundamentals } from '@/api/types'
 import { ErrorNotice, SkeletonRows } from '@/components/states'
 import { ExternalLink } from '@/components/ExternalLink'
 import { Provenance } from '@/components/Provenance'
-import { formatCompact, formatCompactCurrency, formatDate, formatInt, formatNumber, formatPercent, formatPrice } from '@/lib/format'
+import { formatCompact, formatCompactCurrency, formatDate, formatFull, formatInt, formatNumber, formatPercent, formatPrice } from '@/lib/format'
 import { fundamentalsFreshness } from '@/lib/freshness'
 
-type Row = [label: string, value: string | null]
+type Row = [label: string, value: string | null, title?: string]
 
 function group(title: string, rows: Row[]) {
-  const shown = rows.filter((r): r is [string, string] => r[1] !== null && r[1] !== '—')
+  const shown = rows.filter((r): r is [string, string, string?] => r[1] !== null && r[1] !== '—')
   if (shown.length === 0) return null
   return (
     <section key={title} aria-label={title}>
       <h3 className="small" style={{ fontWeight: 600, margin: '0.8rem 0 0.3rem' }}>{title}</h3>
       <dl className="kv">
-        {shown.map(([k, v]) => (
+        {shown.map(([k, v, t]) => (
           <div key={k}>
             <dt>{k}</dt>
-            <dd className="num">{v}</dd>
+            <dd className="num" title={t}>{v}</dd>
           </div>
         ))}
       </dl>
@@ -28,6 +28,7 @@ function group(title: string, rows: Row[]) {
 
 const n = (v: number | null, d = 2) => (v === null ? null : formatNumber(v, d))
 const p = (v: number | null, d = 1) => (v === null ? null : formatPercent(v, d))
+const full = (v: number | null, cur?: string | null) => (v === null ? undefined : formatFull(v, cur))
 const c = (v: number | null, cur: string | null | undefined) => (v === null ? null : formatCompactCurrency(v, cur))
 
 export function FundamentalsPanel({ summary }: { summary: AssetSummary }) {
@@ -54,40 +55,40 @@ export function FundamentalsPanel({ summary }: { summary: AssetSummary }) {
         {f.website ? <ExternalLink href={f.website} className="prov"><span style={{ textDecoration: 'underline' }}>Sitio web</span></ExternalLink> : null}
       </div>
       {group('Valoración', [
-        ['Capitalización', c(f.marketCap, cur)], ['Valor empresa', c(f.enterpriseValue, cur)],
+        ['Capitalización', c(f.marketCap, cur), full(f.marketCap, cur)], ['Valor empresa', c(f.enterpriseValue, cur), full(f.enterpriseValue, cur)],
         ['PER (12 m)', n(f.peTrailing, 1)], ['PER (previsto)', n(f.peForward, 1)], ['PEG', n(f.peg)],
         ['Precio / valor contable', n(f.priceToBook)], ['Precio / ventas', n(f.priceToSales)], ['EV / EBITDA', n(f.evToEbitda, 1)],
       ])}
       {group('Resultados', [
-        ['BPA (12 m)', n(f.epsTrailing)], ['BPA (previsto)', n(f.epsForward)], ['Ingresos (12 m)', c(f.revenueTtm, cur)],
+        ['BPA (12 m)', n(f.epsTrailing)], ['BPA (previsto)', n(f.epsForward)], ['Ingresos (12 m)', c(f.revenueTtm, cur), full(f.revenueTtm, cur)],
         ['Crec. ingresos', p(f.revenueGrowthYoy)], ['Crec. beneficios', p(f.earningsGrowthYoy)],
         ['Margen bruto', p(f.grossMargin)], ['Margen operativo', p(f.operatingMargin)], ['Margen neto', p(f.profitMargin)],
         ['ROE', p(f.roe)], ['ROA', p(f.roa)], ['Próximos resultados', f.nextEarningsDate ? formatDate(f.nextEarningsDate) : null],
       ])}
       {group('Balance', [
-        ['Caja', c(f.totalCash, cur)], ['Deuda', c(f.totalDebt, cur)], ['Deuda / capital', n(f.debtToEquity, 1)],
-        ['Ratio corriente', n(f.currentRatio)], ['Flujo de caja libre', c(f.freeCashFlow, cur)],
+        ['Caja', c(f.totalCash, cur), full(f.totalCash, cur)], ['Deuda', c(f.totalDebt, cur), full(f.totalDebt, cur)], ['Deuda / capital', n(f.debtToEquity, 1)],
+        ['Ratio corriente', n(f.currentRatio)], ['Flujo de caja libre', c(f.freeCashFlow, cur), full(f.freeCashFlow, cur)],
       ])}
       {group('Dividendo y riesgo', [
         ['Rentab. por dividendo', p(f.dividendYield)], ['Payout', p(f.payoutRatio, 0)], ['Beta', n(f.beta)],
-        ['Acciones en circulación', f.sharesOutstanding === null ? null : formatCompact(f.sharesOutstanding)],
+        ['Acciones en circulación', f.sharesOutstanding === null ? null : formatCompact(f.sharesOutstanding), full(f.sharesOutstanding)],
         ['Posición corta (% flotante)', p(f.shortPctFloat)], ['Insiders', p(f.insiderPct)], ['Instituciones', p(f.institutionalPct)],
       ])}
       {group('Analistas', [
         ['Objetivo medio', f.analystTargetMean === null ? null : formatPrice(f.analystTargetMean, { currency: cur })],
         ['Objetivo máximo', f.analystTargetHigh === null ? null : formatPrice(f.analystTargetHigh, { currency: cur })],
         ['Objetivo mínimo', f.analystTargetLow === null ? null : formatPrice(f.analystTargetLow, { currency: cur })],
-        ['Recomendación (1 compra – 5 venta)', n(f.analystRatingMean)], ['Nº de analistas', f.analystCount === null ? null : String(f.analystCount)],
+        ['Recomendación (1 compra – 5 venta)', n(f.analystRatingMean)], ['Nº de analistas', f.analystCount === null ? null : formatInt(f.analystCount)],
       ])}
       {group('Criptoactivo', [
-        ['Oferta circulante', f.circulatingSupply === null ? null : formatCompact(f.circulatingSupply)],
-        ['Oferta total', f.totalSupply === null ? null : formatCompact(f.totalSupply)],
-        ['Oferta máxima', f.maxSupply === null ? null : formatCompact(f.maxSupply)],
-        ['Valoración diluida', c(f.fullyDilutedValuation, cur)],
+        ['Oferta circulante', f.circulatingSupply === null ? null : formatCompact(f.circulatingSupply), full(f.circulatingSupply)],
+        ['Oferta total', f.totalSupply === null ? null : formatCompact(f.totalSupply), full(f.totalSupply)],
+        ['Oferta máxima', f.maxSupply === null ? null : formatCompact(f.maxSupply), full(f.maxSupply)],
+        ['Valoración diluida', c(f.fullyDilutedValuation, cur), full(f.fullyDilutedValuation, cur)],
         ['Máximo histórico', f.allTimeHigh === null ? null : formatPrice(f.allTimeHigh, { currency: cur })],
         ['Fecha del máximo', f.allTimeHighDate ? formatDate(f.allTimeHighDate) : null],
       ])}
-      {group('Fondo / ETF', [['Gastos corrientes', p(f.expenseRatio, 2)], ['Patrimonio', c(f.totalAssets, cur)]])}
+      {group('Fondo / ETF', [['Gastos corrientes', p(f.expenseRatio, 2)], ['Patrimonio', c(f.totalAssets, cur), full(f.totalAssets, cur)]])}
       {group('Bono', [['Rentab. al vencimiento', p(f.yieldToMaturity, 2)], ['Cupón', p(f.coupon, 2)], ['Vencimiento', f.maturityDate ? formatDate(f.maturityDate) : null]])}
       {f.topHoldings.length > 0 ? (
         <section aria-label="Principales posiciones">
@@ -108,7 +109,7 @@ export function FundamentalsPanel({ summary }: { summary: AssetSummary }) {
         </section>
       ) : null}
       {extra.length > 0
-        ? group('Otros datos del proveedor', extra.map(([k, v]) => [k, String(v)] as Row))
+        ? group('Otros datos del proveedor', extra.map(([k, v]) => [k, typeof v === 'number' ? formatPrice(v) : String(v)] as Row))
         : null}
     </div>
   )

@@ -84,7 +84,7 @@ function Snapshot({ a }: { a: Analysis }) {
           <div className="stack small" style={{ marginTop: '0.5rem' }}>
             <p className="muted">Contexto actual (puede diferir del que vio este análisis, generado {formatRelative(a.generatedAt)}). Generado {formatDateTime(snap.data.generatedAt)}.</p>
             <ul className="bullets">
-              <li>Cotización: {snap.data.quote ? `${formatPrice(snap.data.quote.price)} (${sourceName(snap.data.quote.source)}, ${formatRelative(snap.data.quote.timestamp)})` : 'no disponible'}</li>
+              <li>Cotización: {snap.data.quote ? `${formatPrice(snap.data.quote.price, { currency: snap.data.quote.currency })} (${sourceName(snap.data.quote.source)}, ${formatRelative(snap.data.quote.timestamp)})` : 'no disponible'}</li>
               <li>Indicadores técnicos: {snap.data.indicators ? `calculados ${formatRelative(snap.data.indicators.asOf)}` : 'no disponibles'}</li>
               <li>Fundamentales: {snap.data.fundamentals ? `${snap.data.fundamentals.sources.map(sourceName).join(', ') || 'fuente no indicada'}` : 'no disponibles'}</li>
               <li>Noticias: {snap.data.news.length} titulares</li>

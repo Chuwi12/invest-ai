@@ -127,7 +127,7 @@ export function AnalysisPanel({ summary, quote }: { summary: AssetSummary; quote
                     <td><span className={`chip ${a.verdict === 'buy' || a.verdict === 'accumulate' ? 'up' : a.verdict === 'reduce' || a.verdict === 'avoid' ? 'down' : ''}`}>{VERDICT_LABEL[a.verdict]}</span></td>
                     <td className="r num">{formatPercent(a.confidence, 0)}</td>
                     <td className="r num">{Math.round(a.scores.overall)}</td>
-                    <td className="r num">{formatPrice(a.priceAtAnalysis, { currency: summary.currency })}</td>
+                    <td className="r num">{formatPrice(a.priceAtAnalysis, { currency: quote?.currency })}</td>
                     <td className="small muted">{a.model}</td>
                     <td><button type="button" className="btn sm" disabled={a.id === shown?.id} onClick={() => setPicked(a.id)}>{a.id === shown?.id ? 'Mostrado' : 'Ver'}</button></td>
                   </tr>

@@ -20,7 +20,7 @@ const Row = memo(function Row({ row }: { row: WatchRow }) {
     <tr>
       <td><AssetCell id={row.summary.id} name={row.summary.name} /></td>
       <td className="r">
-        {row.quote ? <LivePrice quote={row.quote} assetClass={row.summary.class} currency={row.summary.currency} dot={false} /> : <span className="muted">sin dato</span>}
+        {row.quote ? <LivePrice quote={row.quote} assetClass={row.summary.class} dot={false} /> : <span className="muted">sin dato</span>}
       </td>
       <td className="r" aria-label={`Tendencia de ${assetHrefLabel(row.summary.id)}`}><Sparkline id={row.summary.id} /></td>
       <td className="small muted">

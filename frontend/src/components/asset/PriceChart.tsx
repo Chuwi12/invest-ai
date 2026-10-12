@@ -17,7 +17,7 @@ import { RANGES, defaultInterval, intervalSeconds } from '@/api/types'
 import { useResolvedScheme } from '@/app/theme'
 import { ErrorNotice, Skeleton } from '@/components/states'
 import { Provenance } from '@/components/Provenance'
-import { formatCompact, formatDateTime, formatPrice } from '@/lib/format'
+import { LOCALE, formatCompact, formatDateTime, formatPrice } from '@/lib/format'
 import { intervalsFor } from '@/lib/chart'
 import { freshness } from '@/lib/freshness'
 import { applyTickToCandle, bollingerSeries, smaSeries } from '@/lib/indicators'
@@ -68,7 +68,13 @@ export function PriceChart({ id, summary, quote }: Props) {
   const overlaySeries = useRef(new Map<string, ISeriesApi<'Line'>>())
   const last = useRef<Candle | undefined>(undefined)
   const scheme = useResolvedScheme()
-  const cur = summary.currency
+  const cur = quote?.currency ?? undefined
+  const classRef = useRef(summary.class)
+  // Eje, etiquetas y crosshair en formato español (coma decimal, punto de miles), sin símbolo de moneda.
+  const priceFormat = () => ({ type: 'custom' as const, minMove: 0.01, formatter: (p: number) => formatPrice(p, { class: classRef.current }) })
+  useEffect(() => {
+    classRef.current = summary.class
+  }, [summary.class])
 
   // Crear / destruir el gráfico.
   useEffect(() => {
@@ -77,12 +83,15 @@ export function PriceChart({ id, summary, quote }: Props) {
     const c = createChart(el, {
       autoSize: true,
       crosshair: { mode: CrosshairMode.Normal },
+      // Fechas en español. El precio se formatea por serie (priceFormat custom): un
+      // `localization.priceFormatter` global pisaría también el formato compacto del volumen.
+      localization: { locale: LOCALE, dateFormat: 'dd MMM yyyy' },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false },
     })
     chart.current = c
-    candleSeries.current = c.addSeries(CandlestickSeries, { priceLineVisible: true }, 0)
-    volSeries.current = c.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false }, 1)
+    candleSeries.current = c.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: priceFormat() }, 0)
+    volSeries.current = c.addSeries(HistogramSeries, { priceFormat: { type: 'custom', formatter: (v: number) => formatCompact(v), minMove: 1 }, lastValueVisible: false, priceLineVisible: false }, 1)
     c.panes()[1]?.setHeight(90)
 
     const series = overlaySeries.current
@@ -94,8 +103,9 @@ export function PriceChart({ id, summary, quote }: Props) {
         t.textContent = ''
         return
       }
+      const pc = { class: classRef.current }
       const v = volSeries.current ? (p.seriesData.get(volSeries.current) as { value?: number } | undefined) : undefined
-      t.textContent = `A ${formatPrice(d.open)}  Máx ${formatPrice(d.high)}  Mín ${formatPrice(d.low)}  C ${formatPrice(d.close)}${v?.value ? `  Vol ${formatCompact(v.value)}` : ''}`
+      t.textContent = `A ${formatPrice(d.open, pc)}  Máx ${formatPrice(d.high, pc)}  Mín ${formatPrice(d.low, pc)}  C ${formatPrice(d.close, pc)}${v?.value ? `  Vol ${formatCompact(v.value)}` : ''}`
     }
     c.subscribeCrosshairMove(onMove)
     return () => {
@@ -170,7 +180,7 @@ export function PriceChart({ id, summary, quote }: Props) {
     for (const [k, { color, data }] of overlayData) {
       let s = map.get(k)
       if (!s) {
-        s = c.addSeries(LineSeries, { color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 0)
+        s = c.addSeries(LineSeries, { priceFormat: priceFormat(), color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 0)
         map.set(k, s)
       }
       s.setData(data)

@@ -5,18 +5,18 @@ import { FavoriteButton } from '@/components/FavoriteButton'
 import { LivePrice } from '@/components/LivePrice'
 import { Provenance } from '@/components/Provenance'
 import { CLASS_SINGULAR, MARKET_STATE_LABEL } from '@/lib/assets'
-import { formatCompactCurrency, formatDelay, formatInt, formatPrice } from '@/lib/format'
+import { formatCompactCurrency, formatDelay, formatFull, formatInt, formatPrice } from '@/lib/format'
 import { quoteFreshness } from '@/lib/freshness'
 
 /** Cabecera: identidad, precio en vivo (animado por tick) y cifras del día con su procedencia. */
 export function AssetHeader({ summary, quote, isFavorite }: { summary: AssetSummary; quote: Quote | null | undefined; isFavorite: boolean }) {
   const fresh = quoteFreshness(quote)
-  const cur = summary.currency ?? quote?.currency ?? undefined
+  const cur = quote?.currency ?? undefined
   const opt = { class: summary.class, currency: cur }
-  const cell = (label: string, value: string) => (
+  const cell = (label: string, value: string, title?: string) => (
     <div>
       <dt>{label}</dt>
-      <dd className="num">{value}</dd>
+      <dd className="num" title={title}>{value}</dd>
     </div>
   )
   return (
@@ -42,7 +42,7 @@ export function AssetHeader({ summary, quote, isFavorite }: { summary: AssetSumm
 
       {quote ? (
         <>
-          <LivePrice quote={quote} assetClass={summary.class} currency={cur} showAbs className="big-price" />
+          <LivePrice quote={quote} assetClass={summary.class} showAbs className="big-price" />
           <Provenance
             provider={quote.source}
             asOf={quote.timestamp}
@@ -61,7 +61,7 @@ export function AssetHeader({ summary, quote, isFavorite }: { summary: AssetSumm
             {cell('Mínimo del día', formatPrice(quote.low, opt))}
             {cell('Cierre anterior', formatPrice(quote.prevClose, opt))}
             {cell('Volumen', quote.volume === null ? '—' : formatInt(quote.volume))}
-            {cell('Capitalización', quote.marketCap === null ? '—' : formatCompactCurrency(quote.marketCap, cur))}
+            {cell('Capitalización', quote.marketCap === null ? '—' : formatCompactCurrency(quote.marketCap, cur), quote.marketCap === null ? undefined : formatFull(quote.marketCap, cur))}
           </dl>
         </>
       ) : (

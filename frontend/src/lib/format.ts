@@ -90,27 +90,64 @@ export function formatInt(value: number | null | undefined): string {
   return nf('i', { maximumFractionDigits: 0 }).format(value)
 }
 
-/**
- * Cantidades grandes en escala larga española: `B` = billón (10^12), `mil M` = 10^9, `M` = 10^6.
- * 1,2 B · 125 mil M · 350 M · 12,3 mil.
- */
-export function formatCompact(value: number | null | undefined, digits = 1): string {
-  if (!isNum(value)) return DASH
-  const abs = Math.abs(value)
-  const scale = (div: number, suffix: string) => {
-    const n = value / div
-    // Con 3 o más cifras enteras los decimales sobran.
-    const d = Math.abs(n) >= 100 ? 0 : digits
-    return `${nf(`k${d}`, { minimumFractionDigits: 0, maximumFractionDigits: d }).format(n)}${NBSP}${suffix}`
-  }
-  if (abs >= 1e12) return scale(1e12, 'B')
-  if (abs >= 1e9) return scale(1e9, 'mil M')
-  if (abs >= 1e6) return scale(1e6, 'M')
-  if (abs >= 1e4) return scale(1e3, 'mil')
-  return nf('k0', { maximumFractionDigits: 0 }).format(value)
+const COMPACT_SCALES: [number, string][] = [
+  [1e12, 'B'],
+  [1e9, 'mil M'],
+  [1e6, 'M'],
+  [1e3, 'mil'],
+]
+
+/** Decimales que dejan `sig` cifras significativas para un valor ya redondeado. */
+function decimalsForSig(rounded: number, sig: number): number {
+  const mag = Math.floor(Math.log10(Math.abs(rounded)))
+  return Math.max(0, sig - 1 - mag)
 }
 
-/** Importe grande con moneda: «3,4 B US$». */
+/**
+ * Cantidades grandes en escala larga española: `B` = billón (10^12), `mil M` = 10^9, `M` = 10^6.
+ * Conserva `sig` cifras significativas (3 por defecto) sin ceros finales inútiles:
+ * 4,97 B · 1,2 B · 125 mil M · 350 M · 12,3 mil. Por debajo de 10.000 se muestra el entero.
+ * El valor completo va en el tooltip (`formatFull`).
+ */
+export function formatCompact(value: number | null | undefined, sig = 3): string {
+  if (!isNum(value)) return DASH
+  const abs = Math.abs(value)
+  if (abs < 1e4) return nf('k0', { maximumFractionDigits: 0 }).format(value)
+  // Escala base; si el redondeo a `sig` cifras llega a 1000 se sube a la escala siguiente.
+  let idx = COMPACT_SCALES.findIndex(([div]) => abs >= div)
+  let rounded = Number((value / COMPACT_SCALES[idx]![0]).toPrecision(sig))
+  if (Math.abs(rounded) >= 1000 && idx > 0) {
+    idx -= 1
+    rounded = Number((value / COMPACT_SCALES[idx]![0]).toPrecision(sig))
+  }
+  const d = decimalsForSig(rounded, sig)
+  return `${nf(`k${d}`, { minimumFractionDigits: 0, maximumFractionDigits: d }).format(rounded)}${NBSP}${COMPACT_SCALES[idx]![1]}`
+}
+
+/** Valor completo para tooltips de cifras compactas: «4.967.129.153.536 $». */
+export function formatFull(value: number | null | undefined, currency?: string | null): string {
+  if (!isNum(value)) return DASH
+  const n = nf('full', { maximumFractionDigits: 8 }).format(value)
+  return currency ? `${n}${NBSP}${currencySymbol(currency)}` : n
+}
+
+/** Símbolo corto de una moneda; USDT y otros códigos que `Intl` no conoce salen literales. */
+export function currencySymbol(currency: string): string {
+  try {
+    const parts = new Intl.NumberFormat(LOCALE, { style: 'currency', currency, currencyDisplay: 'narrowSymbol' })
+    return parts.formatToParts(0).find((p) => p.type === 'currency')?.value ?? currency
+  } catch {
+    return currency
+  }
+}
+
+/** Aviso para monedas que no son una divisa fiat clara (hoy, USDT de Binance). */
+export function currencyNote(currency: string | null | undefined): string | undefined {
+  if (currency && currency.toUpperCase() === 'USDT') return 'Tether (stablecoin ≈ USD), cotización de Binance'
+  return undefined
+}
+
+/** Importe grande con moneda: «3,4 B $». */
 export function formatCompactCurrency(
   value: number | null | undefined,
   currency: string | null | undefined,
@@ -118,14 +155,7 @@ export function formatCompactCurrency(
   if (!isNum(value)) return DASH
   const base = formatCompact(value)
   if (!currency) return base
-  let symbol = currency
-  try {
-    const parts = new Intl.NumberFormat(LOCALE, { style: 'currency', currency, currencyDisplay: 'narrowSymbol' })
-    symbol = parts.formatToParts(0).find((p) => p.type === 'currency')?.value ?? currency
-  } catch {
-    /* código no válido: usamos el literal */
-  }
-  return `${base}${NBSP}${symbol}`
+  return `${base}${NBSP}${currencySymbol(currency)}`
 }
 
 /** Porcentaje a partir de una FRACCIÓN (0,25 => «25,00 %»). */

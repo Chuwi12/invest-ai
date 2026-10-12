@@ -4,7 +4,7 @@ import { useClearSearchHistory, useClearViews, useSearchHistory, useViewStats } 
 import { VirtualList } from '@/components/VirtualList'
 import { Empty, ErrorNotice, Section, SkeletonRows } from '@/components/states'
 import { assetHref, symbolOf } from '@/lib/assets'
-import { formatDateTime, formatRelative } from '@/lib/format'
+import { formatDateTime, formatInt, formatRelative } from '@/lib/format'
 import { useTitle } from '@/hooks/useTitle'
 
 export default function HistoryPage() {
@@ -60,7 +60,7 @@ export default function HistoryPage() {
               render={(v) => (
                 <div className="lvl" style={{ alignItems: 'center' }}>
                   <Link to={assetHref(v.id)} className="asset-link grow"><span className="sym">{symbolOf(v.id)}</span><span className="nm trunc">{v.summary.name}</span></Link>
-                  <span className="small num">{v.views} {v.views === 1 ? 'visita' : 'visitas'}</span>
+                  <span className="small num">{formatInt(v.views)} {v.views === 1 ? 'visita' : 'visitas'}</span>
                   <time className="tiny muted" dateTime={v.lastViewedAt} title={formatDateTime(v.lastViewedAt)}>{formatRelative(v.lastViewedAt)}</time>
                 </div>
               )}

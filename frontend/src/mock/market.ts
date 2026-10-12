@@ -183,7 +183,7 @@ export function genQuote(id: AssetId): Quote {
     prevClose,
     volume: noVol ? null : Math.round(between(r, 0.6, 1.6) * (cls === 'crypto' ? 2.5e10 : 4.2e7)),
     marketCap: cls === 'stock' || cls === 'crypto' ? price * sharesFor(id) : null,
-    currency: entry.currency,
+    currency: cls === 'crypto' ? 'USDT' : entry.currency, // como el real: Binance cotiza en USDT
     marketState: marketStateFor(entry),
     timestamp: new Date(Date.now() - delay * 1000).toISOString(),
     source: cls === 'crypto' ? 'binance' : 'yahoo',

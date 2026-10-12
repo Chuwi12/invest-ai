@@ -14,7 +14,7 @@
 - Si un backend antiguo no manda cabeceras `X-Data-Source*` ni `Indicators.source`, la procedencia se deduce de `quote.source`/`summary.source` y se rotula «proveedor deducido, el backend no lo indicó».
 - Chat: no se pueden añadir activos de contexto desde la propia pantalla (solo `?asset=` y los de la conversación) ni renombrar conversaciones.
 - Con el fallback al `POST /analysis` (backend sin `/analysis/stream`) no hay etapas: el panel lo indica tras 6 s y el navegador registra el 404 del stream como error de recurso en consola (solo en ese caso).
-- Diferencia real/mock sin resolver: Binance da la cotización en USDT y la ficha en USD; el panel muestra «USDT» en la tira de mercado y «$» en «Más vistos».
+- Moneda resuelta en el frontend: todo precio se rotula con `quote.currency` (nunca con la del summary). Ver «Pulido de cifras».
 - No verificado: contraste AA medido con herramienta (solo diseño con tokens elegidos para AA), lectores de pantalla reales, Safari/Firefox, (el backend real SÍ se ha probado, ver abajo).
 
 ## Decisiones
@@ -61,3 +61,27 @@ Carga inicial: `index` (React, router, query, shell) + CSS; las páginas y el gr
 - Proxy de Vite: `BACKEND_URL=http://127.0.0.1:8799 npx vite --port 5181` (por defecto sigue 8787). Vite escucha en `localhost` (IPv6): usar `http://localhost:5181`.
 - Prueba real con puppeteer-core (Chrome headless): panel, AAPL (cabecera, indicadores, fundamentales, noticias, macro), BTC con WS (el precio cambió entre lecturas), menú de estado, chat (respuesta con tool call), Ajustes → Modelos y generación de análisis. Resultado: 0 errores/avisos de consola y 0 peticiones fallidas (salvo el 404 del stream mientras el backend no lo tenía). Capturas en `/tmp/claude-1000/-home-chuwi/4d633c05-8d50-4a5d-b60f-b5bff5fd31d2/scratchpad/shots/`: 01-panel, 02-aapl, 03-aapl-{indicators,fundamentals,news,macro}, 04-btc, 05-estado, 06-chat, 07-modelos, 08-analisis-progreso, 09-analisis-resultado (.png).
 - Tests: 16 ficheros, 123 pruebas (nuevos: `analysisStream.test.ts`, `Provenance.test.tsx`, `formatSigned`).
+
+## Pulido de cifras (formato y moneda)
+- `formatCompact`: 3 cifras significativas sin ceros finales (4.967.129.153.536 -> «4,97 B»; 12.345.678 -> «12,3 M»); si el redondeo llega a 1000 sube de escala (999.600 -> «1 M»). Por debajo de 10.000 se muestra el entero. `formatFull` da el valor completo y se usa en `title` de capitalización, valor empresa, caja, deuda, patrimonio, acciones, oferta, etc.
+- Gráfico: `localization.locale = es-ES`, `dateFormat` español; el precio se formatea por serie (`priceFormat: custom` con `formatPrice`, sin símbolo, decimales según precio/clase) y el volumen con `formatCompact` («100 mil»). DESVIACIÓN respecto a pedir `localization.priceFormatter`: un formateador global pisa también el del volumen (comprobado: salía «20.000.000,00»), así que se configura por serie.
+- Moneda: `LivePrice` ya no acepta `currency`; usa solo `quote.currency`. USDT se rotula «USDT» (Intl no lo conoce, cae al código) con tooltip «Tether (stablecoin ≈ USD), cotización de Binance» (`currencyNote`). Aplicado a tira de mercado, Favoritos, Más vistos cabecera de ficha (apertura/máx/mín/cierre/capitalización), histórico de análisis y contexto de datos. Pie del gráfico muestra la moneda de la cotización.
+- Excepción consciente: Fundamentales no trae moneda propia y sigue rotulando con `summary.currency` (capitalización, objetivos de analistas, máximo histórico); no proceden de la cotización.
+- Otros números: nº de analistas, visitas del historial y valores numéricos de «Otros datos del proveedor» pasan por el formateador. Quedan `toLocaleString('es-ES')` en tamaños de modelo (GB/MB, valores <1000, correcto) y `toFixed` solo en coordenadas SVG del `Sparkline`.
+- El mock manda ahora `currency: 'USDT'` para cripto (como Binance real).
+
+## Para el coordinador
+- Backend: el `summary.currency` de cripto es «USD» mientras `quote.currency` es «USDT». El frontend ya no depende de ello, pero conviene que `/assets/{id}` y los fundamentales documenten qué moneda usan (los fundamentales no traen `currency`; sería útil añadirla para rotular capitalización/objetivos con su moneda real).
+- `priceAtAnalysis` no lleva moneda: se rotula con la de la cotización actual; si cambia de proveedor entre análisis podría no coincidir. Idealmente el análisis guardaría `currency`.
+
+## Pulido de cifras (formato y moneda)
+- `formatCompact`: 3 cifras significativas sin ceros finales (4.967.129.153.536 -> «4,97 B»; 12.345.678 -> «12,3 M»); si el redondeo llega a 1000 sube de escala (999.600 -> «1 M»). Por debajo de 10.000 se muestra el entero. `formatFull` da el valor completo y se usa en `title` de capitalización, valor empresa, caja, deuda, patrimonio, acciones, oferta, etc.
+- Gráfico: `localization.locale = es-ES` y `dateFormat` español; el precio se formatea por serie (`priceFormat: custom` con `formatPrice`, sin símbolo, decimales según precio/clase) y el volumen con `formatCompact` («100 mil»). Desviación respecto a pedir `localization.priceFormatter`: un formateador global pisa también el del volumen (comprobado: salía «20.000.000,00»), así que se configura por serie.
+- Moneda: `LivePrice` ya no acepta `currency`; usa solo `quote.currency`. USDT se rotula «USDT» (Intl no lo conoce, cae al código) con tooltip «Tether (stablecoin ≈ USD), cotización de Binance» (`currencyNote`). Aplicado a tira de mercado, Favoritos, Más vistos, cabecera de ficha (apertura/máx/mín/cierre/capitalización), histórico de análisis, contexto de datos y pie del gráfico.
+- Excepción consciente: Fundamentales no trae moneda propia y sigue rotulando con `summary.currency` (capitalización, objetivos de analistas, máximo histórico); no proceden de la cotización.
+- Otros números: nº de analistas, visitas del historial y valores numéricos de «Otros datos del proveedor» pasan por el formateador. Quedan `toLocaleString('es-ES')` en tamaños de modelo (GB/MB, valores <1000, correcto) y `toFixed` solo en coordenadas SVG del `Sparkline`.
+- El mock manda ahora `currency: 'USDT'` para cripto (como Binance real).
+
+## Para el coordinador
+- Backend: `summary.currency` de cripto es «USD» y `quote.currency` «USDT». El frontend ya no depende de ello, pero los fundamentales no traen `currency`; sería útil añadirla para rotular capitalización/objetivos con su moneda real.
+- `priceAtAnalysis` no lleva moneda: se rotula con la de la cotización actual. Idealmente el análisis guardaría `currency`.
