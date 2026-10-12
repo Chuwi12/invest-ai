@@ -1,15 +1,16 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-use domain::{Analyst, MarketData, NewsItem};
-use server::{AppState, Settings, config::Config, db, fake};
+use domain::{Analyst, MarketData, ModelService, NewsItem};
+use server::{AppState, Settings, config::Config, db, fake, repo::settings::SqliteSettings};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 /// Tiempo máximo que se espera a las conexiones abiertas y tareas en curso al apagar.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
-type Services = (Arc<dyn MarketData>, Arc<dyn Analyst>, fn(&mut [NewsItem]));
+/// Mercado, analista, anotador de sentimiento y, con el analista real, la gestión de modelos.
+type Services = (Arc<dyn MarketData>, Arc<dyn Analyst>, fn(&mut [NewsItem]), Option<Arc<dyn ModelService>>);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,15 +26,18 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::from_env()?;
     let pool = db::connect(&config.database_url).await?;
-    let (market, analyst, annotate_news) = build_services(&config).await?;
+    let (market, analyst, annotate_news, models) = build_services(&config, &pool).await?;
 
-    let state = AppState::new(
+    let mut state = AppState::new(
         market,
         analyst,
         pool.clone(),
         Settings { language: config.language.clone(), allowed_origins: config.frontend_origins.clone() },
     )
     .with_news_annotator(annotate_news);
+    if let Some(models) = models {
+        state = state.with_models(models);
+    }
 
     match &config.static_dir {
         Some(dir) => tracing::info!(dir = %dir.display(), "sirviendo el frontend compilado"),
@@ -80,15 +84,21 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn build_services(config: &Config) -> anyhow::Result<Services> {
+async fn build_services(config: &Config, pool: &sqlx::SqlitePool) -> anyhow::Result<Services> {
     if config.fake {
         tracing::warn!("INVEST_AI_FAKE activo: datos y analista simulados");
         let market = fake::FakeMarket { tick_interval: Duration::from_millis(250), ..Default::default() };
-        return Ok((Arc::new(market), Arc::new(fake::FakeAnalyst::default()), fake::annotate_fake));
+        return Ok((Arc::new(market), Arc::new(fake::FakeAnalyst::default()), fake::annotate_fake, None));
     }
-    // PENDIENTE (coordinador): cablear `market::MarketService` y `ai::OllamaAnalyst` cuando los
-    // crates dejen de ser stubs. Ver docs/notes/server.md.
-    anyhow::bail!("los proveedores reales (market) y el analista (ai) aún no están cableados: arranca con INVEST_AI_FAKE=1")
+    // Datos reales: proveedores con fallback, caché y tiempo real (ver docs/notes/market.md).
+    let market = market::MarketService::new(market::MarketConfig::from_env())
+        .context("no se pudo iniciar el servicio de mercado")?;
+    // LLM local: el modelo activo se guarda en la tabla `settings` (ver docs/notes/ai.md).
+    let settings = Arc::new(SqliteSettings::new(pool.clone()));
+    let analyst = ai::OllamaAnalyst::new(ai::AiConfig::from_env(), settings)
+        .map_err(|e| anyhow::anyhow!("no se pudo iniciar el analista: {e}"))?;
+    let models = analyst.models();
+    Ok((market, Arc::new(analyst), ai::annotate_sentiment, Some(models)))
 }
 
 /// Espera Ctrl+C o SIGTERM.

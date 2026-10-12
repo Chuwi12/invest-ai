@@ -15,6 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 domain.workspace = true
+market.workspace = true
+ai.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
