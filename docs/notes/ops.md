@@ -1,6 +1,6 @@
 # Operación: `./invest-ai`, servicio systemd y lanzador de KDE
 
-Estado: **funcional** (verificado con `--fake`; el modo real espera al cableado de `market`/`ai` en `main.rs`).
+Estado: **funcional** (verificado con `--fake` y, el 13-oct-2026, en modo real: ver «`install` en modo real»).
 
 ## Hecho
 - `./invest-ai` (bash, `set -Eeuo pipefail`, sin `eval`, `.env` leído con `grep`, nunca impreso): prerequisitos con instrucciones pacman (sin sudo), `.env` desde `.env.example` (600), `data/` (700), Ollama (reutiliza el que corre; si no, `ollama serve` con `setsid` y log en `~/.local/state/invest-ai/ollama.log`), `ollama pull` solo si falta el modelo, `npm ci` solo si cambia `package.json`/`package-lock.json`, build del frontend y `cargo build --release` solo si cambia la huella (ruta+tamaño+mtime, sha256), servidor en `127.0.0.1:8787` sirviendo `frontend/dist`, espera a `/api/health`, `xdg-open`.
@@ -13,11 +13,10 @@ Estado: **funcional** (verificado con `--fake`; el modo real espera al cableado 
 - Verificado: doble lanzamiento (el segundo no arranca otro proceso), `stop`, Ctrl+C real (SIGINT con `timeout -s INT`): "parado limpiamente", `pgrep -x invest-ai` vacío, puertos 8787/5180 libres; servicio instalado, arrancado, `status`, `logs`, `open`, `stop`, `uninstall`; `invest-ai-ollama.service` queda `inactive (Result: exec-condition)` cuando ya hay Ollama.
 
 ## Pendiente
-- `GET /api/models` -> `hardware.gpus` bajo el servicio: la ruta aún no existe en el servidor (devuelve 404); verificar cuando llegue. `nvidia-smi` sí funciona bajo las mismas restricciones.
-- Modo real (sin `--fake`): el servidor aborta hoy en `build_services` (proveedores sin cablear); el script lo detecta y lo explica, pero no se pudo probar de punta a punta.
+- (Resuelto el 13-oct-2026) `/api/models` y `hardware.gpus` bajo el servicio y el modo real de punta a punta: verificados, ver «`install` en modo real».
 - `shellcheck` NO está instalado (no lo he instalado). Solo se comprobó `bash -n` y revisión manual de comillas.
-- Probar el icono de KDE con un clic (no hay sesión gráfica interactiva aquí); `desktop-file-validate` no está disponible.
-- Autoarranque (`install --autostart`) no probado (solo `enable`, sin reiniciar sesión).
+- Probar el icono de KDE con un clic (no hay sesión gráfica interactiva aquí). `desktop-file-validate` sí está y da OK.
+- Autoarranque (`install --autostart`): `enable`/`disable` probados; sin reiniciar sesión.
 
 ## Decisiones
 - Estado (pids, logs, huellas) en `~/.local/state/invest-ai/`, fuera del repo. Datos: `data/` según `DATABASE_URL` (el cwd del servidor es la raíz del repo).
@@ -34,3 +33,21 @@ Estado: **funcional** (verificado con `--fake`; el modo real espera al cableado 
 4. "Modelo activo guardado": no hay ningún ajuste persistido que el script pueda leer sin tocar SQLite; solo se usa `LLM_MODEL`. Si el servidor guarda el modelo activo, exponer `GET /api/models` (activo) y `_prestart` podría consultarlo.
 5. Sugerencia: `GET /api/health` podría incluir `fake: bool` para que `status` indique el modo.
 6. `.gitignore` ya cubre `.env`, `data/`, `frontend/dist`, `backend/target`; nada nuevo que añadir. Ficheros nuevos para commitear: `invest-ai`, `dev.sh`, `packaging/*`, `docs/notes/ops.md`, README, `.env.example`.
+
+## `./invest-ai install` en modo real (13-oct-2026)
+Con el binario real (sin `--fake`), mercado abierto, `CARGO_TARGET_DIR` apuntando a otro destino de compilación y el puerto del servicio movido a :8784 (`systemctl --user set-environment BIND_ADDR=127.0.0.1:8784` y, al terminar, `unset-environment`; el valor por defecto sigue siendo 8787).
+| Paso | Resultado |
+|---|---|
+| `./invest-ai install` | compila frontend (`npm run build`) y backend release (41 s incremental); instala `invest-ai.service`, `invest-ai-ollama.service`, `invest-ai.desktop` e icono. `systemd-analyze --user verify` sin salida; `desktop-file-validate` (ya instalado): OK |
+| `systemctl --user start invest-ai.service` | `ExecStartPre=_prestart` OK (`modelo qwen2.5:7b disponible`), activo en 0,06 s, 3,2 MB, escuchando en 127.0.0.1:8784 |
+| `./invest-ai selftest` contra el servicio | `todo OK (1.9 s)`: AAPL `mercado=regular hace 2 s`, BTC, tick WS, `/models` con la GPU (`NVIDIA GeForce RTX 4070 Laptop GPU`, el endurecimiento no la oculta), cabeceras y `Host` ajeno -> 403 |
+| `systemd-analyze --user security invest-ai.service` | **1.8 OK** (sin cambios) |
+| `./invest-ai status` / `stop` | `[servicio systemd]`, pid; `stop` -> `inactive`, puerto libre, `hasta luego` en el journal, `-wal`/`-shm` de SQLite retirados |
+| `install --autostart` + `uninstall` | `Created symlink .../default.target.wants/invest-ai.service`, `is-enabled` = enabled; `uninstall` lo deshabilita y borra el directorio `default.target.wants` |
+| `./invest-ai uninstall` | árbol de `~/.config/systemd`, `~/.local/share/applications` y `~/.local/share/icons` **idéntico** al anterior (`find -printf '%p %y %s'` + `diff`), `mimeinfo.cache` con el mismo sha256, sin unidades (`list-units`/`list-unit-files`), sin `BIND_ADDR` en el entorno del gestor, sin procesos ni puertos, sin `invest-ai.desktop` ni icono; `systemctl --user is-system-running` = running, sin unidades fallidas |
+Lo que sí cambia (no es del servicio): `data/invest-ai.db` (migraciones al arrancar, mtime), el journal de usuario y las huellas de compilación de `~/.local/state/invest-ai/{backend,frontend}.stamp` (caché de compilación, cambian con cualquier edición del código).
+Bugs encontrados y arreglados en `packaging/`:
+1. **`ExecStart` fijo a `backend/target/release/invest-ai`** aunque `./invest-ai install` compile en otro destino (`CARGO_TARGET_DIR`): el servicio habría arrancado un binario viejo o inexistente. Ahora la plantilla usa `@BIN@` (el script lo rellena con `$BIN`, que ya respeta `CARGO_TARGET_DIR`, y se valida contra caracteres que las unidades no admiten).
+2. **`invest-ai-ollama.service` no podía arrancar nunca**: `ReadWritePaths=%h/.ollama` con `~/.ollama` inexistente (aquí Ollama es el servicio del sistema, modelos en `/var/lib/ollama`) hace fallar la unidad al montar el espacio de nombres: `Failed to set up mount namespacing: /home/chuwi/.ollama: No such file or directory`, `status=226/NAMESPACE`. Como `ExecCondition` trata cualquier salida 1-254 como «condición no cumplida», systemd lo registraba como `Skipped due to 'exec-condition'` y el fallo quedaba camuflado (también cuando el puerto estaba libre y debía arrancar). Arreglo: `ExecStartPre=+/usr/bin/mkdir -p -m 700 %h/.ollama` (el prefijo `+` lo ejecuta fuera de la jaula) y `ReadWritePaths=-%h/.ollama` (el `-` tolera que falte en el `ExecCondition`). Probado con una copia temporal en el puerto 11999: `ExecCondition` 0, `ExecStartPre` 0, `ollama serve` activo, `/api/version` = 0.40.3, CUDA detectada; tras la prueba se paró, se borró la unidad de prueba y `~/.ollama` (no existía antes). No se pudo probar con el puerto 11434 real porque el Ollama del sistema lo ocupa (y es compartido).
+- Sigue sin probarse: el icono con un clic en KDE (no hay sesión interactiva) y el autoarranque con reinicio de sesión real.
+

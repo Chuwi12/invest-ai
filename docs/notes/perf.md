@@ -46,8 +46,34 @@ Conclusión: el tiempo propio del servidor en caliente es despreciable (<0,5 ms 
 | Peticiones salientes por un dashboard en frío | 7 | 6 (GDELT ya no se reintenta mientras está apartado) |
 
 ### WebSocket (20 clientes, 10 activos cripto, 20 s)
-132 ticks/s entregados en total (6,6 por cliente y segundo; Binance `miniTicker` ~1/s por símbolo), 0 fallos, CPU del servidor ~0,4 % de un núcleo en 30 s con 20 clientes y 10 activos; latencia marca del proveedor -> recepción en el cliente: p50 125 ms, p95 1,7 s, p99 2,7 s. La cola larga NO la he diagnosticado (el sospechoso es la hora del evento de los pares poco líquidos, no el reenvío; no verificado). Acciones (sin feed WS, sondeo): 5 clientes con `stock:AAPL/MSFT` recibieron 10 ticks en 15 s con el mismo `ts`: NO son repeticiones, son el tick inicial que recibe cada cliente al suscribirse (5 clientes x 2 activos); el sondeo ya descartaba lo no cambiado (`changed`). Con 3 clientes x 2 activos durante 40 s llegaron exactamente 6 ticks (uno por cliente y activo). El `ts` de 60 277 s de antigüedad es el cierre del lunes (16:00 ET) visto el martes por la mañana: hora del proveedor, no retraso del servidor.
+132 ticks/s entregados en total (6,6 por cliente y segundo; Binance `miniTicker` ~1/s por símbolo), 0 fallos, CPU del servidor ~0,4 % de un núcleo en 30 s con 20 clientes y 10 activos; latencia marca del proveedor -> recepción en el cliente: p50 125 ms, p95 1,7 s, p99 2,7 s. La cola larga se diagnosticó después (ver «Cola de latencia del tick WS»): son los primeros ticks de cada suscripción, no la tubería. Acciones (sin feed WS, sondeo): 5 clientes con `stock:AAPL/MSFT` recibieron 10 ticks en 15 s con el mismo `ts`: NO son repeticiones, son el tick inicial que recibe cada cliente al suscribirse (5 clientes x 2 activos); el sondeo ya descartaba lo no cambiado (`changed`). Con 3 clientes x 2 activos durante 40 s llegaron exactamente 6 ticks (uno por cliente y activo). El `ts` de 60 277 s de antigüedad es el cierre del lunes (16:00 ET) visto el martes por la mañana: hora del proveedor, no retraso del servidor.
 
+
+### Cola de latencia del tick WS (diagnosticada el 13-oct-2026)
+`loadgen ws` (ahora con `--dump fichero.tsv`: una fila por tick con hora del proveedor y de recepción, y percentiles separados `initial_ts_to_recv_ms` / `live_ts_to_recv_ms`), 20 clientes x 10 pares (BTC ETH SOL BNB XRP ADA DOGE AVAX DOT LINK), 40 s, servidor en release:
+| Subconjunto | n | p50 | p95 | p99 | máx |
+|---|---|---|---|---|---|
+| todos los ticks | 4860 | 138 ms | 227 ms | 1236 ms | 1363 ms |
+| **primer tick de cada (cliente, activo)** | 200 | 1109 ms | 1363 | 1363 | 1363 |
+| **ticks en vivo** | 4660 | **138 ms** | **199 ms** | **234 ms** | **252 ms** |
+- Causa: el primer tick que recibe un cliente al suscribirse es el **último tick conocido** del hub (`last_tick`, con su `ts` original de Binance), no uno nuevo. En pares poco líquidos el último evento puede tener hasta 10 s (el `miniTicker` solo emite si hubo cambios: huecos entre ticks de 1-13 s en ADA/DOT/LINK/DOGE). Esos 200 ticks (3,5-4 % del total) eran todo el p95/p99 de la medida anterior (1,7 s / 2,7 s); sin ellos, 0 de 4660 ticks pasaron de 252 ms (la antigüedad 138 ms es red a Binance + su emisión). Primera medida (sin separar): 180 de los 200 primeros ticks > 400 ms y 0 de los 5580 restantes.
+- Descartado con datos: el throttle de 4 ticks/s (separación mínima entre ticks de un activo 0,7-1,0 s, siempre > 250 ms: no actúa con `miniTicker`), el buffer del broadcast (64 por activo; 0 repeticiones ni huecos de más) y la hora del evento (`E` = momento de emisión de Binance, constante).
+- No es un fallo, es el diseño documentado (el suscriptor tardío recibe el último tick con su hora real, que la UI usa para mostrar la antigüedad). Documentado en `docs/API.md`.
+- **Bug real encontrado por el camino (nuestro código)**: en esa misma prueba el log mostraba `WS conectado symbols=1` y 0,6 s después `WS desconectado: cerrada por el servidor`, con reconexión ~2 s más tarde. Binance admite **5 mensajes de control por segundo y conexión**; el worker mandaba un `SUBSCRIBE` por activo (1 al conectar + 9 de los demás clientes en ráfaga). Reproducido con un cliente Node contra `data-stream.binance.vision`: 10 `SUBSCRIBE` seguidos -> 5 acks, ningún tick, la conexión deja de servir (10 con 250 ms de separación: 42 mensajes en 8 s, bien). Arreglo en `realtime.rs`: las altas/bajas que llegan juntas se agrupan 40 ms en una sola tanda (diferencia entre el conjunto deseado antes y después) y los mensajes de control se espacian con `WsFeed::min_msg_gap()` (Binance 250 ms). Tests `burst_of_subscriptions_is_batched_and_paced` y `burst_of_unsubscriptions_is_batched` (servidor WS local). Verificado de nuevo con Binance real: una sola conexión (`WS conectado`, sin desconexión prematura) y los 10 pares con ticks.
+
+## Con la bolsa de EE. UU. abierta (13-oct-2026, 15:42-16:30 UTC = 11:42-12:30 ET, servidor release en :8786)
+Hasta hoy todo se había medido cerrado o en pre-market.
+| Comprobación | Medida |
+|---|---|
+| `marketState` de `stock:AAPL`, `stock:MSFT`, `index:^GSPC`, `etf:SPY` | `regular` en los cuatro (15 muestras cada uno) |
+| Antigüedad real del `timestamp` (hora local - hora del proveedor), 15 muestras cada 4 s | AAPL 0,5 / 2,0 / 4,2 s (mín / mediana / máx); MSFT 1,1 / 2,1 / 2,9; ^GSPC 0,6 / 1,1 / 1,7; SPY 1,0 / 1,9 / 3,7. Los 4 cambian de (precio, hora) en las 15 muestras |
+| Retraso **declarado** (`delaySecs`, de `exchangeDataDelayedBy` de Yahoo) | AAPL 15 s, MSFT 15 s, ^GSPC 0, SPY 0. **No coincide con la realidad**: AAPL tiene 2 s de antigüedad mediana. Contraste independiente: `api.nasdaq.com/api/quote/AAPL/info` (`isRealTime: true`) daba 344,98 a las 11:44 ET y nuestra cotización 344,9557 a las 15:44:01Z. Yahoo declara 15 s por defecto en NMS/NYQ aunque sirva datos casi en tiempo real; la UI muestra «Retraso de 15 s» junto a «ahora mismo». No se oculta ni se corrige en backend (es lo que declara el proveedor); queda como observación para el frontend |
+| Ticks WS de acciones (sin feed WS: sondeo) | 3 clientes x 4 activos, 90 s: 216 ticks = 18 por activo y cliente = uno cada 5,0-5,2 s (huecos mín/mediana/máx 5,0/5,1/5,2 s); 0 ticks repetidos (mismo precio y hora); edad p50 1,0-2,4 s, p95 2,3-4,2 s |
+| Peticiones salientes a Yahoo en esos 90 s (`/api/status` -> `outbound`) | 72 = 4 activos x 90 s / 5 s: el sondeo va a 5 s y se comparte entre clientes |
+| ¿Se aplica el espaciado a 60 s? | **No** con el mercado abierto (18 sondeos por activo en 90 s; con 60 s habría 1-2). Los tests con tiempo simulado lo cubren y ahora hay medida real |
+| `./invest-ai selftest` | `todo OK (1.9 s)`: cotización AAPL `mercado=regular hace 1 s`, BTC `continuous hace 0 s`, tick WS BTC `hace 0 s` |
+- **Bug encontrado solo con el mercado abierto**: Yahoo añade a las series intradía un punto «en vivo» desalineado (hora del último trade, p. ej. 15:47:31 en una serie de 5 min, `o=h=l=c`, volumen 0), p. ej. `1d/5m`: velas 15:40, 15:45 y **15:47:36**; `1mo/1h`: 15:30 y 15:46:47. El gráfico recibía una vela fantasma dentro del tramo en curso y `X-Data-As-Of` salía desalineado. Arreglo: `yahoo::fold_live_point` (lo pliega en la vela de su tramo, o abre la del tramo alineada). Verificado en real tras el arreglo: 1m/5m/15m/1h con 0 velas desalineadas. Tests con la respuesta real capturada (`yahoo_chart_aapl_5m_live.json`) y casos de 1 min, 1 h con inicio a :30, huecos y diario.
+- No verificado: el cambio `regular -> post` (cierre 22:00 Madrid) ni la apertura (el espaciado a 60 s al cerrar y volver a 5 s al abrir solo se prueba con tiempo simulado).
 
 ## Qué NO se optimizó (y por qué)
 - Latencia en frío de quote/history/indicators/fundamentals (150-280 ms p50): es 1 ida y vuelta a Yahoo (193 ms de media saliente); el servidor aporta <1 ms.
@@ -101,9 +127,8 @@ CPU en reposo: 0 ticks de reloj en 20 s (y en 10 s con el servidor recién usado
 
 ## No verificado
 - Tras 10 min de uso continuo exactos: la serie anterior son ~6 min de carga + 4 min de reposo (10 min en total), no 10 min de carga sostenida.
-- La causa de la cola de latencia del tick WS (p95 1,7 s) en pares cripto poco líquidos.
 - Que el espaciado a 60 s del mercado cerrado se comporte igual con Finnhub/otros proveedores (solo probado con Yahoo y tests).
-- Efecto en horas de mercado abierto de EE. UU.: todas las medidas de bolsa se hicieron en pre-market/cerrado; las de cripto son tiempo real.
+- El paso regular -> post / pre -> regular con mercado abierto real (solo medido a media sesión, ver arriba).
 - `./invest-ai` completo con navegador y Ctrl+C no se repitió tras los cambios del script (se probó `selftest`, la instancia temporal, y el arranque con `--no-browser`).
 - Compresión de respuestas: el cliente de carga midió con `identity`; no se midió el coste de br/gzip.
-- Servicio systemd: no probado con los cambios.
+- Servicio systemd: probado el 13-oct-2026 (ver `ops.md`).

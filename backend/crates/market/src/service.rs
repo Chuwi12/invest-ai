@@ -605,7 +605,7 @@ impl Inner {
 
     async fn indicators(&self, id: &AssetId) -> domain::Result<Indicators> {
         symbol::validate(id)?;
-        cached(&self.indicators, id.to_string(), async {
+        cached(&self.indicators, id.to_string(), Box::pin(async {
             let (source, candles) = self.history_src(id, Range::Y2, Interval::D1).await?;
             if candles.len() < 2 {
                 return Err(DomainError::NotFound(format!(
@@ -616,7 +616,7 @@ impl Inner {
             ind.source_url = symbol::verify_url(&source, id);
             ind.source = Some(source);
             Ok(ind)
-        })
+        }))
         .await
     }
 
@@ -630,7 +630,7 @@ impl Inner {
         ) {
             return Ok(None);
         }
-        cached(&self.fundamentals, id.to_string(), async {
+        cached(&self.fundamentals, id.to_string(), Box::pin(async {
             let id = id.clone();
             let r = self
                 .route(
@@ -649,7 +649,7 @@ impl Inner {
                 Err(DomainError::NotFound(_)) => Ok(None),
                 Err(e) => Err(e),
             }
-        })
+        }))
         .await
     }
 
@@ -664,7 +664,7 @@ impl Inner {
         }
         let limit = limit.clamp(1, 50);
         let key = format!("{}|{limit}", q.to_lowercase());
-        let arc = cached(&self.search, key, async {
+        let arc = cached(&self.search, key, Box::pin(async {
             let fetch = |name: &'static str| {
                 let q = q.to_string();
                 async move {
@@ -725,7 +725,7 @@ impl Inner {
                     .map(|h| with_summary_url(h.summary))
                     .collect::<Vec<_>>(),
             ))
-        })
+        }))
         .await?;
         Ok((*arc).clone())
     }
@@ -733,7 +733,7 @@ impl Inner {
     /// Ficha del activo (nombre, mercado...). `NotFound` si ningún proveedor lo conoce.
     async fn summary(&self, id: &AssetId, quote: Option<&Quote>) -> domain::Result<AssetSummary> {
         symbol::validate(id)?;
-        cached(&self.summaries, id.to_string(), async {
+        cached(&self.summaries, id.to_string(), Box::pin(async {
             let hits = self.search(&id.symbol, 10).await.unwrap_or_default();
             let found = hits.into_iter().find(|h| {
                 h.id.class == id.class && h.symbol.eq_ignore_ascii_case(&id.symbol)
@@ -763,7 +763,7 @@ impl Inner {
                 source_url: symbol::verify_url(&q.source, id),
                 source: q.source,
             })
-        })
+        }))
         .await
     }
 
@@ -775,7 +775,7 @@ impl Inner {
         }
         let limit = limit.clamp(1, 50);
         let key = id.map_or_else(|| "general".to_string(), ToString::to_string);
-        let arc = cached(&self.news, key.clone(), async {
+        let arc = cached(&self.news, key.clone(), Box::pin(async {
             let name = match id {
                 Some(id) => tokio::time::timeout(Duration::from_secs(6), self.summary(id, None))
                     .await
@@ -832,7 +832,7 @@ impl Inner {
                 return Err(e);
             }
             Ok(Arc::new(news::merge(lists, rel.as_ref(), 50, Utc::now())))
-        })
+        }))
         .await?;
         // Noticias de los proveedores en segundo plano que ya han llegado (ya filtradas).
         let list = match self.late_news.get(&key).await {
@@ -928,13 +928,17 @@ impl Inner {
                     Err(DomainError::Unavailable("tiempo de espera agotado".into()))
                 })
         }
+        // Cada parte va en el montón (`Box::pin`): sin eso, el estado de las seis (206 KB en debug,
+        // 54 KB solo `news`) viaja por valor dentro del `join!`, del `timeout` y del futuro
+        // encajado por `async_trait`, y en debug cada traslado es una copia en la pila. Con los
+        // 2 MiB de un worker de Tokio el servidor abortaba por desbordamiento de pila.
         let (quote, indicators, fundamentals, news, macro_ctx, summary) = futures::join!(
-            part(8, self.quote(id)),
-            part(12, self.indicators(id)),
-            part(12, self.fundamentals(id)),
-            part(12, self.news(Some(id), 15)),
-            part(8, self.macro_context()),
-            part(8, self.summary(id, None)),
+            part(8, Box::pin(self.quote(id))),
+            part(12, Box::pin(self.indicators(id))),
+            part(12, Box::pin(self.fundamentals(id))),
+            part(12, Box::pin(self.news(Some(id), 15))),
+            part(8, Box::pin(self.macro_context())),
+            part(8, Box::pin(self.summary(id, None))),
         );
         let mut missing = Vec::new();
         let mut note = |what: &str, e: &DomainError| missing.push(format!("{what}: {e}"));
@@ -1367,7 +1371,8 @@ mod provenance_tests {
 #[cfg(test)]
 mod latency_tests {
     use super::*;
-    use crate::providers::ProviderInfo;
+    use crate::providers::{ProviderInfo, SearchHit};
+    use domain::MacroIndicator;
 
     struct Dummy(ProviderInfo);
 
@@ -1636,6 +1641,124 @@ mod latency_tests {
         assert_eq!(providers_of(&inner.news(None, 50).await.unwrap()), ["google_news"]);
         // El fallo del proveedor en segundo plano queda anotado como el de cualquier otro.
         assert!(bad_slot.state().last_error.is_some());
+    }
+
+    /// Proveedor falso que responde a todo con datos mínimos pero válidos (para recorrer el
+    /// camino completo de `snapshot` sin red).
+    struct FakeAll {
+        info: ProviderInfo,
+    }
+
+    #[async_trait]
+    impl Provider for FakeAll {
+        fn info(&self) -> &ProviderInfo {
+            &self.info
+        }
+
+        async fn search(&self, query: &str, _limit: usize) -> PResult<Vec<SearchHit>> {
+            let id = AssetId::new(AssetClass::Stock, query);
+            Ok(vec![SearchHit {
+                summary: AssetSummary {
+                    id,
+                    symbol: query.into(),
+                    name: format!("{query} Inc."),
+                    class: AssetClass::Stock,
+                    exchange: Some("NASDAQ".into()),
+                    currency: Some("USD".into()),
+                    country: None,
+                    source: self.info.name.into(),
+                    source_url: None,
+                },
+                liquidity: 1.0,
+            }])
+        }
+
+        async fn quote(&self, id: &AssetId) -> PResult<Quote> {
+            Ok(Quote {
+                id: id.clone(),
+                price: 100.0,
+                change: None,
+                change_pct: None,
+                open: None,
+                high: None,
+                low: None,
+                prev_close: Some(99.0),
+                volume: None,
+                market_cap: None,
+                currency: Some("USD".into()),
+                market_state: domain::MarketState::Regular,
+                timestamp: Utc::now(),
+                source: self.info.name.into(),
+                delay_secs: None,
+                source_url: None,
+                timestamp_origin: None,
+            })
+        }
+
+        async fn history(&self, _id: &AssetId, _r: Range, _i: Interval) -> PResult<Vec<Candle>> {
+            let now = Utc::now().timestamp();
+            Ok((0..300)
+                .map(|i| {
+                    let p = 100.0 + f64::from(i % 17);
+                    Candle { t: now - (300 - i64::from(i)) * 86_400, o: p, h: p + 1.0, l: p - 1.0, c: p + 0.5, v: Some(1e6) }
+                })
+                .collect())
+        }
+
+        async fn fundamentals(&self, _id: &AssetId) -> PResult<Option<Fundamentals>> {
+            Ok(Some(Fundamentals::default()))
+        }
+
+        async fn news(&self, _q: &NewsQuery) -> PResult<Vec<NewsItem>> {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            Ok(vec![news_item("titular", self.info.name, 3)])
+        }
+
+        async fn macro_indicators(&self) -> PResult<Vec<MacroIndicator>> {
+            Ok(vec![])
+        }
+    }
+
+    fn fake_all(name: &'static str) -> Arc<Slot> {
+        let info = ProviderInfo {
+            name,
+            requires_key: false,
+            has_key: false,
+            capabilities: vec![],
+            classes: vec![],
+            rate_per_sec: 1000.0,
+            burst: 1000,
+        };
+        Arc::new(Slot::new(Arc::new(FakeAll { info }), Arc::new(Vec::new())))
+    }
+
+    /// Regresión (13-oct-2026): `GET /assets/{id}/snapshot` abortaba el servidor DEBUG con
+    /// «thread 'tokio-rt-worker' has overflowed its stack». Los workers de Tokio tienen 2 MiB de
+    /// pila y en debug cada futuro anidado se copia entero en el marco del que lo sondea; el
+    /// `join!` de `snapshot` con las partes sin encajar superaba el límite. Se ejecuta en un hilo
+    /// de 2 MiB con un runtime de un solo hilo (como un worker) y proveedores simulados.
+    #[test]
+    fn snapshot_runs_in_a_2_mib_stack() {
+        let worker = std::thread::Builder::new()
+            .name("tokio-rt-worker-like".into())
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                rt.block_on(async {
+                    let inner = test_inner(vec![fake_all("yahoo"), fake_all("google_news"), fake_all("gdelt")]);
+                    let id = AssetId::new(AssetClass::Stock, "AAPL");
+                    // El futuro de `snapshot` (y el de `news`, el mayor de sus partes) debe ser
+                    // pequeño: antes 206 KB y 54 KB en debug, ahora van en el montón.
+                    let (snap_size, news_size) = (std::mem::size_of_val(&inner.snapshot(&id)), std::mem::size_of_val(&inner.news(Some(&id), 15)));
+                    println!("SIZE snapshot={snap_size} news={news_size}");
+                    assert!(snap_size < 16 * 1024, "el futuro de snapshot ocupa {snap_size} B");
+                    assert!(news_size < 16 * 1024, "el futuro de news ocupa {news_size} B");
+                    let snap = inner.snapshot(&id).await.expect("snapshot");
+                    assert!(snap.quote.is_some() && snap.indicators.is_some() && !snap.news.is_empty(), "{:?}", snap.missing);
+                });
+            })
+            .unwrap();
+        worker.join().expect("el hilo no debe entrar en pánico");
     }
 
     type Fut = std::pin::Pin<Box<dyn Future<Output = (&'static str, PResult<u8>)> + Send>>;
