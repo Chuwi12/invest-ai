@@ -229,6 +229,7 @@ pub struct Quote {
     pub id: AssetId,
     pub price: f64,
     pub change: Option<f64>,
+    /// Variación respecto al cierre anterior en PUNTOS porcentuales (1.2 = +1,2 %), no en fracción.
     pub change_pct: Option<f64>,
     pub open: Option<f64>,
     pub high: Option<f64>,
@@ -256,6 +257,7 @@ pub struct Quote {
 pub struct PriceTick {
     pub id: AssetId,
     pub price: f64,
+    /// Variación respecto al cierre anterior en PUNTOS porcentuales (1.2 = +1,2 %), no en fracción.
     pub change_pct: Option<f64>,
     pub volume: Option<f64>,
     pub ts: DateTime<Utc>,

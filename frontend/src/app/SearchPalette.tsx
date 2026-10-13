@@ -54,9 +54,14 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
   )
   const flat: Entry[] = term.length < 2 ? idleItems : groups.flatMap((g) => g.items)
   const sel = Math.min(active, Math.max(0, flat.length - 1))
+  // Término al que corresponden los resultados que se ven. Mientras se escribe (antirrebote) o llega la
+  // respuesta siguen los de la búsqueda anterior (`keepPreviousData`): Enter no debe elegir uno de ellos
+  // (acababa en la ficha de «Tesco» al teclear «tesla») ni anotar en el historial «tesla → Tesco».
+  const shownFor = dq.trim()
+  const fresh = term.length < 2 || (shownFor === term && !search.isPlaceholderData)
 
   const choose = (e: Entry) => {
-    if (term.length >= 2) record.mutate({ query: term, selected: e.summary.id })
+    if (term.length >= 2) record.mutate({ query: e.kind === 'result' ? shownFor : term, selected: e.summary.id })
     onClose()
     void navigate(assetHref(e.summary.id))
   }
@@ -72,7 +77,7 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
       const e = flat[sel]
       if (e) {
         ev.preventDefault()
-        choose(e)
+        if (fresh) choose(e)
       }
     } else if (ev.key === 'Escape') {
       ev.preventDefault()

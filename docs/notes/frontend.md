@@ -100,3 +100,27 @@ Carga inicial: `index` (React, router, query, shell) + CSS; las páginas y el gr
 - `.table-wrap` y `.tabs` tienen scroll horizontal con sombras laterales (scroll-shadow en CSS puro) que indican que hay más contenido; la pestaña activa se desplaza a la vista (`scrollIntoView` en `AssetPage`). `.table-wrap` lleva `position: relative`: sin eso el desbordamiento interno de la tabla ensanchaba el documento en móvil (495 px a 360).
 - El banner de modo mock usaba un margen negativo en línea de 1,25 rem que desbordaba 8 px con el padding móvil de `.main`; ahora el margen va en CSS y se ajusta en ≤ 880 px.
 - Comprobado con puppeteer (isMobile) a 360 y 494 px: `documentElement.scrollWidth` = ancho del viewport (antes 495/502). Capturas `m360-*.png` y `m494-*.png` en shots-analysis.
+
+
+## Segunda revisión: hooks, chat, WebSocket y tests (R-21…R-29)
+
+Detalle en `review.md → Segunda revisión`.
+
+- **`useChatStream`**: cada `send` comprueba que sigue siendo la respuesta vigente (`ctrl.current === ac`) antes de tocar
+  el búfer o el estado; los eventos pendientes de una respuesta abortada (un chunk SSE trae varios) ya no se mezclan con
+  la nueva. `StreamState.base` guarda cuántos mensajes tenía el hilo al enviar: cuando el hilo guardado pasa de
+  `base + 1` / `base + 2`, `ChatPage` oculta la pregunta/respuesta en vivo (tras un error o «Detener» el servidor guarda
+  el texto parcial y salía dos veces). Si el servidor no guardó nada, el aviso del error se mantiene.
+- **`RealtimeClient`**: `reconnectNow()` cierra el socket del intento anterior antes de abrir otro; el backoff solo se
+  reinicia cuando la conexión lleva `stableAfterMs` (10 s) abierta, no al abrir.
+- **Buscador**: Enter se ignora mientras los resultados visibles son los de una búsqueda anterior (antirrebote/respuesta en curso); antes elegía el primero de la búsqueda previa.
+- **Claves de React Query**: `qk.search(q, clase, límite)`; `useHistory` solo conserva las velas previas (`placeholderData`)
+  si son del mismo activo.
+- **`applyTickToCandle`**: velas diarias y semanales abren vela nueva al cruzar su intervalo; las mensuales (duración
+  variable) siguen actualizando la última.
+- **Tests deterministas bajo carga**: `setup.ts` fija `asyncUtilTimeout` en 10 s (las esperas terminan en cuanto se
+  cumple la condición; solo el tope es mayor), `vite.config.ts` `testTimeout`/`hookTimeout` de 30 s, `App.test` y
+  `ChatPage.test` precargan los chunks perezosos, y `Element.prototype.scrollIntoView` se stubea (jsdom no lo tiene).
+  Regla para tests nuevos: esperar por condición (`findBy*`/`waitFor`) o con `vi.useFakeTimers`, nunca con un `sleep` ni con
+  umbrales de reloj; no fijar `{ timeout }` menores que el global.
+- Tests: 24 ficheros, 175 pruebas (`npm test` ×5 seguidas sin fallos).

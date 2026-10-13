@@ -246,3 +246,36 @@ async fn binance_history_ends_now() {
         assert!((b - a) / 86_400 >= min_days, "no cubre el rango");
     }
 }
+
+/// GDELT (11-15 s por petición, 8-10 s de TLS): corre en segundo plano. La primera respuesta no lo
+/// espera; sus noticias aparecen en una lectura posterior si responde (a veces da 429 o `{}`).
+#[tokio::test]
+#[ignore = "red real"]
+async fn gdelt_background_news() {
+    let s = svc();
+    let id = AssetId::new(AssetClass::Stock, "AAPL");
+    let t0 = std::time::Instant::now();
+    let providers = |items: &[domain::NewsItem]| {
+        let mut m = std::collections::BTreeMap::<String, usize>::new();
+        for n in items {
+            *m.entry(n.provider.clone()).or_default() += 1;
+        }
+        m
+    };
+    let first = s.news(Some(&id), 50).await.expect("noticias");
+    println!("GDELT: primera respuesta en {:?}: {:?}", t0.elapsed(), providers(&first));
+    for _ in 0..45 {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let now = s.news(Some(&id), 50).await.expect("noticias");
+        if providers(&now).contains_key("gdelt") {
+            println!("GDELT: sus noticias llegaron a los {:?}: {:?}", t0.elapsed(), providers(&now));
+            for n in now.iter().filter(|n| n.provider == "gdelt").take(3) {
+                println!("  {} | {} | {}", n.published_at, n.title, n.url);
+            }
+            break;
+        }
+    }
+    let h = s.provider_health();
+    let g = h.iter().find(|p| p.name == "gdelt").unwrap();
+    println!("GDELT: ok={:?} error={:?} latencia={:?} ms bloqueado={:?}", g.last_ok, g.last_error, g.last_latency_ms, g.blocked_secs);
+}

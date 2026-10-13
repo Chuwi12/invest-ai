@@ -7,6 +7,12 @@ enums en snake_case). `frontend/src/api/types.ts` los refleja 1:1.
 `{id}` es un `AssetId` (`"stock:AAPL"`, `"crypto:BTC"`, `"index:^GSPC"`); en la URL va
 percent-encoded (`encodeURIComponent`).
 
+## Unidades
+
+- `changePct` (en `Quote` y `PriceTick`) va en **puntos porcentuales**: `1.2` = +1,2 %. No es una fracción.
+  Confundirlo hizo que el contexto del LLM mostrara la variación del día multiplicada por 100 (R-10 en
+  `docs/notes/review.md`).
+
 ## Errores
 
 Cualquier error responde con JSON `{ "error": { "code": string, "message": string } }`.
@@ -75,7 +81,10 @@ si no se conocen; nunca se inventa una URL):
   última vela, ISO 8601) y `X-Data-Interval` (`1m|5m|15m|30m|1h|1d|1wk|1mo`: intervalo **realmente servido**,
   deducido de la separación entre velas; difiere del pedido cuando el proveedor sube de intervalo porque
   la combinación rango/intervalo no cabe, p. ej. `5d/1m` en Binance se sirve a `5m`; la UI lo avisa).
-  Faltan si el backend no la conoce (p. ej. el servidor simulado). La API se
+  Faltan si el backend no la conoce (p. ej. el servidor simulado). Con la sesión abierta Yahoo añade a
+  las series intradía un punto «en vivo» desalineado (`o=h=l=c`, volumen 0, hora del último trade); el
+  servidor lo pliega en la vela de su tramo (actualiza su cierre/máximo/mínimo) o, si ese tramo aún no
+  tiene vela, la abre alineada a su inicio: todas las velas caen siempre en fronteras del intervalo. La API se
   sirve en el mismo origen que la UI (o a través del proxy de Vite), por lo que no hace falta
   `Access-Control-Expose-Headers`; solo haría falta si el frontend se alojara en otro origen.
 
@@ -106,6 +115,14 @@ Servidor → cliente:
 ```
 El servidor agrupa ticks del mismo activo (como mucho ~4 por segundo y activo) para no saturar el
 navegador.
+
+`tick.ts` es siempre la hora **del proveedor**, no la de envío. Al suscribirse (o al unirse a un activo
+que ya tiene suscriptores) el servidor reenvía de inmediato el último tick conocido con su `ts` original:
+en pares cripto poco líquidos puede tener varios segundos (Binance `miniTicker` solo emite al haber
+cambios), y no es retraso del servidor. Medido (13-oct-2026, 20 clientes x 10 pares): ticks en vivo
+p50 138 ms / p99 234 ms; el primer tick de cada activo, p50 ~1 s. Las acciones sin feed WS se sondean
+cada 5 s con el mercado abierto y solo emiten si cambió el precio o la hora (a 60 s si el mercado está
+cerrado/pre/post y no hay cambios).
 
 ## Análisis de IA
 

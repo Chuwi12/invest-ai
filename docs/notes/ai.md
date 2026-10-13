@@ -127,8 +127,8 @@ descripciones de escenarios flojas; en `quick` la tesis sigue siendo poco espec�
   punto medio entre el soporte A y la resistencia B (…)»). Del texto del modelo se conservan solo las frases cuyas cifras
   sean el precio, los niveles de ESE escenario, el precio de partida, su variación o su probabilidad; las demás se
   descartan y se anota en `qualityNotes` («Escenario bajista: 1 frase(s) … descartada(s) …»).
-- Límite: si el modelo escribe cifras en formato español («81.059,79») su frase se descarta (se parsea mal); el prompt
-  le da las cifras con punto, así que en la práctica no ocurre.
+- Cifras en formato español del modelo («81.059,79», «2057,45», «-3,2 %»): se leen bien (ver «Fidelidad numérica»); el
+  prompt sigue dando las cifras con punto, pero ya no se descarta una frase correcta por escribirlas con coma.
 - Tests: `scenario_text_tests` (caso BTC exacto → solo la frase de Rust + nota; coherente → se conserva; una frase
   ajena entre varias → solo esa cae), `levels::level_notes_...`, `fmt::spanish_prices_...`.
 
@@ -143,5 +143,35 @@ qualityNotes| Escenario alcista: 1 frase(s) del modelo descartada(s) por citar c
 ```
 AAPL deep: «Precio = resistencia 344,96 (yahoo, 12 oct 2026).», «Precio 339,25 = punto medio entre el soporte 335,78 y la
 resistencia 342,72 (…)»; los tres escenarios tuvieron una frase del 7B descartada (cifras ajenas): con el 7B el
-descarte es frecuente. Pendiente conocido: el nombre del proveedor sale tal cual del snapshot («binance», «yahoo»
-en minúsculas).
+descarte es frecuente. El nombre del proveedor ya sale con su nombre de visualización («Binance», «Yahoo Finance»; ver «Fidelidad numérica»).
+
+
+## Fidelidad numérica: formatos, signo y unidades (segunda revisión)
+
+Detalle de los hallazgos R-10…R-20 en `review.md → Segunda revisión`.
+
+- **Unidades del contexto** (`context.rs`): `Quote.change_pct` está en PUNTOS porcentuales (1.2 = +1,2 %) y pasa por
+  `pct_signed(c / 100)`; los rendimientos, márgenes, ROE, caída máxima, rentabilidad por dividendo y gastos del ETF son
+  FRACCIONES (`domain`). Gastos y dividendo se imprimen con 2 decimales (`fmt::pct2`). Si la moneda de las cuentas
+  (`extra.financialCurrency`) difiere de la de cotización, ingresos/FCF/caja/deuda llevan su moneda y hay una fila «Monedas».
+- **Un único registro de noticias**: el contexto completo, el de cada etapa y el del juez se construyen con el mismo
+  `NewsRegistry` y todos alimentan el `NumberIndex`; lo que ve una etapa siempre se puede citar y verificar.
+- **Formatos de número** (`fidelity::extract_numbers`): inglés (`81059.79`, `1,234.5`) y español (`81.059,79`, `2057,45`,
+  `-3,2 %`, también con espacio fino/no separable). Una cifra con UN separador y exactamente 3 dígitos detrás (`1.234`,
+  `1,234`) es ambigua: (1) si el mismo texto trae una cifra inequívoca (`81.059,79` → español; `1,234.5` → inglés) todas
+  las ambiguas se leen así; (2) si no, `value` es la lectura inglesa (la del contexto) y la española queda en `alt`; la
+  cifra se da por verificada si CUALQUIER lectura está en los datos (`Num::values`). Sufijos `K/M/B/T` (pegados o con
+  espacio) y palabras (`mil`, `millones`, `mil millones`, `billones` = 10^12, `billion` = 10^9). El `%` puede ir con
+  espacio (`5 %`) o como «por ciento».
+- **Signo**: con signo explícito debe coincidir; sin signo, una cifra encaja con un dato negativo solo si la frase habla
+  de una bajada (`fidelity::DECLINE_CUES`). «Caída máxima del 13.8%» pasa contra `-13.8%`; «sube un 3.2%» no.
+- **Exentos**: enteros ≤ 12 sin unidad, años (salvo con moneda al lado: «2050 USD»), códigos pegados a un entero (`52w`),
+  fechas/horas con patrón de fecha, umbrales convencionales junto a su indicador (por palabra, no por subcadena) y los
+  nombres de índices (`S&P 500`, `Nasdaq 100`…). Los rangos (`81000-82000`) y pares (`a/b`) NO son fechas.
+- **Proveedor en el texto del usuario**: `fmt::provider_name` («binance» → «Binance», «yahoo» → «Yahoo Finance»; mismos
+  nombres que `frontend/src/lib/sources.ts`) en bases de niveles/escenarios, citas `(fuente: …)` y avisos de datos.
+  `SourceRef.provider` y el contexto del modelo conservan el id.
+- **Lint**: «caja libre del» solo es un calco sin «flujo de» delante; «palabra repetida» exige los dos tokens contiguos
+  sin puntuación; el inglés colado ignora nombres propios (mayúscula a mitad de frase); `dedupe_sentences` cuenta las
+  cifras cortas.
+- **Fixture**: `ai::fixture` da `change_pct` en puntos porcentuales, como los proveedores.
