@@ -153,13 +153,14 @@ async fn http(addr: String, n: usize, c: usize, gzip: bool, paths: Vec<String>) 
     }
     let wall = t0.elapsed().as_secs_f64();
     lat.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let codes_json = format!("{{{}}}", codes.iter().map(|(k, v)| format!("\"{k}\":{v}")).collect::<Vec<_>>().join(","));
     println!(
         "{{\"path\":{:?},\"n\":{},\"c\":{},\"errs\":{},\"codes\":{},\"rps\":{:.1},\"p50_ms\":{:.2},\"p95_ms\":{:.2},\"p99_ms\":{:.2},\"max_ms\":{:.2},\"avg_bytes\":{}}}",
         paths.first().cloned().unwrap_or_default(),
         lat.len(),
         c,
         errs,
-        format!("{{{}}}", codes.iter().map(|(k, v)| format!("\"{k}\":{v}")).collect::<Vec<_>>().join(",")),
+        codes_json,
         lat.len() as f64 / wall,
         pct(&lat, 0.50),
         pct(&lat, 0.95),

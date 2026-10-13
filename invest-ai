@@ -8,8 +8,10 @@ readonly ROOT
 readonly ENV_FILE="$ROOT/.env"
 readonly ENV_EXAMPLE="$ROOT/.env.example"
 readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/invest-ai"
-readonly BIN="$ROOT/backend/target/release/invest-ai"
-readonly BIN_DEBUG="$ROOT/backend/target/debug/invest-ai"
+readonly TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/backend/target}" # cargo lo respeta; el script debe buscar el binario ahí
+readonly BIN="$TARGET_DIR/release/invest-ai"
+readonly SELFTEST_BIN="$TARGET_DIR/release/invest-ai-selftest"
+readonly BIN_DEBUG="$TARGET_DIR/debug/invest-ai"
 readonly SERVER_LOG="$STATE_DIR/server.log"
 readonly OLLAMA_LOG="$STATE_DIR/ollama.log"
 readonly RUN_PID="$STATE_DIR/run.pid"
@@ -28,6 +30,9 @@ SERVER_PGID=""
 VITE_PGID=""
 OLLAMA_STARTED_PID=""
 CLEANED=0
+# Las variables globales de abajo se llaman como las del entorno y las pisarían: se guardan
+# antes los valores que vinieron del entorno (si no, `BIND_ADDR=... ./invest-ai` se ignoraba).
+declare -A ENV_ORIG=([BIND_ADDR]="${BIND_ADDR-}" [LLM_BASE_URL]="${LLM_BASE_URL-}" [LLM_MODEL]="${LLM_MODEL-}")
 BIND_ADDR="" BIND_HOST="" BIND_PORT="" APP_URL="" LLM_BASE_URL="" LLM_MODEL=""
 OLLAMA_HOSTPORT="" OLLAMA_LOCAL=0 DATA_DIR=""
 
@@ -48,6 +53,10 @@ elapsed() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }'; }
 # Lee CLAVE del entorno o de .env (sin cargar el fichero como código) o usa el valor por defecto.
 env_get() {
   local key=$1 def=${2-} val="" line
+  if [[ -n ${ENV_ORIG[$key]-} ]]; then
+    printf '%s' "${ENV_ORIG[$key]}"
+    return 0
+  fi
   if [[ -n ${!key-} ]]; then
     printf '%s' "${!key}"
     return 0
@@ -106,7 +115,7 @@ wait_for() { # wait_for SEGUNDOS COMANDO... ; devuelve 0 en cuanto el comando te
   end=$(( SECONDS + secs ))
   while (( SECONDS < end )); do
     if "$@"; then return 0; fi
-    sleep 0.2
+    sleep 0.05
   done
   "$@"
 }
@@ -193,10 +202,12 @@ prepare_files() {
 fingerprint() { # fingerprint DIR [filtros de find...]
   local dir=$1
   shift
-  find "$dir" -type f "$@" -printf '%P %s %T@\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1
+  find "$dir" "$@" -printf '%P %s %T@\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1
 }
-backend_fp() { fingerprint "$ROOT/backend" -not -path '*/target/*'; }
-frontend_fp() { fingerprint "$ROOT/frontend" -not -path '*/node_modules/*' -not -path '*/dist/*' -not -name '*.tsbuildinfo'; }
+# `-prune` evita recorrer target/ y node_modules/ (con `-not -path` find los recorre igualmente:
+# 158 ms -> 4 ms en backend/). La huella resultante es idéntica.
+backend_fp() { fingerprint "$ROOT/backend" -name target -prune -o -type f; }
+frontend_fp() { fingerprint "$ROOT/frontend" \( -name node_modules -o -name dist \) -prune -o -type f -not -name '*.tsbuildinfo'; }
 
 stamp_is() { [[ -f $STATE_DIR/$1 && $(<"$STATE_DIR/$1") == "$2" ]]; }
 
@@ -272,7 +283,7 @@ ensure_backend() { # ensure_backend [release|debug]
   fp=$(backend_fp)
   if [[ ! -x $bin ]] || ! stamp_is "$stamp" "$fp"; then
     info "Compilando el backend ($profile; la primera vez tarda minutos)"
-    (cd -- "$ROOT/backend" && cargo build "${args[@]}" -p server --bin invest-ai) \
+    (cd -- "$ROOT/backend" && cargo build "${args[@]}" -p server --bin invest-ai --bin invest-ai-selftest) \
       || die "el backend no compila: corrige los errores de cargo y vuelve a lanzar."
     printf '%s' "$fp" >"$STATE_DIR/$stamp"
   else
@@ -580,6 +591,50 @@ cmd_prestart() {
   ensure_model
 }
 
+# selftest [--llm] [--url URL]: prueba de humo (health, cotizaciones reales, tick WS, /models,
+# cabeceras). Usa la instancia en marcha; si no hay, arranca una temporal en un puerto libre.
+cmd_selftest() {
+  local llm=() url="" tmp="" pid="" port
+  while (( $# )); do
+    case $1 in
+      --llm) llm=(--llm) ;;
+      --url) shift; url=${1:-} ;;
+      *) die "selftest: opción desconocida: $1" ;;
+    esac
+    shift
+  done
+  mkdir -p -- "$STATE_DIR"
+  prepare_files
+  have curl || die "falta curl"
+  if [[ -z $url ]]; then
+    if app_up; then
+      url=$APP_URL
+      info "selftest contra la instancia en marcha ($url)"
+    else
+      ensure_backend release
+      for port in $(seq 18787 18887); do port_busy "$port" || break; done
+      tmp=$(mktemp -d)
+      info "no hay instancia: arranco una temporal en 127.0.0.1:$port"
+      (
+        cd -- "$ROOT"
+        BIND_ADDR="127.0.0.1:$port" DATABASE_URL="sqlite://$tmp/selftest.db" \
+          setsid "$BIN" >"$tmp/server.log" 2>&1 9>&- &
+        echo $! >"$tmp/pid"
+      )
+      pid=$(<"$tmp/pid")
+      url="http://127.0.0.1:$port"
+      # shellcheck disable=SC2064
+      trap "kill_group '$pid' 5; rm -rf -- '$tmp'" EXIT
+      wait_for 20 curl -fsS --max-time 2 -o /dev/null "$url/api/health" 2>/dev/null \
+        || { cat -- "$tmp/server.log" >&2; die "la instancia temporal no arrancó"; }
+    fi
+  fi
+  [[ -x $SELFTEST_BIN ]] || ensure_backend release
+  local rc=0
+  "$SELFTEST_BIN" "$url" ${llm[@]+"${llm[@]}"} || rc=$?
+  return "$rc"
+}
+
 usage() {
   cat <<'USO'
 Uso: ./invest-ai [opciones] [comando]
@@ -593,6 +648,7 @@ Comandos:
   open              abre el navegador; arranca la app si no corre (lo usa el icono de KDE)
   install [--autostart]   servicio systemd de usuario + entrada en el menú de KDE
   uninstall         quita servicio y entrada del menú
+  selftest [--llm]  prueba de humo contra la instancia (o una temporal): sale con 1 si algo falla
 
 Opciones:
   --fake            datos simulados (sin red ni Ollama)
@@ -619,6 +675,7 @@ main() {
     open) cmd_open ;;
     install) cmd_install ${args[@]+"${args[@]}"} ;;
     uninstall) cmd_uninstall ;;
+    selftest) cmd_selftest ${args[@]+"${args[@]}"} ;;
     _prestart) cmd_prestart ;;
     help) usage ;;
     *) usage >&2; exit 2 ;;

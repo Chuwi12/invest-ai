@@ -21,7 +21,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use domain::{AssetClass, AssetId, PriceTick, Quote};
+use domain::{AssetClass, AssetId, MarketState, PriceTick, Quote};
 use futures::{
     Stream, StreamExt,
     future::BoxFuture,
@@ -591,6 +591,9 @@ impl Hub {
     }
 }
 
+/// Intervalo del sondeo de un activo con el mercado cerrado y sin cambios desde el sondeo anterior.
+const CLOSED_POLL: Duration = Duration::from_secs(60);
+
 /// Sondeo de respaldo. Además fija el precio de referencia (cierre previo) para calcular el
 /// cambio de los ticks WS que no lo traen.
 async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
@@ -601,6 +604,7 @@ async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
     };
     let mut last: Option<(f64, DateTime<Utc>)> = None;
     let mut first = true;
+    let mut wait = every;
     loop {
         let feed_ok = {
             let map = inner.lock();
@@ -615,7 +619,15 @@ async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
                 () = cancel.cancelled() => return,
                 q = fut => q,
             };
+            wait = every;
             if let Some(q) = q {
+                // Fuera de la sesión regular (cerrado, pre o post) el precio y su hora de la quote no
+                // cambian: si no hay novedad, no tiene sentido preguntar cada pocos segundos.
+                if matches!(q.market_state, MarketState::Closed | MarketState::Pre | MarketState::Post)
+                    && last.is_some_and(|(p, t)| p == q.price && t == q.timestamp)
+                {
+                    wait = every.max(CLOSED_POLL);
+                }
                 let mut map = inner.lock();
                 if let Some(e) = map.get_mut(&id)
                     && e.reference.is_none()
@@ -640,7 +652,7 @@ async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
         }
         tokio::select! {
             () = cancel.cancelled() => return,
-            () = tokio::time::sleep(every) => {}
+            () = tokio::time::sleep(wait) => {}
         }
     }
 }
@@ -756,6 +768,54 @@ mod tests {
         assert_eq!(hub.active_assets(), 1);
         drop(b);
         assert_eq!(hub.active_assets(), 0);
+        cancel.cancel();
+    }
+
+    /// Hub de sondeo cuyo proveedor devuelve siempre la misma cotización.
+    fn frozen_hub(state: domain::MarketState, counter: Arc<std::sync::atomic::AtomicU64>) -> (Hub, CancellationToken) {
+        let cancel = CancellationToken::new();
+        let qf: QuoteFn = Arc::new(move |id: AssetId| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let mut q = quote(&id.symbol, 100.0, 1000);
+                q.market_state = state;
+                Some(q)
+            }
+            .boxed()
+        });
+        (Hub::polling_only(qf, cancel.clone()), cancel)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn closed_market_without_changes_is_polled_rarely_and_emits_one_tick() {
+        // Pre y post tampoco mueven la quote regular: mismo trato que cerrado.
+        for state in [domain::MarketState::Closed, domain::MarketState::Pre, domain::MarketState::Post] {
+            closed_case(state).await;
+        }
+    }
+
+    async fn closed_case(state: domain::MarketState) {
+        let counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let (hub, cancel) = frozen_hub(state, counter.clone());
+        let mut s = hub.subscribe(&[AssetId::new(AssetClass::Stock, "AAPL")]);
+        assert_eq!(s.next().await.unwrap().price, 100.0);
+        tokio::time::sleep(Duration::from_secs(300)).await;
+        // Con 5 s serían 60 consultas; con el sondeo espaciado a 60 s, unas 6.
+        let n = counter.load(Ordering::SeqCst);
+        assert!(n <= 8, "demasiadas consultas con el mercado cerrado: {n}");
+        assert!(tokio::time::timeout(Duration::from_millis(10), s.next()).await.is_err(), "no debe repetir el tick");
+        cancel.cancel();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn open_market_keeps_the_fast_poll_but_does_not_repeat_identical_ticks() {
+        let counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let (hub, cancel) = frozen_hub(domain::MarketState::Regular, counter.clone());
+        let mut s = hub.subscribe(&[AssetId::new(AssetClass::Stock, "AAPL")]);
+        assert_eq!(s.next().await.unwrap().price, 100.0);
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert!(counter.load(Ordering::SeqCst) >= 10);
+        assert!(tokio::time::timeout(Duration::from_millis(10), s.next()).await.is_err());
         cancel.cancel();
     }
 

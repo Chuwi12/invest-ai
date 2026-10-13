@@ -13,6 +13,11 @@ path = "src/lib.rs"
 name = "invest-ai"
 path = "src/main.rs"
 
+# Prueba de humo de una instancia en marcha (`./invest-ai selftest`).
+[[bin]]
+name = "invest-ai-selftest"
+path = "src/bin/selftest.rs"
+
 [dependencies]
 domain.workspace = true
 market.workspace = true
@@ -35,11 +40,11 @@ tower-http = { version = "0.6", features = ["compression-br", "compression-gzip"
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "macros", "chrono"] }
 dotenvy = "0.15"
 tokio-util = { version = "0.7", features = ["rt"] }
+tokio-tungstenite = "0.26"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
-tokio-tungstenite = "0.26"
 sha2 = "0.10"
 base64 = "0.22"

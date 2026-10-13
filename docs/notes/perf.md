@@ -1,6 +1,6 @@
 # Rendimiento: mediciones y optimizaciones
 
-Estado: **en curso** (parte 2: primeras optimizaciones aplicadas; faltan memoria, arranque, análisis y selftest). Todo se mide en release, con datos reales, en el puerto 8791 y con `RUST_LOG` del `.env` (`info,server=debug,market=debug,ai=debug`).
+Estado: **completo** salvo lo listado en «No verificado». Todo se mide en release, con datos reales, en el puerto 8791 y con `RUST_LOG` del `.env` (`info,server=debug,market=debug,ai=debug`).
 
 ## Metodología
 - No hay `oha`/`wrk`/`ab`: cliente propio `backend/crates/server/examples/loadgen.rs` (HTTP/1.1 keep-alive, un socket por cliente; modo `ws` con latencia marca del proveedor -> recepción). Uso: `loadgen http http://127.0.0.1:8791 -n 2000 -c 50 [--gzip] /api/dashboard`, `loadgen ws http://127.0.0.1:8791 --clients 20 --secs 30 crypto:BTC ...`.
@@ -46,11 +46,64 @@ Conclusión: el tiempo propio del servidor en caliente es despreciable (<0,5 ms 
 | Peticiones salientes por un dashboard en frío | 7 | 6 (GDELT ya no se reintenta mientras está apartado) |
 
 ### WebSocket (20 clientes, 10 activos cripto, 20 s)
-132 ticks/s entregados en total (6,6 por cliente y segundo; Binance `miniTicker` ~1/s por símbolo), 0 fallos, CPU del servidor ~0,4 % de un núcleo en 30 s con 20 clientes y 10 activos; latencia marca del proveedor -> recepción en el cliente: p50 125 ms, p95 1,7 s, p99 2,7 s. La cola larga NO la he diagnosticado (el sospechoso es la hora del evento de los pares poco líquidos, no el reenvío; no verificado). Acciones: sin feed WS, 5 clientes con `stock:AAPL/MSFT` con el mercado cerrado recibieron 10 ticks en 15 s con `ts` del viernes (60 277 s de antigüedad: es la hora del proveedor, no un retraso del servidor).
-CPU en reposo (sin clientes) 10 s: 0 ticks de reloj. RSS tras arrancar y servir ~100 peticiones: 84 MB; tras la prueba WS 88 MB.
+132 ticks/s entregados en total (6,6 por cliente y segundo; Binance `miniTicker` ~1/s por símbolo), 0 fallos, CPU del servidor ~0,4 % de un núcleo en 30 s con 20 clientes y 10 activos; latencia marca del proveedor -> recepción en el cliente: p50 125 ms, p95 1,7 s, p99 2,7 s. La cola larga NO la he diagnosticado (el sospechoso es la hora del evento de los pares poco líquidos, no el reenvío; no verificado). Acciones (sin feed WS, sondeo): 5 clientes con `stock:AAPL/MSFT` recibieron 10 ticks en 15 s con el mismo `ts`: NO son repeticiones, son el tick inicial que recibe cada cliente al suscribirse (5 clientes x 2 activos); el sondeo ya descartaba lo no cambiado (`changed`). Con 3 clientes x 2 activos durante 40 s llegaron exactamente 6 ticks (uno por cliente y activo). El `ts` de 60 277 s de antigüedad es el cierre del lunes (16:00 ET) visto el martes por la mañana: hora del proveedor, no retraso del servidor.
+
 
 ## Qué NO se optimizó (y por qué)
 - Latencia en frío de quote/history/indicators/fundamentals (150-280 ms p50): es 1 ida y vuelta a Yahoo (193 ms de media saliente); el servidor aporta <1 ms.
 - Latencia de `news` por encima de 1 s en frío: el limitador de Google News (1 req/s, 2 peticiones por llamada: en + idioma) es deliberado para no ser bloqueados; subirlo es un riesgo de ban sin medir.
 - `search` (p99 62 ms en caliente, cola de 3 s en frío): escribe `record_search` en SQLite en cada llamada y, en frío, espera al limitador de CoinGecko (0,15 req/s, tope de espera 3 s). Es una decisión de protección de la API gratuita.
 - Compresión/HTTP2 del lado servidor: ya están (`CompressionLayer`, reqwest con HTTP/2); `history 1y` pesa 29,5 kB sin comprimir.
+
+## Sondeo con el mercado cerrado (optimización 4)
+Hallazgo: aunque el tick no se repetía, el sondeo de respaldo preguntaba a Yahoo cada 5 s por activo aunque el mercado estuviera cerrado o en pre/post (la quote regular no se mueve). Ahora, si `marketState` es `closed`/`pre`/`post` y precio+`ts` no cambiaron desde el sondeo anterior, el siguiente sondeo se espacia a 60 s (`CLOSED_POLL`); con la sesión regular, cripto o estado desconocido sigue a 5 s (3 s para cripto). Coste: abrir el mercado se nota con hasta 60 s de retraso en el sondeo (con feed WS no aplica).
+| Medida (pre-market de EE. UU., 3 clientes, `stock:AAPL` + `stock:MSFT`, 40 s) | Antes | Después |
+|---|---|---|
+| Peticiones salientes a Yahoo | 16 | 2 |
+| Ticks entregados | 6 (1 por cliente y activo) | 6 |
+Tests: `closed_market_without_changes_is_polled_rarely_and_emits_one_tick` (closed, pre y post), `open_market_keeps_the_fast_poll_but_does_not_repeat_identical_ticks`.
+(La primera prueba, solo con `Closed`, no cambió nada porque el estado real era `pre`; por eso la condición incluye pre y post.)
+
+## Arranque, binario y compilación
+| Medida | Resultado |
+|---|---|
+| `./invest-ai` en caliente hasta `/api/health` OK | ~0,05 s medidos con sondeo de 20 ms desde la invocación (Ollama y modelo ya listos, sin recompilar); antes el script anunciaba «listo en 0.3 s» porque sondeaba cada 200 ms |
+| Huella de cambios (`backend_fp`) | 158 ms -> 4 ms (`find -prune` en vez de `-not -path`: antes recorría `target/`); hash idéntico |
+| Binario release | 18,9 MB (strip, thin LTO) |
+| Compilación incremental release (tocar `service.rs` / `system.rs`) | 59 s / 45 s en esta máquina con otros agentes compilando; primera completa 1 min 46 s |
+Correcciones del script: (a) `BIND_ADDR=... ./invest-ai` y `LLM_BASE_URL`/`LLM_MODEL` del entorno se ignoraban porque las variables globales del script se llaman igual y las pisaban (arrancó en el puerto por defecto); (b) el script respeta `CARGO_TARGET_DIR` para localizar el binario.
+
+## Coste de un análisis `quick` (stock:AAPL, qwen2.5:7b, 100 % GPU)
+| Parte | Tiempo |
+|---|---|
+| Snapshot en frío (quote, indicadores, fundamentales, noticias, macro, ficha, en paralelo) | 1,95 s (antes de la optimización de noticias sería ~6 s por GDELT) |
+| Snapshot en caliente | 0,5 ms |
+| Análisis completo (2 llamadas al modelo, 6161 tokens de entrada, 1529 de salida) | 43,4 s (otra ejecución vía `selftest --llm`: 37,3 s, 1644 tokens de salida) |
+El LLM supone >95 % del tiempo; el snapshot es ~4 % en frío. No hay nada que optimizar en la parte de datos; la palanca es el modelo (tokens de salida, `num_ctx`), que pertenece a `crates/ai`.
+
+## `./invest-ai selftest`
+Ver README. Implementado en `backend/crates/server/src/bin/selftest.rs` (binario `invest-ai-selftest`, cliente HTTP/WS mínimo, sin dependencias nuevas salvo mover `tokio-tungstenite` de dev a normales) y `cmd_selftest` en el script. Antigüedad máxima aceptada: cripto 3 min; sesión regular 20 min; pre/post 20 h; cerrado 5 días.
+
+## Memoria y CPU en reposo
+Servidor nuevo, recorrido de 200 activos distintos (S&P 500, 189-200 válidos) por 6 endpoints seguidos (~6 min de uso continuo), y 4 min en reposo:
+| Momento | RSS |
+|---|---|
+| Recién arrancado | 14,3 MB |
+| tras 200 x quote | 20,1 MB |
+| + indicators (200) | 27,2 MB |
+| + fundamentals | 28,4 MB |
+| + history 1y/1d | 31,5 MB |
+| + history 1d/5m | 32,5 MB |
+| + news (200 x ~170 kB) | 66,0 MB |
+| 4 min después, sin tráfico | 66,7 MB |
+CPU en reposo: 0 ticks de reloj en 20 s (y en 10 s con el servidor recién usado); no hay sondeos sin clientes (el hub de tiempo real es perezoso). Todas las cachés `moka` tienen tope (`quotes` 5000, `history` 500+500, `indicators` 1000, `fundamentals` 1000, `news` 500, `search` 1000, `summaries` 5000, `quote_batches` 200): la memoria **no crece sin límite**, pero el tope de `news` (500 entradas de ~170 kB, 50 noticias cada una) permite llegar a ~85 MB más que se verían como ~150 MB de RSS. El RSS no baja tras el TTL porque moka solo expulsa en mantenimiento al acceder y el asignador no devuelve memoria al SO. No lo recorté: es memoria acotada y un uso real toca pocas decenas de activos. Candidato si molestara: guardar solo 20 noticias por clave o bajar el tope a 200.
+(Con 20 clientes WS y 10 activos durante 30 s el RSS pasó de 84 a 88 MB en el servidor de la primera tanda.)
+
+## No verificado
+- Tras 10 min de uso continuo exactos: la serie anterior son ~6 min de carga + 4 min de reposo (10 min en total), no 10 min de carga sostenida.
+- La causa de la cola de latencia del tick WS (p95 1,7 s) en pares cripto poco líquidos.
+- Que el espaciado a 60 s del mercado cerrado se comporte igual con Finnhub/otros proveedores (solo probado con Yahoo y tests).
+- Efecto en horas de mercado abierto de EE. UU.: todas las medidas de bolsa se hicieron en pre-market/cerrado; las de cripto son tiempo real.
+- `./invest-ai` completo con navegador y Ctrl+C no se repitió tras los cambios del script (se probó `selftest`, la instancia temporal, y el arranque con `--no-browser`).
+- Compresión de respuestas: el cliente de carga midió con `identity`; no se midió el coste de br/gzip.
+- Servicio systemd: no probado con los cambios.

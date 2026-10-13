@@ -34,7 +34,7 @@ Errores de HTTP que no vienen del dominio:
 | Método | Ruta              | Respuesta |
 |--------|-------------------|-----------|
 | GET    | `/health`         | `{ "status": "ok", "version": string }` |
-| GET    | `/status`         | `{ "llm": LlmStatus, "providers": ProviderStatus[] }` |
+| GET    | `/status`         | `{ "llm": LlmStatus, "providers": ProviderStatus[], "outbound": { "host": string, "requests": number, "avgMs": number }[] }` (`outbound`: peticiones HTTP salientes a proveedores desde el arranque y latencia media hasta las cabeceras; diagnóstico de caché/single-flight) |
 
 ## Mercado
 
