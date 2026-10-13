@@ -24,7 +24,19 @@ const RISK_PER_TRADE_PCT: f64 = 1.0;
 #[derive(Debug, Clone)]
 pub struct Level {
     pub value: f64,
+    /// Nombre del nivel («SMA50», «soporte»…) o, si es derivado, la fórmula completa.
     pub basis: String,
+    /// Cifras de las que sale (para validar que un texto solo cita las de este nivel).
+    pub refs: Vec<f64>,
+    /// `basis` ya lleva sus cifras (nivel derivado): no hay que añadir el valor.
+    pub derived: bool,
+}
+
+impl Level {
+    /// «SMA50 81.059,79» (o la fórmula completa si es derivado), con formato para el usuario.
+    pub fn describe(&self, lang: Lang) -> String {
+        if self.derived { self.basis.clone() } else { format!("{} {}", self.basis, fmt::price_l(lang, self.value)) }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -40,8 +52,32 @@ pub struct LevelPlan {
     pub stop_basis: Option<String>,
     pub targets: Vec<Level>,
     pub reward_risk: Option<f64>,
-    /// Frases sobre lo que falta o cómo se calculó.
+    /// Frases sobre lo que falta o cómo se calculó, para el usuario (cifras en formato castellano).
     pub notes: Vec<String>,
+    /// Las mismas frases con punto decimal, para el prompt del juez (se compara textualmente).
+    pub prompt_notes: Vec<String>,
+    /// «Binance, 12 oct 2026»: proveedor y fecha del precio sobre el que se calcula todo.
+    pub source: String,
+}
+
+/// «Binance, 12 oct 2026»: de dónde y de cuándo es el precio sobre el que se calcula.
+pub fn source_label(snap: &AssetSnapshot, lang: Lang) -> String {
+    match &snap.quote {
+        Some(q) => format!("{}, {}", q.source, fmt::date_l(lang, q.timestamp.date_naive())),
+        None => fmt::date_l(lang, snap.generated_at.date_naive()),
+    }
+}
+
+impl LevelPlan {
+    /// Añade una frase a las notas de usuario (cifras en castellano) y del prompt (punto decimal).
+    fn note_both(&mut self, f: impl Fn(&dyn Fn(f64) -> String) -> String, lang: Lang) {
+        self.notes.push(f(&|x| fmt::price_l(lang, x)));
+        self.prompt_notes.push(f(&|x| fmt::price(x)));
+    }
+    fn note_plain(&mut self, s: String) {
+        self.notes.push(s.clone());
+        self.prompt_notes.push(s);
+    }
 }
 
 fn price_of(snap: &AssetSnapshot) -> Option<f64> {
@@ -74,7 +110,7 @@ fn collect(snap: &AssetSnapshot, price: f64, lang: Lang) -> (Vec<Level>, Vec<Lev
     let mut up = Vec::new();
     let mut add = |value: Option<f64>, basis: &str| {
         let Some(v) = value.filter(|v| v.is_finite() && *v > 0.0) else { return };
-        let l = Level { value: v, basis: basis.to_string() };
+        let l = Level { value: v, basis: basis.to_string(), refs: vec![v], derived: false };
         if v < price * 0.999 {
             sup.push(l);
         } else if v > price * 1.001 {
@@ -109,11 +145,11 @@ pub fn plan(snap: &AssetSnapshot, verdict: Verdict, lang: Lang) -> Option<LevelP
     let price = price_of(snap)?;
     let atr = snap.indicators.as_ref().and_then(|i| i.atr14).filter(|a| a.is_finite() && *a > 0.0);
     let (supports, upside) = collect(snap, price, lang);
-    let mut p = LevelPlan { price, atr, supports: supports.clone(), upside: upside.clone(), ..Default::default() };
+    let mut p = LevelPlan { price, atr, supports: supports.clone(), upside: upside.clone(), source: source_label(snap, lang), ..Default::default() };
 
     let actionable = matches!(verdict, Verdict::Buy | Verdict::Accumulate | Verdict::Hold | Verdict::Wait);
     if !actionable {
-        p.notes.push(tr!(
+        p.note_plain(tr!(
             lang,
             "Con un veredicto de reducir o evitar no se proponen zona de entrada, stop ni objetivos.",
             "With a reduce/avoid verdict no entry zone, stop or targets are proposed."
@@ -133,27 +169,50 @@ pub fn plan(snap: &AssetSnapshot, verdict: Verdict, lang: Lang) -> Option<LevelP
         _ => None,
     };
     match (&p.entry_zone, verdict) {
-        (None, Verdict::Wait) => p.notes.push(tr!(
+        (None, Verdict::Wait) => p.note_plain(tr!(
             lang,
             "Sin zona de entrada: los datos no muestran ningún soporte por debajo del precio sobre el que esperar.",
             "No entry zone: the data shows no support below the price to wait for."
         )),
-        (None, _) => p.notes.push(tr!(
+        (None, _) => p.note_plain(tr!(
             lang,
             "Sin zona de entrada: faltan el ATR y un soporte cercano en los datos.",
             "No entry zone: ATR and a nearby support are missing from the data."
         )),
-        (Some(_), Verdict::Wait) => p.notes.push(tr!(
-            lang,
-            "Zona de entrada: sobre el soporte más cercano ({}), un 0,5×ATR de margen.",
-            "Entry zone: just above the nearest support ({}), with 0.5×ATR of room.",
-            s1.as_ref().map(|s| fmt::price(s.value)).unwrap_or_default()
-        )),
-        (Some(_), _) => p.notes.push(tr!(
-            lang,
-            "Zona de entrada: del soporte más cercano o 1×ATR bajo el precio (el más cercano de los dos) hasta el precio actual.",
-            "Entry zone: from the nearest support or 1×ATR below the price (whichever is closer) up to the current price."
-        )),
+        (&Some((lo, hi)), Verdict::Wait) => {
+            let sv = s1.as_ref().map(|s| s.value).unwrap_or(lo);
+            let src = p.source.clone();
+            p.note_both(
+                |px| {
+                    tr!(
+                        lang,
+                        "Zona de entrada {} – {} = sobre el soporte más cercano {}, con un margen de 0,5×ATR14 ({}).",
+                        "Entry zone {} – {} = just above the nearest support {}, with 0.5×ATR14 of room ({}).",
+                        px(lo),
+                        px(hi),
+                        px(sv),
+                        src
+                    )
+                },
+                lang,
+            );
+        }
+        (&Some((lo, hi)), _) => {
+            let src = p.source.clone();
+            p.note_both(
+                |px| {
+                    tr!(
+                        lang,
+                        "Zona de entrada {} – {} = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual ({}).",
+                        "Entry zone {} – {} = from the nearest support or 1×ATR14 below the price (whichever is closer) up to the current price ({}).",
+                        px(lo),
+                        px(hi),
+                        src
+                    )
+                },
+                lang,
+            );
+        }
     }
 
     // --- Stop ---
@@ -163,28 +222,35 @@ pub fn plan(snap: &AssetSnapshot, verdict: Verdict, lang: Lang) -> Option<LevelP
             let stop = s.value - STOP_ATR_MULT * a;
             if stop > 0.0 {
                 p.stop_loss = Some(stop);
-                p.stop_basis = Some(format!("{} {} − {STOP_ATR_MULT}×ATR", s.basis, fmt::price(s.value)));
-                p.notes.push(tr!(
+                let (sb, sv, src) = (s.basis.clone(), s.value, p.source.clone());
+                p.stop_basis = Some(format!("{sb} {} − {STOP_ATR_MULT}×ATR14 {}", fmt::price_l(lang, sv), fmt::price_l(lang, a)));
+                p.note_both(
+                    |px| {
+                        tr!(
+                            lang,
+                            "Stop {} = {} {} − {}×ATR14 {} ({}).",
+                            "Stop {} = {} {} − {}×ATR14 {} ({}).",
+                            px(stop),
+                            sb,
+                            px(sv),
+                            STOP_ATR_MULT,
+                            px(a),
+                            src
+                        )
+                    },
                     lang,
-                    "Stop: {} ({} {} menos {}×ATR14 de {}).",
-                    "Stop: {} ({} {} minus {}×ATR14 of {}).",
-                    fmt::price(stop),
-                    s.basis,
-                    fmt::price(s.value),
-                    STOP_ATR_MULT,
-                    fmt::price(a)
-                ));
+                );
             }
         }
         if p.stop_loss.is_none() {
-            p.notes.push(tr!(
+            p.note_plain(tr!(
                 lang,
                 "Sin stop: los datos no tienen ningún soporte en o bajo la zona de entrada sobre el que calcularlo.",
                 "No stop: the data has no support at or below the entry zone to base it on."
             ));
         }
     } else if p.entry_zone.is_some() {
-        p.notes.push(tr!(
+        p.note_plain(tr!(
             lang,
             "Sin stop: falta el ATR14 en los datos.",
             "No stop: ATR14 is missing from the data."
@@ -194,14 +260,20 @@ pub fn plan(snap: &AssetSnapshot, verdict: Verdict, lang: Lang) -> Option<LevelP
     // --- Objetivos ---
     p.targets = upside.iter().take(3).cloned().collect();
     if p.targets.is_empty() {
-        p.notes.push(tr!(
+        p.note_plain(tr!(
             lang,
             "Sin objetivos: el precio está por encima de todas las resistencias y máximos de los datos.",
             "No targets: the price is above every resistance and high in the data."
         ));
     } else {
-        let list: Vec<String> = p.targets.iter().map(|t| format!("{} ({})", fmt::price(t.value), t.basis)).collect();
-        p.notes.push(tr!(lang, "Objetivos: {}.", "Targets: {}.", list.join("; ")));
+        let (targets, src) = (p.targets.clone(), p.source.clone());
+        p.note_both(
+            |px| {
+                let list: Vec<String> = targets.iter().map(|t| format!("{} = {}", px(t.value), t.basis)).collect();
+                tr!(lang, "Objetivos: {} ({}).", "Targets: {} ({}).", list.join("; "), src)
+            },
+            lang,
+        );
     }
 
     // --- Recompensa/riesgo ---
@@ -211,13 +283,18 @@ pub fn plan(snap: &AssetSnapshot, verdict: Verdict, lang: Lang) -> Option<LevelP
         if risk > 0.0 && t1.value > entry {
             let rr = (t1.value - entry) / risk;
             p.reward_risk = Some((rr * 10.0).round() / 10.0);
-            p.notes.push(tr!(
+            p.note_both(
+                |px| {
+                    tr!(
+                        lang,
+                        "Relación recompensa/riesgo hasta el primer objetivo: {:.1} (entrada en el punto medio de la zona, {}).",
+                        "Reward/risk to the first target: {:.1} (entry at the zone midpoint, {}).",
+                        rr,
+                        px(entry)
+                    )
+                },
                 lang,
-                "Relación recompensa/riesgo hasta el primer objetivo: {:.1} (entrada en el punto medio de la zona, {}).",
-                "Reward/risk to the first target: {:.1} (entry at the zone midpoint, {}).",
-                rr,
-                fmt::price(entry)
-            ));
+            );
         }
     }
     Some(p)
@@ -264,7 +341,7 @@ impl LevelPlan {
         if let Some(rr) = self.reward_risk {
             s.push_str(&format!("{}: {rr:.1}\n", lang.t("Recompensa/riesgo", "Reward/risk")));
         }
-        for n in &self.notes {
+        for n in &self.prompt_notes {
             s.push_str(&format!("- {n}\n"));
         }
         s
@@ -354,9 +431,11 @@ pub fn scenario_levels(plan: &LevelPlan, lang: Lang) -> ScenarioLevels {
                 lang,
                 "punto medio entre el soporte {} y la resistencia {}",
                 "midpoint between support {} and resistance {}",
-                fmt::price(s.value),
-                fmt::price(r.value)
+                fmt::price_l(lang, s.value),
+                fmt::price_l(lang, r.value)
             ),
+            refs: vec![s.value, r.value, (s.value + r.value) / 2.0],
+            derived: true,
         }),
         _ => None,
     };
@@ -365,7 +444,9 @@ pub fn scenario_levels(plan: &LevelPlan, lang: Lang) -> ScenarioLevels {
         [_, b, ..] => Some(b.clone()),
         [a] => plan.atr.map(|atr| Level {
             value: a.value - atr,
-            basis: tr!(lang, "{} {} menos 1×ATR14", "{} {} minus 1×ATR14", a.basis, fmt::price(a.value)),
+            basis: tr!(lang, "{} {} − 1×ATR14 {}", "{} {} − 1×ATR14 {}", a.basis, fmt::price_l(lang, a.value), fmt::price_l(lang, atr)),
+            refs: vec![a.value, atr, a.value - atr],
+            derived: true,
         }),
     };
     ScenarioLevels { bullish, base, bearish }
@@ -471,5 +552,19 @@ mod tests {
         let bear = sc.bearish.unwrap();
         assert!(bull.value > p.price && bear.value < p.price);
         assert!(sc.base.is_some());
+    }
+
+    #[test]
+    fn level_notes_state_basis_and_source_in_spanish_but_the_prompt_keeps_dots() {
+        let mut snap = fixture::stock_snapshot();
+        snap.quote.as_mut().unwrap().price = 81_900.0;
+        let p = plan(&snap, Verdict::Accumulate, Lang::Es).unwrap();
+        let note = p.note();
+        assert!(note.contains(&format!("({})", p.source)) && p.source.contains(", "), "{note}");
+        assert!(note.contains("Stop ") && note.contains("ATR14"), "{note}");
+        let stop = p.stop_loss.unwrap();
+        assert!(note.contains(&fmt::price_l(Lang::Es, stop)));
+        // El prompt del juez conserva el formato con punto (se compara textualmente).
+        assert!(p.prompt_block(Lang::Es).contains(&fmt::price(stop)));
     }
 }

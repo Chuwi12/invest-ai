@@ -181,7 +181,7 @@ async fn deep_pipeline_runs_all_stages_and_verifies_figures() {
     assert!(known.iter().any(|s| (s - ind.atr14.unwrap() - stop).abs() < 1e-6), "stop = nivel de los datos − ATR");
     assert!(a.key_levels.entry_zone.is_some() && !a.key_levels.targets.is_empty());
     assert!(a.key_levels.targets.iter().all(|t| ind.resistances.contains(t) || [ind.high52w, ind.bb_upper].contains(&Some(*t)) || snap.fundamentals.as_ref().is_some_and(|f| [f.analyst_target_mean, f.analyst_target_high, f.all_time_high].contains(&Some(*t)))));
-    assert!(a.levels_note.as_deref().unwrap().contains("Stop:"));
+    assert!(a.levels_note.as_deref().unwrap().contains("Stop "));
     let ps = a.position_sizing.as_ref().expect("tamaño de posición");
     assert!(ps.max_portfolio_pct > 0.0 && ps.max_portfolio_pct <= 10.0);
     assert!(a.strategy.as_deref().unwrap().contains("Tamaño de posición (orientativo)"));

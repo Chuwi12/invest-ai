@@ -1,11 +1,14 @@
 import type {
   Analysis,
+  AnalysisDepth,
   AssetId,
   AssetSnapshot,
   Catalyst,
   Horizon,
   MacroContext,
   NewsItem,
+  PositionSizing,
+  Scenario,
   Sentiment,
   SentimentLabel,
   SourceRef,
@@ -14,6 +17,7 @@ import type {
 import { classOf, symbolOfId, toSummary } from './catalog'
 import { currentPrice, entryFor, genFundamentals, genIndicators, genQuote } from './market'
 import { between, hashString, pick, rngFor } from './rng'
+import { activeModelId } from './models'
 
 const HOUR = 3_600_000
 
@@ -154,9 +158,15 @@ function verdictFor(overall: number, risk: number): Verdict {
   return 'avoid'
 }
 
-const MODEL = 'qwen2.5:7b'
+export interface GenAnalysisOptions {
+  depth?: AnalysisDepth
+  /** Duración medida; si falta se inventa una verosímil (solo para los análisis sembrados del histórico). */
+  durationMs?: number
+}
 
-export function genAnalysis(id: AssetId, serial = 0, generatedAt: Date = new Date()): Analysis {
+const DEPTH_NAME: Record<AnalysisDepth, string> = { quick: 'rápido', standard: 'estándar', deep: 'profundo' }
+
+export function genAnalysis(id: AssetId, serial = 0, generatedAt: Date = new Date(), opts: GenAnalysisOptions = {}): Analysis {
   const entry = entryFor(id)
   const cls = classOf(id)
   const ind = genIndicators(id)
@@ -218,6 +228,62 @@ export function genAnalysis(id: AssetId, serial = 0, generatedAt: Date = new Dat
   if (entry.delay) warnings.push(`El precio tiene un retraso de ${Math.round(entry.delay / 60)} minutos.`)
   if (r() > 0.6) warnings.push('El sentimiento de noticias se calculó con léxico, no con el LLM, para 2 de los 6 titulares.')
 
+  const depth: AnalysisDepth = opts.depth ?? 'standard'
+  const model = activeModelId()
+  const durationMs = opts.durationMs ?? Math.round(
+    ({ quick: between(r, 38_000, 52_000), standard: between(r, 45_000, 62_000), deep: between(r, 64_000, 82_000) })[depth],
+  )
+  const llmCalls = { quick: 3, standard: 6, deep: 9 }[depth] + (r() > 0.7 ? 1 : 0)
+  const promptTokens = Math.round(llmCalls * between(r, 1500, 2600))
+  const completionTokens = Math.round(llmCalls * between(r, 350, 700))
+  const cur = entry.currency ?? ''
+  const withMoney = (v: number) => `${fmt(v)} ${cur}`.trim()
+
+  const changeIf = [
+    `El precio cierra por debajo de ${withMoney(lows[0] ?? price - atr * 2)} con volumen superior a la media`,
+    'El próximo informe de resultados queda por debajo de las previsiones de los analistas',
+    'El RSI de 14 sesiones supera 75 sin confirmación de nuevos máximos',
+  ]
+  const uncertainty = 'El análisis usa solo precio, noticias y fundamentales disponibles; no incluye flujos de órdenes ni posicionamiento de grandes fondos.'
+  const thesisTail = `\n\nIncertidumbre: ${uncertainty}\n\nLa conclusión cambiaría si:\n${changeIf.map((c) => `- ${c}`).join('\n')}`
+
+  const noLevels = verdict === 'avoid'
+  const levelsNote = noLevels
+    ? 'No se propone stop ni objetivos porque el veredicto es no entrar: sin posición no hay nada que proteger.'
+    : 'Stop = soporte más cercano − 1×ATR14; objetivos = resistencias de los datos. El modelo no decide estos precios.'
+
+  const bullT = highs[0] ?? price + atr * 3
+  const baseT = price + (bullT - price) * 0.15
+  const bearT = lows[0] ?? price - atr * 3
+  const pBull = Math.round(clamp(20 + (overall - 50) * 0.6 + between(r, -4, 4), 10, 55))
+  const pBear = Math.round(clamp(20 + (50 - overall) * 0.6 + between(r, -4, 4), 10, 55))
+  const pBase = 100 - pBull - pBear
+  const ret = (t: number) => Math.round(((t - price) / price) * 1000) / 10
+  const scenarios: Scenario[] | null = depth === 'deep' ? [
+    { kind: 'bullish', probability: pBull, description: 'Rompe la resistencia con volumen y el flujo de noticias se mantiene favorable.', targetPrice: bullT, targetBasis: 'resistencia más cercana de los datos', returnPct: ret(bullT) },
+    { kind: 'base', probability: pBase, description: 'Se mueve en rango, con rebotes limitados entre soporte y resistencia mientras se digieren los resultados.', targetPrice: baseT, targetBasis: 'punto intermedio del rango entre soporte y resistencia', returnPct: ret(baseT) },
+    { kind: 'bearish', probability: pBear, description: 'Pierde el soporte tras una sorpresa macro o de resultados y corrige hasta la zona siguiente.', targetPrice: bearT, targetBasis: 'soporte más cercano de los datos', returnPct: ret(bearT) },
+  ] : null
+  const expectedReturnPct = scenarios
+    ? Math.round(scenarios.reduce((t, sc) => t + (sc.probability / 100) * (sc.returnPct ?? 0), 0) * 10) / 10
+    : null
+  const stopPct = Math.round(((atr * 2.5) / price) * 1000) / 10
+  const atrPct = Math.round((atr / price) * 1000) / 10
+  const maxPortfolioPct = Math.round(clamp(2 / Math.max(stopPct, 1) * 10, 1, 10) * 10) / 10
+  const positionSizing: PositionSizing | null = verdict === 'avoid' ? null : {
+    maxPortfolioPct,
+    riskPerTradePct: 1,
+    stopDistancePct: stopPct,
+    atrPct,
+    volatility30d: ind.volatility30d ?? null,
+    rationale: `Arriesgando el 1 % de la cartera con un stop a ${fmt(stopPct)} % de la entrada, la posición máxima orientativa es del ${fmt(maxPortfolioPct)} % de la cartera. El ATR diario es del ${fmt(atrPct)} %.`,
+  }
+  const qualityNotes = r() > 0.5 ? [
+    'Se descartó 1 afirmación del modelo porque la cifra no aparecía en los datos.',
+    ...(depth === 'quick' ? [] : ['Una frase se reescribió tras detectar redacción dudosa.']),
+  ] : null
+  const method = `Modelo ${model}, análisis ${DEPTH_NAME[depth]}, ${llmCalls} llamadas, ${promptTokens + completionTokens} tokens, ${Math.round(durationMs / 1000)} s. Análisis automatizado: no es asesoramiento financiero.`
+
   return {
     id: `an_${hashString(`${id}|${serial}|${generatedAt.getTime()}`).toString(16)}`,
     asset: id,
@@ -237,7 +303,7 @@ export function genAnalysis(id: AssetId, serial = 0, generatedAt: Date = new Dat
     summary: summaryByVerdict[verdict],
     thesis: `${sym} cotiza a ${fmt(price)} ${entry.currency ?? ''} con ${trendText}. El RSI de 14 sesiones está ${rsiText} (${fmt(rsi)}) y la volatilidad a 30 días es del ${fmt((ind.volatility30d ?? 0) * 100)} %. ${
       fund?.peTrailing ? `El PER trailing de ${fmt(fund.peTrailing)} ${fund.peTrailing > 30 ? 'incorpora expectativas de crecimiento altas' : 'resulta razonable para su sector'}. ` : ''
-    }La conclusión se apoya en los datos del snapshot y no constituye asesoramiento financiero.`,
+    }La conclusión se apoya en los datos del snapshot y no constituye asesoramiento financiero.${thesisTail}`,
     bullCase: [
       `Tendencia ${ind.trend === 'down' || ind.trend === 'strong_down' ? 'a revertir si recupera la media de 50 sesiones' : 'favorable con precio sobre sus medias'}`,
       'Flujo de noticias con sentimiento neto positivo en la última semana',
@@ -270,7 +336,20 @@ export function genAnalysis(id: AssetId, serial = 0, generatedAt: Date = new Dat
     dataWarnings: warnings,
     sources,
     priceAtAnalysis: price,
-    model: MODEL,
+    model,
     generatedAt: generatedAt.toISOString(),
+    levelsNote,
+    scenarios,
+    expectedReturnPct,
+    wouldChangeIf: changeIf,
+    horizonNote: `Horizonte ${horizon === 'short' ? 'corto' : horizon === 'long' ? 'largo' : 'medio'} porque los catalizadores identificados se concentran en las próximas semanas y la volatilidad a 30 días es del ${fmt((ind.volatility30d ?? 0) * 100)} %.`,
+    positionSizing,
+    method,
+    qualityNotes,
+    depth,
+    durationMs,
+    llmCalls,
+    promptTokens,
+    completionTokens,
   }
 }

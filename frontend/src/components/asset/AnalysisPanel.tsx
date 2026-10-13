@@ -1,26 +1,36 @@
 import { Check, Loader2, Sparkles, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useAnalyses, useGenerateAnalysis, useLatestAnalysis, useStatus } from '@/api/hooks'
+import { useAnalyses, useDurationSamples, useGenerateAnalysis, useLatestAnalysis, useStatus } from '@/api/hooks'
 import type { AnalysisDepth, AnalysisProgress, AssetSummary, Quote } from '@/api/types'
 import { ANALYSIS_DEPTHS } from '@/api/types'
 import { AnalysisReport } from '@/components/AnalysisReport'
 import { ErrorNotice, SkeletonRows } from '@/components/states'
 import { VERDICT_LABEL } from '@/lib/assets'
+import { formatDurationMs, medianDuration, type MedianDuration } from '@/lib/analysis'
 import { formatDateTime, formatInt, formatPercent, formatPrice, formatRelative } from '@/lib/format'
 
-const DEPTH_INFO: Record<AnalysisDepth, { label: string; hint: string; typical: string }> = {
-  quick: { label: 'Rápido', hint: 'Solo los datos ya reunidos; sin consultas extra.', typical: '≈ 10 s' },
-  standard: { label: 'Estándar', hint: 'Datos en vivo, indicadores, fundamentales y noticias.', typical: '≈ 30 s' },
-  deep: { label: 'Profundo', hint: 'Más herramientas y verificaciones cruzadas del modelo.', typical: '60 s o más' },
+const DEPTH_INFO: Record<AnalysisDepth, { label: string; hint: string }> = {
+  quick: { label: 'Rápido', hint: 'Solo los datos ya reunidos; sin consultas extra.' },
+  standard: { label: 'Estándar', hint: 'Datos en vivo, indicadores, fundamentales y noticias.' },
+  deep: { label: 'Profundo', hint: 'Más herramientas, debate entre posturas y escenarios con probabilidades.' },
+}
+
+const NO_MEASURE = 'sin medición todavía con este modelo'
+
+/** Texto del estimado, siempre derivado de análisis medidos; sin ellos, lo dice. */
+function estimateText(m: MedianDuration | null): string {
+  return m ? `≈ ${formatDurationMs(m.ms)} (mediana de ${m.n} ${m.n === 1 ? 'análisis previo' : 'análisis previos'})` : NO_MEASURE
 }
 
 /** Etapas reales emitidas por el backend (`stage`), acumuladas por índice. */
-function Progress({ depth, stages, onCancel }: { depth: AnalysisDepth; stages: AnalysisProgress[]; onCancel: () => void }) {
+function Progress({ depth, stages, estimate, model, onCancel }: { depth: AnalysisDepth; stages: AnalysisProgress[]; estimate: MedianDuration | null; model: string | undefined; onCancel: () => void }) {
+  const [t0] = useState(() => Date.now())
   const [secs, setSecs] = useState(0)
   useEffect(() => {
-    const t = setInterval(() => setSecs((s) => s + 1), 1000)
+    // Se mide contra el reloj (no se cuentan ticks): una pestaña en segundo plano frena los intervalos.
+    const t = setInterval(() => setSecs(Math.floor((Date.now() - t0) / 1000)), 500)
     return () => clearInterval(t)
-  }, [])
+  }, [t0])
   const seen = stages
   const progress = stages[stages.length - 1] ?? null
   const now = progress?.stage
@@ -32,7 +42,7 @@ function Progress({ depth, stages, onCancel }: { depth: AnalysisDepth; stages: A
           Generando análisis ({DEPTH_INFO[depth].label.toLowerCase()})
           {progress ? <span className="muted small"> · paso {formatInt(progress.index)} de {formatInt(progress.total)}</span> : null}
         </strong>
-        <span className="num muted">{secs} s</span>
+        <span className="num muted" title="Tiempo transcurrido">{formatDurationMs(secs * 1000)}</span>
         <button type="button" className="btn sm" onClick={onCancel}><X aria-hidden="true" /> Cancelar</button>
       </div>
       <div className="indet" />
@@ -51,7 +61,9 @@ function Progress({ depth, stages, onCancel }: { depth: AnalysisDepth; stages: A
         {seen.length === 0 && secs >= 6
           ? 'Todavía no ha llegado ninguna etapa: este backend puede no informar del avance. '
           : ''}
-        Suele tardar {DEPTH_INFO[depth].typical}; en equipos modestos o con modelos grandes puede tardar bastante más.
+        {estimate
+          ? <>Estimado {estimateText(estimate)} con {model ?? 'este modelo'}{secs * 1000 > estimate.ms ? '; ya lo supera, pero sigue en marcha' : ''}. </>
+          : <>Duración estimada: {NO_MEASURE}. </>}
         Al cancelar se corta la conexión y el servidor deja de trabajar en el análisis.
       </p>
     </div>
@@ -66,6 +78,13 @@ export function AnalysisPanel({ summary, quote }: { summary: AssetSummary; quote
   const status = useStatus()
   const [depth, setDepth] = useState<AnalysisDepth>('standard')
   const [picked, setPicked] = useState<string | null>(null)
+  const samples = useDurationSamples(id)
+  const model = status.data?.llm.model
+  const estimates: Record<AnalysisDepth, MedianDuration | null> = {
+    quick: medianDuration(samples, model, 'quick'),
+    standard: medianDuration(samples, model, 'standard'),
+    deep: medianDuration(samples, model, 'deep'),
+  }
 
   const history = list.data ?? []
   const shown = (picked ? history.find((a) => a.id === picked) : null) ?? latest.data ?? history[0] ?? null
@@ -80,7 +99,7 @@ export function AnalysisPanel({ summary, quote }: { summary: AssetSummary; quote
             <div className="seg" role="radiogroup" aria-label="Profundidad del análisis">
               {ANALYSIS_DEPTHS.map((d) => (
                 <button key={d} type="button" role="radio" aria-checked={depth === d} aria-pressed={depth === d} onClick={() => setDepth(d)} disabled={gen.isPending} title={DEPTH_INFO[d].hint}>
-                  {DEPTH_INFO[d].label} <span className="muted tiny">{DEPTH_INFO[d].typical}</span>
+                  {DEPTH_INFO[d].label} {estimates[d] ? <span className="muted tiny">≈ {formatDurationMs(estimates[d].ms)}</span> : null}
                 </button>
               ))}
             </div>
@@ -89,11 +108,12 @@ export function AnalysisPanel({ summary, quote }: { summary: AssetSummary; quote
             <Sparkles aria-hidden="true" /> {shown ? 'Generar análisis nuevo' : 'Generar análisis'}
           </button>
         </div>
-        <p className="small muted">{DEPTH_INFO[depth].hint} Modelo: {status.data?.llm.model ?? '…'} (se cambia en Ajustes → Modelos de IA).</p>
+        <p className="small muted">{DEPTH_INFO[depth].hint} Modelo: {model ?? '…'} (se cambia en Ajustes → Modelos de IA).</p>
+        <p className="small muted" data-testid="depth-estimate">Tiempo: {estimateText(estimates[depth])}.</p>
         {llmDown ? <div className="notice warn" role="status">La IA local no está disponible{status.data?.llm.error ? `: ${status.data.llm.error}` : ''}. Arranca Ollama para generar análisis.</div> : null}
       </div>
 
-      {gen.isPending ? <Progress depth={depth} stages={gen.stages} onCancel={gen.cancel} /> : null}
+      {gen.isPending ? <Progress depth={depth} stages={gen.stages} estimate={estimates[depth]} model={model} onCancel={gen.cancel} /> : null}
       {gen.isError && !(gen.error instanceof DOMException) && gen.error.name !== 'AbortError' ? (
         <ErrorNotice error={gen.error} onRetry={() => gen.mutate(depth)} title="No se pudo generar el análisis" />
       ) : null}

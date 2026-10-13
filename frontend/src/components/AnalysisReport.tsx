@@ -10,6 +10,8 @@ import { HORIZON_HINT, HORIZON_LABEL, VERDICT_HINT, VERDICT_LABEL, symbolOf } fr
 import { analysisFreshness } from '@/lib/freshness'
 import { formatDate, formatDateTime, formatPercent, formatPrice, formatRelative, formatSigned } from '@/lib/format'
 import { sourceName } from '@/lib/sources'
+import { splitThesis } from '@/lib/analysis'
+import { MethodFooter, PositionSizingBlock, QualityNotes, Scenarios, WouldChange } from '@/components/AnalysisSections'
 import type { Quote } from '@/api/types'
 
 const SCORE_ROWS: [keyof ScoreBreakdown, string][] = [
@@ -109,6 +111,8 @@ export const AnalysisReport = memo(function AnalysisReport({ analysis: a, quote,
   const fresh = analysisFreshness(a.generatedAt)
   const k = a.keyLevels
   const opt = { currency: quote?.currency ?? null }
+  const hasChange = (a.wouldChangeIf ?? []).some((t) => t.trim() !== '')
+  const thesis = splitThesis(a.thesis, hasChange)
   return (
     <article className="report" aria-label={`Análisis de IA de ${symbolOf(a.asset)}`}>
       <div className="verdict-block">
@@ -125,6 +129,7 @@ export const AnalysisReport = memo(function AnalysisReport({ analysis: a, quote,
             <span>· Horizonte <strong>{HORIZON_LABEL[a.horizon]}</strong> <span className="muted">({HORIZON_HINT[a.horizon]})</span></span>
             <span>· Puntuación global <strong className="num">{Math.round(a.scores.overall)}</strong>/100</span>
           </div>
+          {a.horizonNote ? <p className="small muted" style={{ maxWidth: '68ch' }}>Por qué este horizonte: {a.horizonNote}</p> : null}
         </div>
       </div>
 
@@ -149,14 +154,21 @@ export const AnalysisReport = memo(function AnalysisReport({ analysis: a, quote,
             {k.resistances.length > 0 ? <div className="lvl"><span>Resistencias</span><span className="num">{k.resistances.map((t) => formatPrice(t, opt)).join(' · ')}</span></div> : null}
             {!k.entryZone && k.stopLoss === null && k.targets.length + k.supports.length + k.resistances.length === 0 ? <p className="muted small">El modelo no propuso niveles.</p> : null}
           </div>
+          {a.levelsNote ? <p className="small muted" style={{ marginTop: '0.5rem', maxWidth: '60ch' }}>{a.levelsNote}</p> : null}
           <div style={{ marginTop: '0.5rem' }}><Drift quote={quote} atAnalysis={a.priceAtAnalysis} /></div>
         </section>
       </div>
 
       <section>
         <h3>Tesis</h3>
-        <p className="report-prose">{a.thesis}</p>
+        {thesis.paragraphs.map((p, i) => <p key={i} className="report-prose">{p}</p>)}
+        {thesis.uncertainty ? (
+          <p className="small uncertainty"><strong>Incertidumbre.</strong> {thesis.uncertainty}</p>
+        ) : null}
       </section>
+
+      <Scenarios a={a} currency={opt.currency} />
+      <WouldChange items={a.wouldChangeIf} />
 
       <div className="cases">
         <section className="bull"><h3 className="up">Caso alcista</h3><ul>{a.bullCase.map((t, i) => <li key={i}>{t}</li>)}</ul></section>
@@ -172,6 +184,7 @@ export const AnalysisReport = memo(function AnalysisReport({ analysis: a, quote,
       </div>
 
       {a.strategy ? <section><h3>Estrategia</h3><p className="report-prose">{a.strategy}</p></section> : null}
+      <PositionSizingBlock ps={a.positionSizing} />
 
       <section>
         <h3>Qué datos faltan o son dudosos</h3>
@@ -181,6 +194,8 @@ export const AnalysisReport = memo(function AnalysisReport({ analysis: a, quote,
           <p className="muted small">El modelo no declaró carencias de datos.</p>
         )}
       </section>
+
+      <QualityNotes notes={a.qualityNotes} />
 
       {!compact ? (
         <section>
@@ -200,6 +215,7 @@ export const AnalysisReport = memo(function AnalysisReport({ analysis: a, quote,
 
       <footer className="row wrap tiny muted" style={{ borderTop: '1px solid var(--line)', paddingTop: '0.6rem' }}>
         <span>Modelo: <strong>{a.model}</strong></span>
+        <MethodFooter a={a} />
         <time dateTime={a.generatedAt} title={formatDateTime(a.generatedAt)}>· generado {formatRelative(a.generatedAt)} ({formatDateTime(a.generatedAt)})</time>
         {a.priceAtAnalysis !== null ? <span>· precio en ese momento {formatPrice(a.priceAtAnalysis, opt)}</span> : null}
         <span>· Análisis automatizado: no es asesoramiento financiero.</span>

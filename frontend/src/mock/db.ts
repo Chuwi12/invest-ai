@@ -1,4 +1,4 @@
-import type { Analysis, AssetId, ChatMessage, Conversation, Favorite, SearchEntry } from '@/api/types'
+import type { Analysis, AnalysisDepth, AssetId, ChatMessage, Conversation, Favorite, SearchEntry } from '@/api/types'
 import { toSummary } from './catalog'
 import { genAnalysis } from './content'
 import { entryFor } from './market'
@@ -72,16 +72,25 @@ function seed(): MockDb {
   })
 
   const analyses: MockDb['analyses'] = {}
-  const an = (id: AssetId, serial: number, hours: number) => {
+  const an = (id: AssetId, serial: number, hours: number, depth: AnalysisDepth = 'standard', legacy = false) => {
     const list = (analyses[id] ??= [])
-    list.push(genAnalysis(id, serial, new Date(Date.now() - hours * H)))
+    const a = genAnalysis(id, serial, new Date(Date.now() - hours * H), { depth })
+    if (legacy) {
+      // Análisis anterior a los campos nuevos: sin escenarios, método ni mediciones.
+      for (const k of ['levelsNote', 'scenarios', 'expectedReturnPct', 'wouldChangeIf', 'horizonNote', 'positionSizing', 'method', 'qualityNotes', 'depth', 'durationMs', 'llmCalls', 'promptTokens', 'completionTokens'] as const) delete a[k]
+      a.thesis = a.thesis.split('\n\n')[0]!
+    }
+    list.push(a)
   }
-  an('stock:AAPL', 1, 1)
-  an('stock:AAPL', 0, 49)
-  an('crypto:BTC', 0, 3)
-  an('stock:NVDA', 0, 6)
-  an('stock:TSLA', 0, 27)
-  an('stock:SAN.MC', 0, 31)
+  an('stock:AAPL', 1, 1, 'deep')
+  an('stock:AAPL', 0, 49, 'standard')
+  an('stock:AAPL', 2, 100, 'standard')
+  an('stock:AAPL', 3, 150, 'quick')
+  an('stock:AAPL', 4, 400, 'standard', true)
+  an('crypto:BTC', 0, 3, 'standard')
+  an('stock:NVDA', 0, 6, 'deep')
+  an('stock:TSLA', 0, 27, 'quick', true)
+  an('stock:SAN.MC', 0, 31, 'standard')
 
   return {
     favorites: [

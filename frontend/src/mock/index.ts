@@ -185,10 +185,11 @@ export const mockApi: Api = {
 
   async generateAnalysis(id, depth, signal) {
     // Simula la espera real del LLM (en producción son 10–60 s).
+    const t0 = Date.now()
     await sleep(depth === 'quick' ? 3500 : depth === 'deep' ? 14_000 : 7000, signal)
     const db = getDb()
     const list = (db.analyses[id] ??= [])
-    const a = genAnalysis(id, list.length + 1)
+    const a = genAnalysis(id, list.length + 1, new Date(), { depth, durationMs: Date.now() - t0 })
     list.unshift(a)
     db.analyses[id] = list.slice(0, 20)
     saveDb()
@@ -204,13 +205,14 @@ export const mockApi: Api = {
       ['llm', 'El modelo redacta el análisis', 3500],
       ['validate', 'Validando el resultado', 800],
     ]
+    const t0 = Date.now()
     for (const [i, [stage, label, ms]] of stages.entries()) {
       yield { type: 'stage', stage, label, index: i + 1, total: stages.length }
       await sleep(ms * scale, signal)
     }
     const db = getDb()
     const list = (db.analyses[id] ??= [])
-    const a = genAnalysis(id, list.length + 1)
+    const a = genAnalysis(id, list.length + 1, new Date(), { depth, durationMs: Date.now() - t0 })
     list.unshift(a)
     db.analyses[id] = list.slice(0, 20)
     saveDb()

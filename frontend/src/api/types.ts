@@ -164,6 +164,8 @@ export interface Fundamentals {
   website: string | null
   employees: number | null
   country: string | null
+  /** Moneda de las cifras monetarias de los fundamentales (capitalización, objetivos, máximo histórico…). Puede diferir de la de cotización. Ausente/null en backends antiguos. */
+  currency?: string | null
 
   marketCap: number | null
   enterpriseValue: number | null
@@ -389,6 +391,50 @@ export interface Analysis {
   priceAtAnalysis: number | null
   model: string
   generatedAt: string
+  /** Por qué faltan (o cómo se calcularon) entrada, stop y objetivos. */
+  levelsNote?: string | null
+  /** Solo `deep`; las probabilidades suman 100. */
+  scenarios?: Scenario[] | null
+  /** Σ probabilidad × rentabilidad de los escenarios, en % respecto al precio del análisis. */
+  expectedReturnPct?: number | null
+  /** Qué tendría que pasar para cambiar el veredicto. */
+  wouldChangeIf?: string[] | null
+  /** Por qué ese horizonte. */
+  horizonNote?: string | null
+  positionSizing?: PositionSizing | null
+  /** Nota de método (modelo, profundidad, llamadas, tokens, tiempo, aviso). */
+  method?: string | null
+  /** Avisos de calidad del propio análisis (descartes, cifras sin verificar…); no son carencias de datos. */
+  qualityNotes?: string[] | null
+  depth?: AnalysisDepth | null
+  durationMs?: number | null
+  llmCalls?: number | null
+  promptTokens?: number | null
+  completionTokens?: number | null
+}
+
+export type ScenarioKind = 'bullish' | 'base' | 'bearish'
+
+export interface Scenario {
+  kind: ScenarioKind
+  /** 0–100. */
+  probability: number
+  description: string
+  targetPrice: number | null
+  /** Qué nivel de los datos se usó como objetivo. */
+  targetBasis: string | null
+  /** % desde el precio del análisis hasta `targetPrice`. */
+  returnPct: number | null
+}
+
+export interface PositionSizing {
+  /** % máximo orientativo de la cartera. */
+  maxPortfolioPct: number
+  riskPerTradePct: number | null
+  stopDistancePct: number | null
+  atrPct: number | null
+  volatility30d: number | null
+  rationale: string
 }
 
 // --- Chat ------------------------------------------------------------------------------------

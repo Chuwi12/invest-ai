@@ -18,6 +18,34 @@ pub fn price(x: f64) -> String {
     }
 }
 
+/// Precio para el usuario: en castellano usa coma decimal y punto de millares (81.059,79); en
+/// inglés es igual que `price`. Solo para texto que ve el usuario: el contexto del modelo usa `price`.
+pub fn price_l(lang: crate::lang::Lang, x: f64) -> String {
+    let p = price(x);
+    if !matches!(lang, crate::lang::Lang::Es) || !x.is_finite() {
+        return p;
+    }
+    let (neg, body) = p.strip_prefix('-').map_or((false, p.as_str()), |b| (true, b));
+    let (int, frac) = body.split_once('.').map_or((body, None), |(i, f)| (i, Some(f)));
+    let mut grouped = String::new();
+    for (k, c) in int.chars().enumerate() {
+        if k > 0 && (int.len() - k) % 3 == 0 && int.len() > 4 {
+            grouped.push('.');
+        }
+        grouped.push(c);
+    }
+    format!("{}{}{}", if neg { "-" } else { "" }, grouped, frac.map(|f| format!(",{f}")).unwrap_or_default())
+}
+
+/// Fecha corta legible: «12 oct 2026» / «12 Oct 2026».
+pub fn date_l(lang: crate::lang::Lang, d: chrono::NaiveDate) -> String {
+    use chrono::Datelike;
+    const ES: [&str; 12] = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+    const EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let m = d.month0() as usize;
+    format!("{} {} {}", d.day(), if matches!(lang, crate::lang::Lang::Es) { ES[m] } else { EN[m] }, d.year())
+}
+
 /// Número genérico con 2 decimales (1 si ≥ 100) sin ceros finales.
 pub fn num(x: f64) -> String {
     if !x.is_finite() {
@@ -74,6 +102,16 @@ fn trim_zeros(s: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn spanish_prices_use_dot_thousands_and_decimal_comma() {
+        use crate::lang::Lang;
+        assert_eq!(super::price_l(Lang::Es, 81059.79), "81.059,79");
+        assert_eq!(super::price_l(Lang::Es, 2057.45), "2057,45");
+        assert_eq!(super::price_l(Lang::Es, 1234567.0), "1.234.567");
+        assert_eq!(super::price_l(Lang::Es, 0.5), "0,5");
+        assert_eq!(super::price_l(Lang::En, 81059.79), "81059.79");
+    }
+
     use super::*;
 
     #[test]

@@ -263,3 +263,29 @@ export function formatDelay(secs: number | null | undefined): string {
   if (secs < 3600) return `Retraso de ${Math.round(secs / 60)} min`
   return `Retraso de ${Math.round(secs / 3600)} h`
 }
+
+export interface FundamentalsCurrency {
+  currency: string | null
+  /** true si se usa la del summary porque los fundamentales no traen la suya. */
+  fallback: boolean
+  /** Texto de tooltip cuando la moneda no es la propia de los fundamentales. */
+  note: string | undefined
+}
+
+/**
+ * Moneda de las cifras monetarias de los fundamentales: la suya (`fundamentals.currency`) y, si falta, la del
+ * summary del activo, avisando de que es una deducción (puede diferir de la moneda de cotización).
+ */
+export function fundamentalsCurrency(
+  f: { currency?: string | null | undefined },
+  summaryCurrency: string | null | undefined,
+): FundamentalsCurrency {
+  const own = f.currency?.trim()
+  if (own) return { currency: own, fallback: false, note: currencyNote(own) }
+  const cur = summaryCurrency?.trim() || null
+  return {
+    currency: cur,
+    fallback: true,
+    note: cur ? `Moneda tomada del resumen del activo (${cur}): el proveedor no indicó la de los fundamentales.` : undefined,
+  }
+}

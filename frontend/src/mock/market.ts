@@ -391,7 +391,8 @@ export function genFundamentals(id: AssetId): Fundamentals | null {
   const price = currentPrice(id)
   const r = rngFor(id, 'fund')
   const asOf = new Date().toISOString()
-  const base = { ...EMPTY_FUNDAMENTALS, asOf, sources: [cls === 'crypto' ? 'coingecko' : 'yahoo'] }
+  // Como el real: CoinGecko cifra en USD (la cotización de Binance va en USDT); Yahoo, en la moneda financiera.
+  const base = { ...EMPTY_FUNDAMENTALS, currency: cls === 'crypto' ? 'USD' : entry.currency, asOf, sources: [cls === 'crypto' ? 'coingecko' : 'yahoo'] }
 
   if (cls === 'stock') {
     const shares = sharesFor(id)

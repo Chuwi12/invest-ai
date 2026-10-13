@@ -421,3 +421,23 @@ textarea { resize: vertical; width: 100%; }
   .asset-head h1 { font-size: 1.6rem; }
   .chart-box { height: 20rem; }
 }
+
+/* ------------------------------------------------- escenarios y notas del informe */
+.scen-bar { display: flex; height: 1.5rem; gap: 2px; border-radius: 3px; overflow: hidden; }
+.scen { display: flex; align-items: center; justify-content: center; min-width: 0; flex-basis: 0; font-size: 0.75rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--bg); }
+.scen.bullish { background: var(--up); }
+.scen.base { background: var(--muted); }
+.scen.bearish { background: var(--down); }
+.scen-list { display: grid; gap: 0.2rem; }
+.scen-list li { padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+.scen-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; margin-bottom: 0.15rem; }
+.scen-dot { width: 0.6rem; height: 0.6rem; border-radius: 2px; align-self: center; }
+.scen-dot.bullish { background: var(--up); }
+.scen-dot.base { background: var(--muted); }
+.scen-dot.bearish { background: var(--down); }
+.uncertainty { color: var(--ink-2); border-left: 2px solid var(--line-strong); padding-left: 0.7rem; max-width: 68ch; margin-top: 0.4rem; }
+.quality { color: var(--muted); border-top: 1px dashed var(--line); padding-top: 0.5rem; }
+.quality p { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.15rem; }
+.quality svg { width: 0.85rem; height: 0.85rem; }
+.quality ul { list-style: none; padding: 0; margin: 0; }
+.quality li { padding: 0.1rem 0; }

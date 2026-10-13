@@ -46,6 +46,7 @@ use crate::{
     config::AiConfig,
     context::{ContextOptions, NewsRegistry, Sections, build_context, build_context_sections},
     fidelity::{Segment, extract_numbers},
+    fmt,
     lang::{Lang, tr},
     models::{ModelCaps, ModelManager},
     ollama::{ChatParams, OllamaClient, WireMessage},
@@ -465,7 +466,7 @@ impl AnalysisEngine {
             analysis.position_sizing = levels::sizing(plan, &snap, &card, analysis.verdict, lang);
             if let Some(sc) = analysis.scenarios.as_mut() {
                 price_scenarios(sc, plan, analysis_price(&snap), lang);
-                explain_scenarios(sc, &snap, lang);
+                quality_notes.extend(explain_scenarios(sc, plan, &snap, lang));
                 analysis.expected_return_pct = expected_return(sc);
             }
         } else {
@@ -742,38 +743,72 @@ fn price_scenarios(sc: &mut [Scenario], plan: &LevelPlan, price: Option<f64>, la
         };
         if let Some(l) = l {
             s.target_price = Some(l.value);
-            s.target_basis = Some(l.basis);
+            s.target_basis = Some(l.describe(lang));
             s.return_pct = price.map(|p| ((l.value / p - 1.0) * 1000.0).round() / 10.0);
         }
     }
 }
 
 /// Antepone a cada escenario la frase de base del precio, generada en Rust (de dónde sale el
-/// número, con proveedor y fecha), y conserva el texto del modelo solo si todas sus cifras son el
-/// precio objetivo, el precio de partida o la variación calculada: el modelo redacta el porqué.
-fn explain_scenarios(sc: &mut [Scenario], snap: &AssetSnapshot, lang: Lang) {
-    let src = snap
-        .quote
-        .as_ref()
-        .map(|q| format!("{}, {}", q.source, q.timestamp.format("%Y-%m-%d")))
-        .unwrap_or_else(|| snap.generated_at.format("%Y-%m-%d").to_string());
+/// número, con proveedor y fecha), y conserva del texto del modelo solo las frases cuyas cifras son
+/// las de ESE escenario (su precio objetivo, los niveles de los que sale, el precio de partida, la
+/// variación calculada o su probabilidad): el modelo redacta el porqué, no los números.
+/// Devuelve las notas de calidad de lo descartado.
+fn explain_scenarios(sc: &mut [Scenario], plan: &LevelPlan, snap: &AssetSnapshot, lang: Lang) -> Vec<String> {
+    let src = levels::source_label(snap, lang);
     let start = analysis_price(snap);
+    let lv = levels::scenario_levels(plan, lang);
+    let mut notes = Vec::new();
     for s in sc.iter_mut() {
-        let (Some(target), Some(basis)) = (s.target_price, s.target_basis.clone()) else { continue };
-        let allowed: Vec<f64> = [Some(target), start, s.return_pct, s.return_pct.map(f64::abs)].into_iter().flatten().collect();
+        let level = match s.kind.as_str() {
+            "bullish" => lv.bullish.clone(),
+            "base" => lv.base.clone(),
+            _ => lv.bearish.clone(),
+        };
+        let (Some(target), Some(level)) = (s.target_price, level) else { continue };
+        let allowed: Vec<f64> = level
+            .refs
+            .iter()
+            .copied()
+            .chain([target, f64::from(s.probability)])
+            .chain(start)
+            .chain(s.return_pct)
+            .chain(s.return_pct.map(f64::abs))
+            .collect();
         let matches = |v: f64| allowed.iter().any(|a| (a - v).abs() <= (a.abs() * 0.0006).max(0.06));
-        let model_ok = extract_numbers(&s.description).iter().filter(|n| !n.exempt).all(|n| matches(n.value.abs()) || matches(n.value));
-        let base = tr!(
-            lang,
-            "Precio objetivo {} = {} ({}).",
-            "Target price {} = {} ({}).",
-            crate::fmt::price(target),
-            basis,
-            src
-        );
-        let why = s.description.trim().to_string();
-        s.description = if model_ok && !why.is_empty() { format!("{base} {why}") } else { base };
+        let base = if level.derived {
+            tr!(lang, "Precio {} = {} ({}).", "Price {} = {} ({}).", fmt::price_l(lang, target), level.basis, src)
+        } else {
+            tr!(lang, "Precio = {} ({}).", "Price = {} ({}).", level.describe(lang), src)
+        };
+        let mut kept = Vec::new();
+        let mut dropped = 0;
+        for sent in s.description.split_inclusive(". ").map(str::trim).filter(|x| !x.is_empty()) {
+            if extract_numbers(sent).iter().filter(|n| !n.exempt).all(|n| matches(n.value.abs()) || matches(n.value)) {
+                kept.push(sent);
+            } else {
+                dropped += 1;
+            }
+        }
+        if dropped > 0 {
+            let kind = match s.kind.as_str() {
+                "bullish" => lang.t("alcista", "bullish"),
+                "base" => lang.t("base", "base"),
+                _ => lang.t("bajista", "bearish"),
+            };
+            notes.push(tr!(
+                lang,
+                "Escenario {}: {} frase(s) del modelo descartada(s) por citar cifras que no son las de este escenario (precio {}).",
+                "Scenario {}: {} model sentence(s) dropped for citing figures that are not this scenario's (price {}).",
+                kind,
+                dropped,
+                fmt::price_l(lang, target)
+            ));
+        }
+        s.description = if kept.is_empty() { base } else { format!("{base} {}", kept.join(" ")) };
+        s.target_basis = Some(level.describe(lang));
     }
+    notes
 }
 
 fn expected_return(sc: &[Scenario]) -> Option<f64> {
@@ -972,37 +1007,68 @@ pub(crate) fn parse_json<T: DeserializeOwned>(content: &str) -> std::result::Res
 #[cfg(test)]
 mod scenario_text_tests {
     use super::*;
-    use crate::fixture;
+    use crate::{analysis::levels::Level, fixture};
 
-    fn sc(desc: &str) -> Vec<Scenario> {
+    /// Plan como el de BTC: soporte 81827.38, 2.º soporte SMA50 81059.79, ATR 2057.45.
+    fn btc_plan() -> LevelPlan {
+        let lv = |value: f64, basis: &str| Level { value, basis: basis.into(), refs: vec![value], derived: false };
+        LevelPlan {
+            price: 82_000.0,
+            atr: Some(2057.45),
+            supports: vec![lv(81_827.38, "banda de Bollinger inferior"), lv(81_059.79, "SMA50")],
+            upside: vec![lv(84_078.75, "SMA20"), lv(86_330.11, "banda de Bollinger superior")],
+            ..Default::default()
+        }
+    }
+
+    fn bearish(desc: &str) -> Vec<Scenario> {
         vec![Scenario {
             kind: "bearish".into(),
             probability: 30.0,
             description: desc.into(),
-            target_price: Some(81059.79),
-            target_basis: Some("SMA50".into()),
-            return_pct: Some(-1.7),
+            target_price: Some(81_059.79),
+            target_basis: None,
+            return_pct: Some(-1.1),
         }]
     }
 
+    fn run(desc: &str) -> (Vec<Scenario>, Vec<String>) {
+        let mut snap = fixture::stock_snapshot();
+        snap.quote.as_mut().unwrap().price = 82_000.0;
+        snap.quote.as_mut().unwrap().source = "Binance".into();
+        snap.quote.as_mut().unwrap().timestamp = "2026-10-12T10:00:00Z".parse().unwrap();
+        let mut sc = bearish(desc);
+        let notes = explain_scenarios(&mut sc, &btc_plan(), &snap, Lang::Es);
+        (sc, notes)
+    }
+
     #[test]
-    fn rust_states_the_price_basis_and_model_text_is_kept_only_if_its_figures_match() {
-        let snap = fixture::stock_snapshot();
-        let mut ok = sc("Si el MACD sigue negativo, el precio cedería hasta 81059.79 (-1.7%).");
-        explain_scenarios(&mut ok, &snap, Lang::Es);
-        assert!(ok[0].description.starts_with("Precio objetivo 81059.79 = SMA50 (fixture, "), "{}", ok[0].description);
-        assert!(ok[0].description.contains("Si el MACD sigue negativo"));
+    fn btc_case_support_figure_foreign_to_the_scenario_is_dropped_and_noted() {
+        // Caso real: el precio objetivo es la SMA50 pero el modelo habla del soporte 79769.92.
+        let (sc, notes) = run("El precio podría caer hacia el soporte 79769.92.");
+        let d = &sc[0].description;
+        assert_eq!(d, "Precio = SMA50 81.059,79 (Binance, 12 oct 2026).", "{d}");
+        assert!(!d.contains("79769"));
+        assert_eq!(sc[0].target_basis.as_deref(), Some("SMA50 81.059,79"));
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("bajista") && notes[0].contains("descartada"), "{notes:?}");
+    }
 
-        // El modelo cita otro nivel (79769.92) distinto del precio del escenario: se descarta su frase.
-        let mut bad = sc("El precio podría caer hacia el soporte 79769.92.");
-        explain_scenarios(&mut bad, &snap, Lang::Es);
-        assert!(bad[0].description.starts_with("Precio objetivo 81059.79 = SMA50"));
-        assert!(!bad[0].description.contains("79769.92"), "{}", bad[0].description);
+    #[test]
+    fn coherent_model_text_is_kept_after_the_rust_basis() {
+        let (sc, notes) = run("Si el MACD sigue negativo, el precio cedería hasta 81059.79 (-1.1%). Dependería de que la volatilidad persista.");
+        let d = &sc[0].description;
+        assert!(d.starts_with("Precio = SMA50 81.059,79 (Binance, 12 oct 2026). Si el MACD"), "{d}");
+        assert!(d.contains("volatilidad persista"));
+        assert!(notes.is_empty(), "{notes:?}");
+    }
 
-        // Sin cifras, el porqué cualitativo se conserva.
-        let mut plain = sc("Si el MACD sigue negativo y la volatilidad persiste.");
-        explain_scenarios(&mut plain, &snap, Lang::Es);
-        assert!(plain[0].description.contains("volatilidad persiste"));
+    #[test]
+    fn only_the_incoherent_sentence_is_dropped() {
+        let (sc, notes) = run("Si el MACD sigue negativo, cedería. Caería a 79769.92 sin remedio. Habría ventas por miedo.");
+        let d = &sc[0].description;
+        assert!(d.contains("MACD") && d.contains("ventas por miedo") && !d.contains("79769"), "{d}");
+        assert_eq!(notes.len(), 1);
     }
 }
 

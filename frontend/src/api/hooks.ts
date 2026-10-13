@@ -186,6 +186,19 @@ export function useAnalyses(id: AssetId, enabled = true) {
   })
 }
 
+/**
+ * Análisis previos con los que estimar cuánto tarda un análisis: el histórico del activo más los últimos del panel
+ * (de otros activos, con el mismo modelo y profundidad el tiempo es comparable). Sin duplicados por `id`.
+ */
+export function useDurationSamples(id: AssetId): Analysis[] {
+  const hist = useAnalyses(id)
+  const dash = useDashboard()
+  const out = new Map<string, Analysis>()
+  for (const a of hist.data ?? []) out.set(a.id, a)
+  for (const a of dash.data?.latestAnalyses ?? []) if (!out.has(a.id)) out.set(a.id, a)
+  return [...out.values()]
+}
+
 export function useSnapshot(id: AssetId, enabled = true) {
   return useQuery({
     queryKey: qk.snapshot(id),
