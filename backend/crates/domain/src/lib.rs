@@ -393,6 +393,10 @@ pub struct Fundamentals {
     pub website: Option<String>,
     pub employees: Option<u64>,
     pub country: Option<String>,
+    /// Moneda ISO de las cifras en precio (capitalización, objetivos de analistas, máximo
+    /// histórico). Las cuentas anuales pueden venir en otra (`extra.financialCurrency`).
+    #[serde(default)]
+    pub currency: Option<String>,
 
     // Valoración
     pub market_cap: Option<f64>,

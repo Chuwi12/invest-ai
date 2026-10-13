@@ -175,6 +175,7 @@ pub fn fundamentals_from_json(
         sector: text(&profile["finnhubIndustry"]),
         website: text(&profile["weburl"]),
         country: text(&profile["country"]),
+        currency: text(&profile["currency"]),
         market_cap: millions(&profile["marketCapitalization"]),
         shares_outstanding: millions(&profile["shareOutstanding"]),
         pe_trailing: num(&m["peTTM"]).or_else(|| num(&m["peBasicExclExtraTTM"])),
@@ -352,11 +353,12 @@ mod tests {
 
     #[test]
     fn fundamentals_units() {
-        let profile = json!({"country":"US","finnhubIndustry":"Technology","marketCapitalization":3000000.0,"name":"Apple Inc","shareOutstanding":15000.0,"weburl":"https://www.apple.com/"});
+        let profile = json!({"country":"US","currency":"USD","finnhubIndustry":"Technology","marketCapitalization":3000000.0,"name":"Apple Inc","shareOutstanding":15000.0,"weburl":"https://www.apple.com/"});
         let metric = json!({"metric":{"peTTM":30.5,"netProfitMarginTTM":24.0,"roeTTM":150.0,"dividendYieldIndicatedAnnual":0.5,"52WeekHigh":280.0}});
         let rec = json!([{"buy":20,"hold":10,"period":"2026-10-01","sell":1,"strongBuy":10,"strongSell":0}]);
         let f = fundamentals_from_json(&profile, Some(&metric), Some(&rec));
         assert_eq!(f.market_cap, Some(3.0e12));
+        assert_eq!(f.currency.as_deref(), Some("USD"));
         assert_eq!(f.shares_outstanding, Some(1.5e10));
         assert!((f.profit_margin.unwrap() - 0.24).abs() < 1e-12);
         assert!((f.roe.unwrap() - 1.5).abs() < 1e-12);

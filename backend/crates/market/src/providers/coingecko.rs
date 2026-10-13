@@ -372,6 +372,8 @@ pub fn parse_coin(text: &str) -> PResult<Fundamentals> {
             .as_str()
             .filter(|s| !s.is_empty())
             .map(str::to_string),
+        // Todas las cifras se piden en la columna `usd` de `market_data`.
+        currency: Some("USD".into()),
         market_cap: usd("market_cap"),
         fully_diluted_valuation: usd("fully_diluted_valuation"),
         circulating_supply: num(&m["circulating_supply"]),
@@ -485,6 +487,7 @@ mod tests {
         assert_eq!(f.website.as_deref(), Some("http://www.bitcoin.org"));
         assert!(f.description.as_deref().unwrap().starts_with("Bitcoin is"));
         assert_eq!(f.sources, ["coingecko"]);
+        assert_eq!(f.currency.as_deref(), Some("USD"));
         assert_eq!(f.as_of.unwrap().to_rfc3339(), "2026-10-11T09:16:49+00:00");
         assert_eq!(f.extra["marketCapRank"], 1);
     }

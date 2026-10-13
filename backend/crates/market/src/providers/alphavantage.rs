@@ -219,6 +219,7 @@ pub fn parse_overview(v: &Value) -> Fundamentals {
         sector: text(&v["Sector"]),
         industry: text(&v["Industry"]),
         country: text(&v["Country"]),
+        currency: text(&v["Currency"]),
         market_cap: num(&v["MarketCapitalization"]),
         enterprise_value: None,
         pe_trailing: num(&v["PERatio"]),
@@ -332,9 +333,10 @@ mod tests {
 
     #[test]
     fn overview_ignores_none_strings() {
-        let v = json!({"Symbol":"X","Description":"Una empresa","Sector":"TECHNOLOGY","MarketCapitalization":"1000000","PERatio":"None","Beta":"1.2","DividendYield":"0.005","LatestQuarter":"2026-06-30"});
+        let v = json!({"Symbol":"X","Description":"Una empresa","Sector":"TECHNOLOGY","Currency":"USD","MarketCapitalization":"1000000","PERatio":"None","Beta":"1.2","DividendYield":"0.005","LatestQuarter":"2026-06-30"});
         let f = parse_overview(&v);
         assert_eq!(f.market_cap, Some(1_000_000.0));
+        assert_eq!(f.currency.as_deref(), Some("USD"));
         assert_eq!(f.pe_trailing, None);
         assert_eq!(f.beta, Some(1.2));
         assert_eq!(f.as_of.unwrap().to_rfc3339(), "2026-06-30T00:00:00+00:00");

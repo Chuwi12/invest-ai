@@ -144,6 +144,7 @@ pub fn fundamentals_from_json(
             .and_then(|e| e.parse().ok())
             .or_else(|| p["fullTimeEmployees"].as_u64()),
         country: text(&p["country"]),
+        currency: text(&p["currency"]),
         market_cap: num(&p["marketCap"]),
         enterprise_value: num(&m["enterpriseValueTTM"]),
         pe_trailing: num(&r["priceToEarningsRatioTTM"]),
@@ -187,11 +188,12 @@ mod tests {
     #[test]
     fn fundamentals_do_not_invent_as_of() {
         let f = fundamentals_from_json(
-            &json!({"sector":"Technology","marketCap":1.0e12,"beta":1.2,"fullTimeEmployees":"164000"}),
+            &json!({"sector":"Technology","currency":"USD","marketCap":1.0e12,"beta":1.2,"fullTimeEmployees":"164000"}),
             Some(&json!({"priceToEarningsRatioTTM":30.0,"netProfitMarginTTM":0.25})),
             None,
         );
         assert_eq!(f.employees, Some(164_000));
+        assert_eq!(f.currency.as_deref(), Some("USD"));
         assert_eq!(f.pe_trailing, Some(30.0));
         assert_eq!(f.profit_margin, Some(0.25));
         assert!(f.as_of.is_none());

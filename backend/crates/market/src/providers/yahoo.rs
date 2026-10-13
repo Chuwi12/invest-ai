@@ -955,6 +955,13 @@ pub fn parse_quote_summary(text: &str, now: DateTime<Utc>) -> PResult<Fundamenta
         website: ap["website"].as_str().map(str::to_string),
         employees: ap["fullTimeEmployees"].as_u64(),
         country: ap["country"].as_str().map(str::to_string),
+        // Moneda de cotización: la de la capitalización y los objetivos de analistas.
+        currency: price["currency"]
+            .as_str()
+            .or_else(|| sd["currency"].as_str())
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string),
 
         market_cap: first_some(&[raw(&price["marketCap"]), raw(&sd["marketCap"])]),
         enterprise_value: raw(&ks["enterpriseValue"]),
@@ -1052,7 +1059,10 @@ pub fn parse_quote_summary(text: &str, now: DateTime<Utc>) -> PResult<Fundamenta
     extra("averageVolume", raw(&sd["averageVolume"]).map(|x| json!(x)));
     extra(
         "financialCurrency",
-        price["currency"].as_str().map(|s| json!(s)),
+        fd["financialCurrency"]
+            .as_str()
+            .filter(|c| !c.is_empty())
+            .map(|s| json!(s)),
     );
     extra(
         "category",
@@ -1323,6 +1333,22 @@ mod tests {
         assert_eq!(f.extra.get("recommendationKey"), Some(&json!("buy")));
         assert_eq!(f.sources, vec!["yahoo"]);
         assert!(f.top_holdings.is_empty());
+        assert_eq!(f.currency.as_deref(), Some("USD"));
+        assert_eq!(f.extra.get("financialCurrency"), Some(&json!("USD")));
+    }
+
+    #[test]
+    fn fundamentals_currency_distinguishes_trading_and_financial() {
+        // ADR: cotiza en USD pero publica cuentas en TWD.
+        let t = r#"{"quoteSummary":{"error":null,"result":[{"price":{"currency":"USD","marketCap":{"raw":5.0e11}},"financialData":{"financialCurrency":"TWD","totalRevenue":{"raw":2.0e12}}}]}}"#;
+        let f = parse_quote_summary(t, Utc::now()).unwrap();
+        assert_eq!(f.currency.as_deref(), Some("USD"));
+        assert_eq!(f.extra.get("financialCurrency"), Some(&json!("TWD")));
+        // Sin moneda en la respuesta: no se inventa.
+        let t = r#"{"quoteSummary":{"error":null,"result":[{"price":{"marketCap":{"raw":5.0e11}}}]}}"#;
+        let f = parse_quote_summary(t, Utc::now()).unwrap();
+        assert_eq!(f.currency, None);
+        assert!(!f.extra.contains_key("financialCurrency"));
     }
 
     #[test]
