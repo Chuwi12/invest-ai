@@ -834,6 +834,9 @@ pub struct ChatMessage {
     pub tool_calls: Vec<ToolCallRecord>,
     /// Si el asistente emitió un veredicto estructurado en este mensaje.
     pub analysis: Option<Analysis>,
+    /// `true` si la respuesta se cortó por un error a mitad de generación (el texto es parcial).
+    #[serde(default)]
+    pub truncated: bool,
     pub created_at: DateTime<Utc>,
 }
 

@@ -458,6 +458,8 @@ export interface ChatMessage {
   toolCalls: ToolCallRecord[]
   /** Veredicto estructurado emitido en este mensaje. */
   analysis: Analysis | null
+  /** true si un error cortó la respuesta: el texto es parcial. Ausente en backends antiguos. */
+  truncated?: boolean
   createdAt: string
 }
 
@@ -687,13 +689,15 @@ export type PullEvent =
 
 // --- Procedencia del histórico y progreso del análisis ----------------------------------------
 
-/** Velas + procedencia (cabeceras `X-Data-Source`, `X-Data-Source-Url`, `X-Data-As-Of`). */
+/** Velas + procedencia (cabeceras `X-Data-Source`, `X-Data-Source-Url`, `X-Data-As-Of`, `X-Data-Interval`). */
 export interface HistoryResult {
   candles: Candle[]
   /** null si el backend no informa del proveedor. */
   source: string | null
   sourceUrl: string | null
   asOf: string | null
+  /** Intervalo realmente servido (`X-Data-Interval`); distinto del pedido si el proveedor subió de intervalo. */
+  interval?: Interval | null
 }
 
 /** Eventos de `POST /assets/{id}/analysis/stream` (SSE). */

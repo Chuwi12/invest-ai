@@ -167,6 +167,8 @@ pub struct NewMessage<'a> {
     pub model: Option<&'a str>,
     pub prompt_tokens: Option<u32>,
     pub completion_tokens: Option<u32>,
+    /// Respuesta cortada por un error: el texto es parcial.
+    pub truncated: bool,
     pub created_at_ms: i64,
 }
 
@@ -197,8 +199,8 @@ pub async fn insert_message(db: &SqlitePool, m: &NewMessage<'_>) -> ApiResult<()
     let mut tx = db.begin().await?;
     sqlx::query(
         "INSERT INTO messages (id, conversation_id, role, content, tool_calls, analysis, model,
-                               prompt_tokens, completion_tokens, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                               prompt_tokens, completion_tokens, truncated, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )
     .bind(m.id)
     .bind(m.conversation_id)
@@ -209,6 +211,7 @@ pub async fn insert_message(db: &SqlitePool, m: &NewMessage<'_>) -> ApiResult<()
     .bind(m.model)
     .bind(m.prompt_tokens)
     .bind(m.completion_tokens)
+    .bind(m.truncated)
     .bind(m.created_at_ms)
     .execute(&mut *tx)
     .await?;
@@ -229,6 +232,7 @@ struct MessageRow {
     content: String,
     tool_calls: String,
     analysis: Option<String>,
+    truncated: bool,
     created_at: i64,
 }
 
@@ -243,12 +247,13 @@ impl TryFrom<MessageRow> for ChatMessage {
             content: r.content,
             tool_calls: serde_json::from_str(&r.tool_calls)?,
             analysis: r.analysis.as_deref().map(serde_json::from_str).transpose()?,
+            truncated: r.truncated,
             created_at: dt_from_ms(r.created_at),
         })
     }
 }
 
-const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, tool_calls, analysis, created_at";
+const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, tool_calls, analysis, truncated, created_at";
 
 /// Todos los mensajes, en orden cronológico.
 pub async fn messages(db: &SqlitePool, conversation_id: &str) -> ApiResult<Vec<ChatMessage>> {

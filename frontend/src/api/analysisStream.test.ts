@@ -66,6 +66,12 @@ describe('httpApi.history (procedencia en cabeceras)', () => {
   })
   it('sin cabeceras la procedencia es null (no se deduce)', async () => {
     vi.stubGlobal('fetch', async () => new Response('[]', { status: 200 }))
-    expect(await httpApi.history('stock:AAPL', '1y')).toMatchObject({ source: null, sourceUrl: null, asOf: null })
+    expect(await httpApi.history('stock:AAPL', '1y')).toMatchObject({ source: null, sourceUrl: null, asOf: null, interval: null })
+  })
+  it('lee X-Data-Interval (intervalo realmente servido) e ignora valores desconocidos', async () => {
+    vi.stubGlobal('fetch', async () => new Response('[]', { status: 200, headers: { 'x-data-interval': '5m' } }))
+    expect((await httpApi.history('crypto:BTC', '1d', '1m')).interval).toBe('5m')
+    vi.stubGlobal('fetch', async () => new Response('[]', { status: 200, headers: { 'x-data-interval': 'raro' } }))
+    expect((await httpApi.history('crypto:BTC', '1d', '1m')).interval).toBeNull()
   })
 })

@@ -10,15 +10,15 @@ La tabla resumen está al principio; el detalle, abajo en el orden en que se con
 
 | Impacto | Id | Fichero:línea | Qué | Estado |
 |---|---|---|---|---|
-| Alto | R-01 | market/providers/binance.rs:150 | Histórico cripto con rango/intervalo > 1000 velas devuelve el tramo viejo (5y/1d acaba en 2024) | VERIFICADO |
-| Medio | R-02 | market/indicators.rs:191 | Vol. anualizada ×1,20 en ASX/NZX/Tadawul (se detecta «fin de semana») | VERIFICADO |
-| Medio | R-05 | ai/scoring.rs:520 | FCF yield mezcla moneda financiera y de cotización (ADRs) | VERIFICADO (lectura) |
-| Bajo | R-03 | market/indicators.rs:327 | Base de rendimientos desplazada una sesión al cruzar el cambio EST/EDT | VERIFICADO |
-| Bajo | R-04 | market/indicators.rs:424 | Volumen relativo con vela parcial dentro de su media | VERIFICADO |
-| Bajo | R-06 | market/realtime.rs:437 | Referencia de cambio WS no se renueva | SOSPECHA |
-| Bajo | R-07 | server/routes/analysis.rs:97 | Profundidad ignorada al unirse; entrada HUB tras panic | SOSPECHA |
-| Bajo | R-08 | server/routes/chat.rs:232 | Respuesta parcial guardada como completa | SOSPECHA |
-| Bajo | R-09 | ai/scoring.rs (debt_equity_ratio) | Doble división de D/E > 25x | SOSPECHA |
+| Alto | R-01 | market/providers/binance.rs:150 | Histórico cripto con rango/intervalo > 1000 velas devuelve el tramo viejo (5y/1d acaba en 2024) | ARREGLADO |
+| Medio | R-02 | market/indicators.rs:191 | Vol. anualizada ×1,20 en ASX/NZX/Tadawul (se detecta «fin de semana») | ARREGLADO |
+| Medio | R-05 | ai/scoring.rs:520 | FCF yield mezcla moneda financiera y de cotización (ADRs) | ARREGLADO |
+| Bajo | R-03 | market/indicators.rs:327 | Base de rendimientos desplazada una sesión al cruzar el cambio EST/EDT | ARREGLADO |
+| Bajo | R-04 | market/indicators.rs:424 | Volumen relativo con vela parcial dentro de su media | ARREGLADO |
+| Bajo | R-06 | market/realtime.rs:437 | Referencia de cambio WS no se renueva | ARREGLADO |
+| Bajo | R-07 | server/routes/analysis.rs:97 | Profundidad ignorada al unirse; entrada HUB tras panic | DESCARTADO/diseño |
+| Bajo | R-08 | server/routes/chat.rs:232 | Respuesta parcial guardada como completa | ARREGLADO |
+| Bajo | R-09 | ai/scoring.rs (debt_equity_ratio) | Doble división de D/E > 25x | ARREGLADO |
 
 
 ## Hallazgos (detalle)
@@ -51,6 +51,8 @@ q.push(("limit", want.to_string()));      // sin startTime: Binance devuelve las
 // y para rangos que necesiten > 1000 velas, subir al siguiente intervalo con coerce_interval()
 ```
 
+- **Estado: ARREGLADO** — `binance.rs::history` ya no manda `startTime`: pide las últimas velas con `endTime` hacia atrás, paginando de 1000 en 1000 (`plan_history`, tope `MAX_KLINES` = 5 páginas); si el intervalo pedido necesitaría más, sube de intervalo (1m→5m, etc.) y lo comunica en la cabecera `X-Data-Interval` (`provenance::infer_interval`, la UI avisa si difiere del pedido). Coste: un rango largo puede costar hasta 5 peticiones a Binance (con caché de histórico). Tests: `binance::tests::history_ends_at_current_candle_and_covers_range` (Binance simulado con su semántica real; en rojo acababa en 2024-07-08), `plan_raises_interval_when_too_many_candles`, `provenance::tests::infers_the_served_interval_from_candle_spacing`, `server/tests/provenance.rs`, `frontend api/analysisStream.test.ts`; prueba real `live.rs::binance_history_ends_now` (5y/1d: 1829 velas hasta hoy; 3mo/1h: 2210 velas; 1d/1m: 1442 velas).
+
 ### R-02 — MEDIO — `periods_per_year` toma como «fin de semana» las velas de ASX/NZX (horario de verano) y de Tadawul: volatilidad inflada ×1,20 (VERIFICADO)
 
 - `backend/crates/market/src/indicators.rs:191-211`. Cuenta velas con día UTC sábado/domingo en las últimas 60; si > 10 % usa 365 en vez de 252.
@@ -70,6 +72,8 @@ let per_year = (tail.len() - 1) as f64 / span_days * 365.25;   // ~7 vel./sem. c
 if per_year > 300.0 { 365.0 } else { 252.0 }
 ```
 
+- **Estado: ARREGLADO** — `periods_per_year` mide la densidad real de velas (velas/día natural × 365,25; > 300 → 365, si no 252) en vez de contar días UTC de fin de semana. Test `indicators::tests::periods_per_year_ignores_utc_weekend_dating_of_exchange_sessions` (ASX-like daba 365).
+
 ### R-03 — BAJO — Rendimientos de calendario usan como base el cierre de la sesión anterior cuando el huso EST/EDT difiere (VERIFICADO)
 
 - `indicators.rs:327-331` (`at_or_before`) y `:416-421`. Las velas de EE. UU. son 14:30 UTC en invierno y 13:30 en verano; el objetivo es `last.t - N meses` con la hora de la última vela.
@@ -83,11 +87,15 @@ si la base fuera el cierre del 22-ene: 0.59211
 - Impacto: desplazamiento de una sesión en la base (≈ 1 punto porcentual en el ejemplo sintético; en datos reales es el movimiento de un día).
 - Arreglo: comparar por fecha, no por instante: `candles.partition_point(|c| c.t < day_start(target) + DAY)` con `target` truncado a medianoche UTC.
 
+- **Estado: ARREGLADO** — `at_or_before` compara por día UTC (`c.t < fin_del_día(objetivo)`), no por instante. Test `indicators::tests::calendar_returns_use_the_session_of_the_target_date_across_dst` (3m daba base del 21-ene en vez del 22-ene). Limitación: sigue siendo día UTC, no del huso de la bolsa.
+
 ### R-04 — BAJO — `relative_volume` usa el volumen parcial de la vela en curso y esa vela entra en su propio promedio (VERIFICADO)
 
 - `indicators.rs:424-435`. `last.v / avg` con `avg` de las últimas 20 velas incluida la actual. Binance/Yahoo devuelven la vela del día en curso con volumen parcial.
 - Reproducción (19 velas de 1 M y la última con 0,3 M): `relative_volume=Some(0.3108) volume_avg20=Some(965000.0)`.
 - Impacto: durante la sesión (o casi todo el día en cripto) el usuario ve «0,3×» como si fuese volumen bajo; no es comparable con el promedio. Arreglo: promediar las 20 velas *anteriores* y marcar o ajustar por la fracción de sesión transcurrida (o usar la última vela completa).
+
+- **Estado: ARREGLADO** — `compute_at(candles, now)`: si la última vela es del día en curso (`now < t + 1 día`) la referencia es la última vela cerrada; la media de 20 excluye la vela de referencia. Test `indicators::tests::relative_volume_ignores_the_partial_current_candle` (daba 965 000 de media y 0,31×). Límite: tras el cierre de una bolsa y antes de la siguiente apertura se usa aún el día anterior (la última vela no se distingue de una parcial sin conocer el horario).
 
 ### R-05 — MEDIO — Rentabilidad por FCF mezcla monedas en ADRs/cotizaciones extranjeras (VERIFICADO por lectura; no reproducido con datos vivos)
 
@@ -100,21 +108,31 @@ let same = f.extra.get("financialCurrency").and_then(|v| v.as_str()).is_none_or(
 if same && !prof.financial { /* añadir FCF yield */ }
 ```
 
+- **Estado: ARREGLADO** — `scoring::valuation` omite el FCF yield si `extra.financialCurrency` difiere de `currency` y añade una razón sin peso («no calculada: el flujo de caja está en TWD y la capitalización en USD», `Parts::note`). Test `scoring::tests::fcf_yield_skipped_when_financial_currency_differs` (daba «Rentabilidad por FCF = 70.0% → 86»).
+
 ### R-06 — BAJO — Referencia de cambio de los ticks WS de acciones no se renueva al cambiar de sesión (SOSPECHA)
 
 - `realtime.rs:437-452` (`on_raw`) y `:612-620` (`poll_task`): `Entry.reference` se fija una vez (`prev_close` de la primera quote) y no se actualiza mientras el WS esté conectado. Con feed Finnhub activo (requiere clave) y una pestaña abierta varios días, `changePct` de los ticks se mide contra un cierre antiguo. Cripto no se ve afectada (Binance da `open24h`). No reproducido (necesita feed vivo). Arreglo: refrescar `reference` cuando cambie `quote.prev_close` en el sondeo o al cruzar el día de mercado.
+
+- **Estado: ARREGLADO** — reproducida con un feed simulado «conectado» (`realtime::tests::reference_is_refreshed_while_the_feed_is_connected`: +110 % contra un cierre de hace 24 h en vez de +5 %). Con el WS conectado el sondeo se paraba y `reference` se fijaba una vez. Ahora `poll_task` consulta cada `REFERENCE_REFRESH` (10 min) aunque el WS esté conectado (sin emitir tick) y renueva `reference` siempre que llegue `prev_close`.
 
 ### R-07 — BAJO — Gestión de profundidad en el análisis compartido (SOSPECHA)
 
 - `server/src/routes/analysis.rs:97-120` (`join_or_start`): quien se une a un análisis en curso recibe el resultado aunque pidiera otra `depth`; no se avisa. Además una tarea que hiciera panic dejaría la entrada en `HUB` para siempre (los que se unan esperan sin fin). Ninguno reproducido.
 
+- **Estado: DESCARTADO (panic) / DECISIÓN DE DISEÑO (profundidad)** — Panic: no se reproduce; el líder corre en su propia tarea (`SingleFlight::run`), un panic llega como `JoinError` → `Error` publicado y la entrada se retira del `HUB`; el permiso se libera en el unwind. Test de regresión `analysis_stream::a_panicking_analysis_ends_with_an_error_and_does_not_block_the_next_one`. Profundidad: sí ocurre (test de caracterización `joining_a_running_analysis_shares_it_regardless_of_requested_depth`), pero es el comportamiento buscado del single-flight (evita lanzar dos análisis de minutos en una sola GPU) y no es silencioso: `Analysis.depth` lleva la profundidad real y la UI la muestra (`AnalysisSections`). Cambiarlo (cola o 409) es decisión de producto.
+
 ### R-08 — BAJO — Chat: un error a mitad de respuesta guarda el texto parcial como mensaje normal (SOSPECHA)
 
 - `server/src/routes/chat.rs:232-251`: con `terminal = Error` y `acc.has_output()` se persiste lo acumulado sin marca de truncado; al recargar, parece una respuesta completa. Además, si el cliente se va, el LLM sigue generando hasta el final (diseño declarado) y retiene el permiso de chat (límite 4).
 
+- **Estado: ARREGLADO** — reproducida (`server/tests/chat_errors.rs`: el mensaje parcial se guardaba sin marca). `ChatMessage.truncated` (bool, `#[serde(default)]`, migración `0003_message_truncated.sql`) se pone a `true` cuando el stream termina en error con salida parcial; la UI avisa («Respuesta interrumpida…», `MessageView.test.tsx`). Documentado en docs/API.md. La parte «el LLM sigue generando si el cliente se va» es diseño declarado, no se toca.
+
 ### R-09 — BAJO — Heurística de deuda/capital (SOSPECHA)
 
 - `scoring.rs:`(`debt_equity_ratio`): Yahoo ya se divide entre 100 en `yahoo.rs`; un D/E real > 25× (poco frecuente) se vuelve a dividir y puntúa como apalancamiento bajo. Edge case, sin reproducir.
+
+- **Estado: ARREGLADO** — reproducida: Yahoo ya divide D/E entre 100 al parsear (`yahoo.rs`) y FMP entrega la razón, pero `scoring` volvía a dividir todo D/E > 25 (40x puntuaba como 0,4x). Se elimina `debt_equity_ratio`; el dominio documenta ratio. Test `scoring::tests::high_debt_to_equity_is_not_divided_again` (en rojo) y `debt_to_equity_is_a_ratio` (sustituye al test de la heurística de %).
 
 ## Lo revisado que está bien (no repetir)
 

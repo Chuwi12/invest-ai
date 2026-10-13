@@ -341,6 +341,10 @@ pub struct FakeAnalyst {
     /// Pausa entre tokens del chat.
     pub token_delay: Mutex<Duration>,
     pub seen: Mutex<Vec<SeenChat>>,
+    /// Profundidad pedida en cada `analyze_stream` (para comprobar qué análisis se lanzó).
+    pub seen_depths: Mutex<Vec<Option<domain::AnalysisDepth>>>,
+    /// Si es `true`, `analyze_stream` hace panic (simula un fallo inesperado del analista).
+    pub panic_on_analyze: std::sync::atomic::AtomicBool,
 }
 
 impl FakeAnalyst {
@@ -417,9 +421,11 @@ impl Analyst for FakeAnalyst {
     fn analyze_stream(
         self: std::sync::Arc<Self>,
         snapshot: AssetSnapshot,
-        _depth: Option<domain::AnalysisDepth>,
+        depth: Option<domain::AnalysisDepth>,
     ) -> BoxStream<'static, domain::AnalysisEvent> {
         use domain::AnalysisEvent;
+        self.seen_depths.lock().unwrap().push(depth);
+        assert!(!self.panic_on_analyze.load(Ordering::SeqCst), "panic simulado del analista");
         const STAGES: [(&str, &str); 4] = [
             ("snapshot", "Preparando datos, puntuación y niveles"),
             ("technical", "Análisis técnico (simulado)"),

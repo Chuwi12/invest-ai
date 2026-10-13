@@ -224,6 +224,7 @@ async fn input_limits_history_budget_and_errors() {
             content: format!("mensaje {i} {}", "palabra ".repeat(100)),
             tool_calls: vec![],
             analysis: None,
+            truncated: false,
             created_at: Utc::now(),
         })
         .collect();

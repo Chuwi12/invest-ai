@@ -590,6 +590,7 @@ impl Inner {
                     .candles
                     .last()
                     .and_then(|c| DateTime::<Utc>::from_timestamp(c.t, 0)),
+                interval: provenance::infer_interval(&entry.candles),
             },
         );
         Ok((entry.source.clone(), entry.candles.clone()))

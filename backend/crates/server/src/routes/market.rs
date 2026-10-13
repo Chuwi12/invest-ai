@@ -125,6 +125,9 @@ pub struct HistoryParams {
 pub const H_SOURCE: HeaderName = HeaderName::from_static("x-data-source");
 pub const H_SOURCE_URL: HeaderName = HeaderName::from_static("x-data-source-url");
 pub const H_AS_OF: HeaderName = HeaderName::from_static("x-data-as-of");
+/// Intervalo realmente servido (`1m`, `5m`, `1h`, `1d`, `1wk`, `1mo`); difiere del pedido si el
+/// proveedor no admite esa combinación rango/intervalo y se subió de intervalo.
+pub const H_INTERVAL: HeaderName = HeaderName::from_static("x-data-interval");
 
 fn provenance_headers(o: &market::provenance::HistoryOrigin) -> HeaderMap {
     let mut h = HeaderMap::new();
@@ -139,6 +142,9 @@ fn provenance_headers(o: &market::provenance::HistoryOrigin) -> HeaderMap {
     }
     if let Some(t) = o.as_of {
         put(H_AS_OF, &t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    }
+    if let Some(i) = o.interval {
+        put(H_INTERVAL, i.as_str());
     }
     h
 }

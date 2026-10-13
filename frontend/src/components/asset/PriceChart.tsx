@@ -59,6 +59,9 @@ export function PriceChart({ id, summary, quote }: Props) {
   const q = useHistory(id, range, interval === 'auto' || !intervalsFor(range).includes(interval) ? undefined : interval)
   const candles = q.data?.candles
   const origin = q.data
+  // Intervalo realmente servido: el proveedor puede haber subido de intervalo (p. ej. 1m -> 5m).
+  const served: Interval = origin?.interval ?? effective
+  const coerced = !q.isPlaceholderData && origin?.interval != null && origin.interval !== effective
 
   const host = useRef<HTMLDivElement>(null)
   const tip = useRef<HTMLDivElement>(null)
@@ -146,9 +149,9 @@ export function PriceChart({ id, summary, quote }: Props) {
       candles.filter((x) => x.v !== null).map((x) => ({ time: x.t as UTCTimestamp, value: x.v ?? 0, color: (x.c >= x.o ? up : down) + '66' })),
     )
     last.current = candles[candles.length - 1]
-    c.applyOptions({ timeScale: { timeVisible: intervalSeconds(effective) < 86_400, secondsVisible: false } })
+    c.applyOptions({ timeScale: { timeVisible: intervalSeconds(served) < 86_400, secondsVisible: false } })
     c.timeScale().fitContent()
-  }, [candles, effective, scheme])
+  }, [candles, served, scheme])
 
   // Superposiciones.
   const overlayData = useMemo(() => {
@@ -191,14 +194,14 @@ export function PriceChart({ id, summary, quote }: Props) {
   usePriceTicks(id, (t) => {
     const s = candleSeries.current
     if (!s || !last.current) return
-    const next = applyTickToCandle(last.current, t.price, Date.parse(t.ts) / 1000, intervalSeconds(effective), t.volume)
+    const next = applyTickToCandle(last.current, t.price, Date.parse(t.ts) / 1000, intervalSeconds(served), t.volume)
     last.current = next
     s.update(toCandle(next))
   })
 
   const lastIso = candles?.length ? new Date((candles[candles.length - 1] as Candle).t * 1000).toISOString() : null
   const open = quote?.marketState === 'regular' || quote?.marketState === 'continuous'
-  const fresh = lastIso ? freshness(lastIso, open && intervalSeconds(effective) < 86_400 ? intervalSeconds(effective) * 3000 : 5 * 86_400_000) : null
+  const fresh = lastIso ? freshness(lastIso, open && intervalSeconds(served) < 86_400 ? intervalSeconds(served) * 3000 : 5 * 86_400_000) : null
 
   const toggle = (k: Overlay) =>
     setOverlays((prev) => {
@@ -242,6 +245,11 @@ export function PriceChart({ id, summary, quote }: Props) {
         {q.isPending ? <Skeleton h="100%" style={{ position: 'absolute', inset: 0, zIndex: 2 }} /> : null}
       </div>
 
+      {coerced ? (
+        <div className="notice" role="status">
+          El proveedor no admite velas de {INTERVAL_LABEL[effective]} en este rango: se muestran de {INTERVAL_LABEL[served]}.
+        </div>
+      ) : null}
       {q.isError ? <ErrorNotice error={q.error} onRetry={() => void q.refetch()} title="No se pudo cargar el histórico" /> : null}
       {candles && candles.length === 0 ? <div className="notice">El proveedor no devolvió velas para este rango.</div> : null}
       {lastIso ? (

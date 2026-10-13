@@ -110,3 +110,40 @@ async fn without_a_permit_post_is_429_and_sse_sends_a_rate_limited_error() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(app.state.limits.analyses.available_permits(), server::limits::MAX_ANALYSES);
 }
+
+/// R-07: un panic del analista no deja la entrada colgada en el hub: el cliente recibe un error y
+/// el siguiente análisis funciona.
+#[tokio::test]
+async fn a_panicking_analysis_ends_with_an_error_and_does_not_block_the_next_one() {
+    let app = TestApp::new().await;
+    app.analyst.panic_on_analyze.store(true, Ordering::SeqCst);
+    let (status, _, body) = tokio::time::timeout(Duration::from_secs(5), app.raw(Method::POST, URI, None))
+        .await
+        .expect("el SSE debe terminar aunque el análisis haga panic");
+    assert_eq!(status, StatusCode::OK);
+    let events = sse_events(&body);
+    assert_eq!(events.last().unwrap()["type"], "error", "{events:?}");
+    app.analyst.panic_on_analyze.store(false, Ordering::SeqCst);
+    let (_, _, body) = tokio::time::timeout(Duration::from_secs(5), app.raw(Method::POST, URI, None))
+        .await
+        .expect("el siguiente análisis no debe quedar colgado");
+    assert_eq!(types(&sse_events(&body)).last(), Some(&"done"));
+}
+
+/// R-07 (caracterización): quien se une a un análisis en curso comparte el resultado aunque pidiera
+/// otra profundidad; el resultado lleva la profundidad realmente usada.
+#[tokio::test]
+async fn joining_a_running_analysis_shares_it_regardless_of_requested_depth() {
+    let analyst = FakeAnalyst::default();
+    *analyst.analyze_delay.lock().unwrap() = Duration::from_millis(300);
+    let app = std::sync::Arc::new(TestApp::with(FakeMarket::default(), analyst).await);
+    let a = tokio::spawn({
+        let app = app.clone();
+        async move { app.raw(Method::POST, &format!("{URI}?depth=quick"), None).await }
+    });
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    let b = app.raw(Method::POST, &format!("{URI}?depth=deep"), None).await;
+    let a = a.await.unwrap();
+    assert_eq!(sse_events(&a.2).last().unwrap()["analysis"]["id"], sse_events(&b.2).last().unwrap()["analysis"]["id"]);
+    assert_eq!(*app.analyst.seen_depths.lock().unwrap(), [Some(domain::AnalysisDepth::Quick)]);
+}

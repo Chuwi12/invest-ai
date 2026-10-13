@@ -19,6 +19,7 @@ async fn history_exposes_provider_headers_when_known() {
             source: "yahoo".into(),
             source_url: Some("https://finance.yahoo.com/quote/AAPL".into()),
             as_of: chrono::DateTime::from_timestamp(1_700_000_000, 0),
+            interval: Some(Interval::M5),
         },
     );
     let (status, headers, _) = app.raw(Method::GET, "/api/assets/stock%3AAAPL/history", None).await;
@@ -26,6 +27,8 @@ async fn history_exposes_provider_headers_when_known() {
     assert_eq!(headers["x-data-source"], "yahoo");
     assert_eq!(headers["x-data-source-url"], "https://finance.yahoo.com/quote/AAPL");
     assert_eq!(headers["x-data-as-of"], "2023-11-14T22:13:20Z");
+    // Intervalo realmente servido (aquí el proveedor subió de 1d a 5m: solo para el test).
+    assert_eq!(headers["x-data-interval"], "5m");
 }
 
 #[tokio::test]

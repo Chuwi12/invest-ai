@@ -71,8 +71,11 @@ si no se conocen; nunca se inventa una URL):
   si faltara el campo).
 - `NewsItem.url` ya es el enlace al artículo/filing original (no necesita `sourceUrl`).
 - `GET /assets/{id}/history` sigue devolviendo `Candle[]`; la procedencia va en cabeceras de respuesta:
-  `X-Data-Source` (proveedor que sirvió las velas), `X-Data-Source-Url` y `X-Data-As-Of` (inicio de la
-  última vela, ISO 8601). Faltan si el backend no la conoce (p. ej. el servidor simulado). La API se
+  `X-Data-Source` (proveedor que sirvió las velas), `X-Data-Source-Url`, `X-Data-As-Of` (inicio de la
+  última vela, ISO 8601) y `X-Data-Interval` (`1m|5m|15m|30m|1h|1d|1wk|1mo`: intervalo **realmente servido**,
+  deducido de la separación entre velas; difiere del pedido cuando el proveedor sube de intervalo porque
+  la combinación rango/intervalo no cabe, p. ej. `5d/1m` en Binance se sirve a `5m`; la UI lo avisa).
+  Faltan si el backend no la conoce (p. ej. el servidor simulado). La API se
   sirve en el mismo origen que la UI (o a través del proxy de Vite), por lo que no hace falta
   `Access-Control-Expose-Headers`; solo haría falta si el frontend se alojara en otro origen.
 
@@ -124,6 +127,9 @@ navegador.
 | PATCH  | `/conversations/{cid}` | `{ title?, assetIds?, pinned? }` | `Conversation` |
 | DELETE | `/conversations/{cid}` | — | 204 |
 | POST   | `/conversations/{cid}/messages` | `{ content: string, assetIds?: AssetId[] }` | **SSE** de `ChatEvent` |
+
+`ChatMessage.truncated` (bool, opcional, `false` si falta): `true` si un error cortó la respuesta del
+asistente y `content` es parcial (la UI lo avisa).
 
 SSE: cada evento es `data: <ChatEvent JSON>\n\n`. Termina con `done` o `error`. El servidor
 guarda el mensaje del usuario antes de empezar y el del asistente (con tool calls y análisis) al

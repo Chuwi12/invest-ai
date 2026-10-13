@@ -545,6 +545,7 @@ mod tests {
             (Range::M1, Interval::M15),
             (Range::D1, Interval::M1),
             (Range::D5, Interval::M5),
+            (Range::D5, Interval::M1), // 7200 velas > tope: se sube a 5m
             (Range::Ytd, Interval::H1),
             (Range::Y1, Interval::D1),
             (Range::Max, Interval::W1),
@@ -554,6 +555,8 @@ mod tests {
             let c = b.history(&id, range, interval).await.unwrap();
             let last = c.last().unwrap().t;
             let (eff, _) = plan_history(range, interval, now);
+            // Lo servido es lo que se comunica al cliente (`X-Data-Interval`): debe coincidir.
+            assert_eq!(crate::provenance::infer_interval(&c), Some(eff), "{range:?}/{interval:?}");
             assert!(now.timestamp() - last < 2 * eff.seconds(), "{range:?}/{interval:?}: acaba en el pasado ({last})");
             assert!(c.windows(2).all(|w| w[0].t < w[1].t), "{range:?}/{interval:?}: desordenada o duplicada");
             if let Some(start) = range_start_ms(range, now) {

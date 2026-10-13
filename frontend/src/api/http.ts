@@ -1,7 +1,9 @@
 import type { Api } from './api'
 import { ApiError, assetPath, request, requestWithHeaders } from './client'
 import { streamAnalysisEvents, streamChatEvents, streamPullEvents } from './sse'
-import type { Analysis, AnalysisDepth, AnalysisStreamEvent, Candle, HistoryResult } from './types'
+import type { Analysis, AnalysisDepth, AnalysisStreamEvent, Candle, HistoryResult, Interval } from './types'
+
+const INTERVALS: readonly string[] = ['1m', '5m', '15m', '30m', '1h', '1d', '1wk', '1mo']
 
 /**
  * Progreso real del análisis por SSE. Si el backend aún no tiene el endpoint (404/405) se cae al
@@ -42,6 +44,7 @@ export const httpApi: Api = {
       source: headers.get('x-data-source'),
       sourceUrl: headers.get('x-data-source-url'),
       asOf: headers.get('x-data-as-of'),
+      interval: ((v) => (v !== null && INTERVALS.includes(v) ? (v as Interval) : null))(headers.get('x-data-interval')),
     }
   },
   indicators: (id, signal) => request(`${assetPath(id)}/indicators`, { signal }),

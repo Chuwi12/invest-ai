@@ -94,6 +94,7 @@ pub async fn send_message(
             model: None,
             prompt_tokens: None,
             completion_tokens: None,
+            truncated: false,
             created_at_ms: user_created_ms,
         },
     )
@@ -297,8 +298,10 @@ impl ChatJob {
             }
             (Some(ev), _) => ev,
         };
+        // Un error con salida parcial se guarda igualmente, pero marcado: al recargar no debe
+        // pasar por una respuesta completa.
         if acc.has_output() {
-            self.save_message(&acc).await;
+            self.save_message(&acc, matches!(terminal, ChatEvent::Error { .. })).await;
         }
         sink.send(terminal).await;
     }
@@ -309,7 +312,7 @@ impl ChatJob {
         }
     }
 
-    async fn save_message(&self, acc: &Accumulated) {
+    async fn save_message(&self, acc: &Accumulated, truncated: bool) {
         let res = convs::insert_message(
             &self.state.db,
             &NewMessage {
@@ -322,6 +325,7 @@ impl ChatJob {
                 model: acc.model.as_deref(),
                 prompt_tokens: acc.prompt_tokens,
                 completion_tokens: acc.completion_tokens,
+                truncated,
                 created_at_ms: self.created_at_ms,
             },
         )

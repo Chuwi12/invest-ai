@@ -24,6 +24,7 @@ export const MessageView = memo(function MessageView({ m }: { m: ChatMessage }) 
           <div style={{ marginTop: '0.8rem' }}><AnalysisReport analysis={m.analysis} compact /></div>
         </details>
       ) : null}
+      {m.truncated ? <div className="notice" role="status">Respuesta interrumpida por un error: el texto está incompleto.</div> : null}
       <span className="tiny muted">{formatTime(m.createdAt)}</span>
     </div>
   )
