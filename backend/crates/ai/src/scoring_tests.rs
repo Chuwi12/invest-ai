@@ -573,12 +573,8 @@ fn fundamentals_reward_quality() {
 }
 
 #[test]
-fn debt_to_equity_percent_heuristic() {
-    // 150 (%) == 1,5x
-    assert_eq!(
-        fund_with(|f| f.debt_to_equity = Some(150.0)),
-        fund_with(|f| f.debt_to_equity = Some(1.5))
-    );
+fn debt_to_equity_is_a_ratio() {
+    // El dominio guarda la razón (1,5 = 1,5x); ya no se reinterpreta como porcentaje (R-09).
     assert!(
         fund_with(|f| f.debt_to_equity = Some(0.2)) > fund_with(|f| f.debt_to_equity = Some(3.0))
     );
@@ -991,4 +987,38 @@ fn contradictory_signals_lower_confidence() {
     let mut agree = stock();
     ind(&mut agree).trend = Some(Trend::StrongUp);
     assert!(sc(&mixed).confidence <= sc(&agree).confidence);
+}
+
+// ---- R-05: FCF yield con monedas distintas --------------------------------------------------
+
+#[test]
+fn fcf_yield_skipped_when_financial_currency_differs() {
+    let mut s = stock();
+    let f = fun(&mut s);
+    f.currency = Some("USD".into());
+    f.market_cap = Some(1.0e12);
+    f.free_cash_flow = Some(7.0e11); // 700 000 M en TWD: sería un «70 %» sobre USD
+    f.extra.insert("financialCurrency".into(), serde_json::json!("TWD"));
+    let c = sc(&s);
+    let joined = c.reasons.valuation.join(" | ");
+    assert!(!joined.contains("Rentabilidad por FCF ="), "{joined}");
+    assert!(joined.contains("TWD"), "debe avisar del motivo: {joined}");
+
+    // Misma moneda (o sin dato de moneda financiera): se calcula como siempre.
+    let f = fun(&mut s);
+    f.extra.insert("financialCurrency".into(), serde_json::json!("USD"));
+    assert!(sc(&s).reasons.valuation.join(" | ").contains("Rentabilidad por FCF ="));
+    fun(&mut s).extra.remove("financialCurrency");
+    assert!(sc(&s).reasons.valuation.join(" | ").contains("Rentabilidad por FCF ="));
+}
+
+// ---- R-09: D/E ya es una razón, no se divide otra vez -----------------------------------------
+
+#[test]
+fn high_debt_to_equity_is_not_divided_again() {
+    // Los proveedores ya entregan la razón (Yahoo se divide entre 100 al parsear): 40x es 40x.
+    assert!(
+        fund_with(|f| f.debt_to_equity = Some(40.0)) <= fund_with(|f| f.debt_to_equity = Some(3.0)),
+        "un D/E de 40x no puede puntuar mejor que uno de 3x"
+    );
 }

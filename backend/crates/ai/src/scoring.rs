@@ -132,6 +132,8 @@ fn round1(x: f64) -> f32 {
 #[derive(Default)]
 struct Parts {
     items: Vec<(f64, f64, String)>,
+    /// Avisos sin peso (p. ej. una razón omitida y por qué): se añaden al final de las razones.
+    notes: Vec<String>,
 }
 
 impl Parts {
@@ -140,13 +142,18 @@ impl Parts {
         self.items.push((weight, s, format!("{reason} → {s:.0}")));
     }
 
+    fn note(&mut self, text: String) {
+        self.notes.push(text);
+    }
+
     fn finish(self) -> Option<Out> {
         let w: f64 = self.items.iter().map(|(w, _, _)| w).sum();
         if self.items.is_empty() || w <= 0.0 {
             return None;
         }
         let s: f64 = self.items.iter().map(|(w, s, _)| w * s).sum::<f64>() / w;
-        Some((round1(s.clamp(0.0, 100.0)), self.items.into_iter().map(|(_, _, r)| r).collect()))
+        let reasons = self.items.into_iter().map(|(_, _, r)| r).chain(self.notes).collect();
+        Some((round1(s.clamp(0.0, 100.0)), reasons))
     }
 }
 
@@ -609,17 +616,31 @@ fn valuation(c: &Ctx) -> Option<Out> {
             tr!(l, "P/B = {} ({})", "P/B = {} ({})", fmt::num(pb), zone_label(l, th, pb)),
         );
     }
-    // Rentabilidad por caja libre sobre capitalización.
+    // Rentabilidad por caja libre sobre capitalización. El FCF viene en la moneda de las cuentas
+    // (`financialCurrency`, p. ej. TWD en un ADR) y la capitalización en la de cotización: si
+    // difieren, la razón no tiene sentido y se omite avisando.
     if let (Some(fcf), Some(m)) =
         (fin(f.free_cash_flow), fin(f.market_cap).or(c.market_cap).filter(|v| *v > 0.0))
         && !prof.financial {
-            let y = fcf / m;
-            let pts = tables::FCF_YIELD;
-            p.add(
-                1.2,
-                piecewise(y, pts),
-                tr!(l, "Rentabilidad por FCF = {}", "FCF yield = {}", fmt::pct(y)),
-            );
+            let fin_cur = f.extra.get("financialCurrency").and_then(|v| v.as_str());
+            match (fin_cur, f.currency.as_deref()) {
+                (Some(fc), Some(pc)) if !fc.eq_ignore_ascii_case(pc) => p.note(tr!(
+                    l,
+                    "Rentabilidad por FCF no calculada: el flujo de caja está en {} y la capitalización en {}",
+                    "FCF yield not computed: cash flow is in {} and market cap in {}",
+                    fc,
+                    pc
+                )),
+                _ => {
+                    let y = fcf / m;
+                    let pts = tables::FCF_YIELD;
+                    p.add(
+                        1.2,
+                        piecewise(y, pts),
+                        tr!(l, "Rentabilidad por FCF = {}", "FCF yield = {}", fmt::pct(y)),
+                    );
+                }
+            }
         }
     // Coste de un ETF/fondo (el ratio de gastos es una «valoración» en sentido amplio).
     if matches!(c.class, AssetClass::Etf | AssetClass::Fund)
@@ -640,12 +661,6 @@ fn valuation(c: &Ctx) -> Option<Out> {
 // ---------------------------------------------------------------------------------------------
 // Fundamentales
 // ---------------------------------------------------------------------------------------------
-
-/// Algunos proveedores dan la deuda/capital en % (150 = 1,5x). Una razón > 25x es irreal fuera
-/// de casos extremos, así que se interpreta como porcentaje.
-fn debt_equity_ratio(v: f64) -> f64 {
-    if v > 25.0 { v / 100.0 } else { v }
-}
 
 fn fundamental(c: &Ctx) -> Option<Out> {
     if matches!(
@@ -696,7 +711,7 @@ fn fundamental(c: &Ctx) -> Option<Out> {
         );
     }
     if !prof.financial {
-        if let Some(de) = fin(f.debt_to_equity).filter(|v| *v >= 0.0).map(debt_equity_ratio) {
+        if let Some(de) = fin(f.debt_to_equity).filter(|v| *v >= 0.0) {
             let pts = tables::DEBT_EQUITY;
             p.add(
                 1.0,

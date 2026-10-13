@@ -219,3 +219,30 @@ async fn macro_and_snapshot() {
         );
     }
 }
+
+/// R-01: el histórico de Binance debe acabar en la vela actual y cubrir el rango pedido.
+#[tokio::test]
+#[ignore = "red real"]
+async fn binance_history_ends_now() {
+    let s = svc();
+    let id = AssetId::new(AssetClass::Crypto, "BTC");
+    for (range, interval, min_days) in [
+        (Range::Y5, Interval::D1, 1820),
+        (Range::M3, Interval::H1, 91),
+        (Range::D1, Interval::M1, 0),
+    ] {
+        let h = s.history(&id, range, interval).await.expect("klines");
+        let (a, b) = (h.first().unwrap().t, h.last().unwrap().t);
+        let now = chrono::Utc::now().timestamp();
+        println!(
+            "  {range:?}/{interval:?}: {} velas, {} -> {} (última hace {} s, cubre {} d)",
+            h.len(),
+            chrono::DateTime::from_timestamp(a, 0).unwrap(),
+            chrono::DateTime::from_timestamp(b, 0).unwrap(),
+            now - b,
+            (b - a) / 86_400
+        );
+        assert!(now - b < 2 * interval.seconds(), "acaba en el pasado");
+        assert!((b - a) / 86_400 >= min_days, "no cubre el rango");
+    }
+}

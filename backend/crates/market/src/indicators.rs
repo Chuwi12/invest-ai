@@ -187,26 +187,20 @@ pub fn max_drawdown(closes: &[f64]) -> Option<f64> {
     Some(worst)
 }
 
-/// 252 sesiones al año en bolsa; 365 si la serie incluye fines de semana (cripto).
+/// 252 sesiones al año en bolsa; 365 si la serie es 24/7 (cripto). Se mide la densidad real de
+/// velas (no el día de la semana UTC: Yahoo data las sesiones de ASX/NZX en horario de verano y
+/// de Tadawul en domingo UTC sin que sean fin de semana): ~5 por semana → 252, ~7 → 365.
 pub fn periods_per_year(candles: &[Candle]) -> f64 {
     let tail = &candles[candles.len().saturating_sub(60)..];
-    if tail.is_empty() {
+    let (Some(first), Some(last)) = (tail.first(), tail.last()) else {
+        return 252.0;
+    };
+    let span_days = (last.t - first.t) as f64 / DAY as f64;
+    if tail.len() < 2 || span_days <= 0.0 {
         return 252.0;
     }
-    let weekend = tail
-        .iter()
-        .filter(|c| {
-            Utc.timestamp_opt(c.t, 0)
-                .single()
-                .map(|d| d.weekday().number_from_monday() >= 6)
-                .unwrap_or(false)
-        })
-        .count();
-    if weekend as f64 / tail.len() as f64 > 0.1 {
-        365.0
-    } else {
-        252.0
-    }
+    let per_year = (tail.len() - 1) as f64 / span_days * 365.25;
+    if per_year > 300.0 { 365.0 } else { 252.0 }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -324,8 +318,12 @@ pub fn support_resistance(
 // Cálculo completo
 // ---------------------------------------------------------------------------------------------
 
+/// Cierre de la última sesión de la fecha (UTC) de `ts` o anterior. Se compara por día y no por
+/// instante: la hora de apertura de las velas cambia 1 h con el horario de verano y, por instante,
+/// la base se desplazaba una sesión cuando la fecha objetivo caía al otro lado del cambio de hora.
 fn at_or_before(candles: &[Candle], ts: i64) -> Option<f64> {
-    let idx = candles.partition_point(|c| c.t <= ts);
+    let end_of_day = ts.div_euclid(DAY) * DAY + DAY;
+    let idx = candles.partition_point(|c| c.t < end_of_day);
     idx.checked_sub(1).map(|i| candles[i].c)
 }
 
@@ -367,6 +365,11 @@ fn sanitize(candles: &[Candle]) -> Vec<Candle> {
 /// Calcula todos los indicadores del dominio a partir de velas diarias (idealmente 2 años).
 /// Lo que no se pueda calcular por falta de histórico queda en `None`/vacío.
 pub fn compute(candles: &[Candle]) -> Indicators {
+    compute_at(candles, Utc::now().timestamp())
+}
+
+/// Como `compute`, con el instante actual (Unix s) explícito: decide si la última vela está en curso.
+pub fn compute_at(candles: &[Candle], now: i64) -> Indicators {
     let candles = sanitize(candles);
     let mut out = Indicators::default();
     let Some(last) = candles.last().copied() else {
@@ -423,8 +426,12 @@ pub fn compute(candles: &[Candle]) -> Indicators {
         .map(|d| d.timestamp() - 1);
     out.return_ytd = ret(jan1);
 
-    // Volumen: las series sin volumen (índices, divisas) devuelven 0 o None.
-    let vols: Vec<f64> = candles
+    // Volumen: las series sin volumen (índices, divisas) devuelven 0 o None. La vela del día en
+    // curso lleva volumen parcial: si lo es, la referencia es la última vela cerrada. La media son
+    // las 20 velas anteriores a la de referencia (la vela no entra en su propia media).
+    let partial = now < last.t + DAY;
+    let ref_idx = if partial && candles.len() > 1 { candles.len() - 2 } else { candles.len() - 1 };
+    let vols: Vec<f64> = candles[..ref_idx]
         .iter()
         .rev()
         .take(20)
@@ -433,7 +440,7 @@ pub fn compute(candles: &[Candle]) -> Indicators {
     if vols.len() >= 10 {
         let avg = vols.iter().sum::<f64>() / vols.len() as f64;
         out.volume_avg20 = Some(avg);
-        out.relative_volume = last.v.filter(|v| *v > 0.0).map(|v| v / avg);
+        out.relative_volume = candles[ref_idx].v.filter(|v| *v > 0.0).map(|v| v / avg);
     }
 
     out.trend = trend(&closes);
@@ -680,5 +687,83 @@ mod tests {
         assert_eq!(res.len(), 1, "una única resistencia agrupada: {res:?}");
         approx(sup[0], 89.5, 0.5);
         approx(res[0], 110.5, 0.5);
+    }
+
+    /// Velas diarias lun-vie de 120 sesiones; `open_hour_utc` es la hora UTC de apertura que fecha Yahoo.
+    /// Con 23 h la apertura cae en el día UTC anterior (ASX en horario de verano: lunes → domingo UTC).
+    fn weekday_candles(open_hour_utc: i64, sessions: usize) -> Vec<Candle> {
+        let mut out = Vec::new();
+        let mut day = Utc.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().timestamp(); // lunes
+        let mut i = 0usize;
+        while out.len() < sessions {
+            let wd = ((day / DAY) + 3) % 7; // 0 = lunes (1970-01-01 fue jueves)
+            if wd < 5 {
+                let c = 100.0 + (i % 7) as f64 - (i % 3) as f64;
+                out.push(candle(day + open_hour_utc * 3600 - if open_hour_utc >= 20 { DAY } else { 0 }, c, c + 1.0, c - 1.0, c));
+                i += 1;
+            }
+            day += DAY;
+        }
+        out
+    }
+
+    /// R-02: una bolsa con la sesión fechada en domingo UTC (ASX/NZX, Tadawul) usa 252, no 365.
+    #[test]
+    fn periods_per_year_ignores_utc_weekend_dating_of_exchange_sessions() {
+        assert_eq!(periods_per_year(&weekday_candles(14, 120)), 252.0, "NYSE-like");
+        assert_eq!(periods_per_year(&weekday_candles(23, 120)), 252.0, "ASX-like (AEDT)");
+        // Cripto 24/7: 7 velas por semana.
+        let btc: Vec<Candle> = (0..120).map(|i| candle(1_700_000_000 + i * DAY, 1.0, 2.0, 0.5, 1.0)).collect();
+        assert_eq!(periods_per_year(&btc), 365.0);
+    }
+
+    /// R-03: la base de 1s/1m/3m es la sesión de esa fecha aunque cambie el huso EST/EDT.
+    #[test]
+    fn calendar_returns_use_the_session_of_the_target_date_across_dst() {
+        // Sesiones NYSE: 14:30 UTC hasta el 7-mar-2026 (EST) y 13:30 UTC desde el 9-mar (EDT).
+        let mut cs = Vec::new();
+        let mut d = Utc.with_ymd_and_hms(2025, 11, 3, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 4, 22, 0, 0, 0).unwrap();
+        let dst = Utc.with_ymd_and_hms(2026, 3, 8, 0, 0, 0).unwrap();
+        let mut n = 0.0;
+        while d <= end {
+            if d.weekday().number_from_monday() <= 5 {
+                n += 1.0;
+                let h = if d < dst { 14 } else { 13 };
+                let t = d.timestamp() + h * 3600 + 1800;
+                cs.push(candle(t, n, n + 1.0, n - 1.0, 100.0 + (d.timestamp() / DAY - 20_000) as f64));
+            }
+            d += chrono::Duration::days(1);
+        }
+        let ind = compute_at(&cs, end.timestamp() + 20 * 3600);
+        let close_of = |y, m, day| 100.0 + (Utc.with_ymd_and_hms(y, m, day, 0, 0, 0).unwrap().timestamp() / DAY - 20_000) as f64;
+        let last = close_of(2026, 4, 22);
+        // 1m: 22-mar (domingo) → viernes 20. 22-abr-2026 menos 3 meses = 22-ene-2026 (jueves, EST): la base es SU cierre, no el del 21.
+        approx(ind.return3m.unwrap(), last / close_of(2026, 1, 22) - 1.0, 1e-12);
+        approx(ind.return1m.unwrap(), last / close_of(2026, 3, 20) - 1.0, 1e-12);
+        approx(ind.return1w.unwrap(), last / close_of(2026, 4, 15) - 1.0, 1e-12);
+    }
+
+    /// R-04: la vela en curso (volumen parcial) no entra en la media ni se compara con ella.
+    #[test]
+    fn relative_volume_ignores_the_partial_current_candle() {
+        let base = Utc.with_ymd_and_hms(2026, 1, 5, 14, 30, 0).unwrap().timestamp();
+        let mut cs: Vec<Candle> = (0..25).map(|k| candle(base + k * DAY, 10.0, 11.0, 9.0, 10.0)).collect();
+        for c in &mut cs {
+            c.v = Some(1_000_000.0);
+        }
+        // Última vela con 0,3 M de volumen parcial, abierta hace 1 h.
+        let last_t = base + 25 * DAY;
+        let mut today = candle(last_t, 10.0, 11.0, 9.0, 10.0);
+        today.v = Some(300_000.0);
+        cs.push(today);
+        let ind = compute_at(&cs, last_t + 3600);
+        approx(ind.volume_avg20.unwrap(), 1_000_000.0, 1e-6);
+        approx(ind.relative_volume.unwrap(), 1.0, 1e-9);
+        // Con la vela ya cerrada (pasó más de un día) sí se usa su volumen y la media la excluye.
+        cs.last_mut().unwrap().v = Some(3_000_000.0);
+        let ind = compute_at(&cs, last_t + 2 * DAY);
+        approx(ind.volume_avg20.unwrap(), 1_000_000.0, 1e-6);
+        approx(ind.relative_volume.unwrap(), 3.0, 1e-9);
     }
 }

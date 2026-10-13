@@ -169,18 +169,61 @@ impl Provider for Binance {
         interval: Interval,
     ) -> PResult<Vec<Candle>> {
         let symbol = pair(id).ok_or(ProviderError::Unsupported)?;
-        let url = self.url(&["api", "v3", "klines"])?;
-        let mut q = vec![
-            ("symbol", symbol),
-            ("interval", binance_interval(interval).to_string()),
-            ("limit", "1000".to_string()),
-        ];
-        if let Some(start) = range_start_ms(range, Utc::now()) {
-            q.push(("startTime", start.to_string()));
+        // Con `startTime` + `limit` Binance sirve las velas MÁS ANTIGUAS: la serie acabaría en el
+        // pasado. Se pide siempre desde el presente hacia atrás (`endTime`), paginando.
+        let (interval, needed) = plan_history(range, interval, Utc::now());
+        let mut pages: Vec<Vec<Candle>> = Vec::new();
+        let mut got = 0usize;
+        let mut end_ms: Option<i64> = None;
+        while got < needed {
+            let limit = (needed - got).min(KLINES_PAGE);
+            let url = self.url(&["api", "v3", "klines"])?;
+            let mut q = vec![
+                ("symbol", symbol.clone()),
+                ("interval", binance_interval(interval).to_string()),
+                ("limit", limit.to_string()),
+            ];
+            if let Some(e) = end_ms {
+                q.push(("endTime", e.to_string()));
+            }
+            let page = parse_klines(&self.get(url, &q).await?)?;
+            let Some(first) = page.first() else { break };
+            end_ms = Some(first.t * 1000 - 1);
+            let short = page.len() < limit; // no hay más historia (par recién listado)
+            got += page.len();
+            pages.push(page);
+            if short {
+                break;
+            }
         }
-        let text = self.get(url, &q).await?;
-        parse_klines(&text)
+        // Las páginas se obtuvieron de la más nueva a la más vieja.
+        Ok(pages.into_iter().rev().flatten().collect())
     }
+}
+
+/// Velas por petición de `/klines` (máximo de Binance).
+const KLINES_PAGE: usize = 1000;
+/// Tope de velas por consulta (5 páginas). Si el rango pedido necesita más, se sube de intervalo.
+const MAX_KLINES: usize = 5 * KLINES_PAGE;
+
+/// Intervalo efectivo y nº de velas a pedir (hacia atrás desde ahora) para cubrir `range`.
+/// Si el intervalo pedido necesitaría más de `MAX_KLINES` velas, se sube al siguiente (como
+/// `coerce_interval` en Yahoo). `Max` pide una sola página.
+fn plan_history(range: Range, interval: Interval, now: chrono::DateTime<Utc>) -> (Interval, usize) {
+    let Some(start) = range_start_ms(range, now) else {
+        return (interval, KLINES_PAGE);
+    };
+    let span_secs = ((now.timestamp_millis() - start) / 1000).max(0);
+    let count = |i: Interval| (span_secs / i.seconds()) as usize + 2; // +2: vela en curso y borde
+    let order = [Interval::M1, Interval::M5, Interval::M15, Interval::M30, Interval::H1, Interval::D1];
+    let mut interval = interval;
+    if let Some(mut idx) = order.iter().position(|i| *i == interval) {
+        while count(order[idx]) > MAX_KLINES && idx + 1 < order.len() {
+            idx += 1;
+        }
+        interval = order[idx];
+    }
+    (interval, count(interval))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -421,5 +464,111 @@ mod tests {
         let subs = f.subscribe_msgs(&["BTCUSDT".into(), "ETHUSDT".into()], true);
         assert_eq!(subs.len(), 1);
         assert!(subs[0].contains("btcusdt@miniTicker") && subs[0].contains("SUBSCRIBE"));
+    }
+
+    /// Binance simulado con su semántica real de `/klines`: con `startTime` devuelve las `limit`
+    /// velas MÁS ANTIGUAS desde ahí; sin él, las `limit` últimas con apertura <= `endTime`.
+    async fn fake_binance(requests: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let requests = requests.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let line = req.lines().next().unwrap_or("");
+                    let url = Url::parse(&format!("http://x{}", line.split_whitespace().nth(1).unwrap_or("/"))).unwrap();
+                    let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+                    let step_ms: i64 = match q["interval"].as_str() {
+                        "1m" => 60_000,
+                        "5m" => 300_000,
+                        "15m" => 900_000,
+                        "30m" => 1_800_000,
+                        "1h" => 3_600_000,
+                        "1d" => 86_400_000,
+                        _ => 604_800_000,
+                    };
+                    let limit: usize = q.get("limit").map_or(500, |l| l.parse().unwrap()).min(1000);
+                    let now = Utc::now().timestamp_millis();
+                    let last_open = now - now.rem_euclid(step_ms); // vela en curso
+                    let mut open_times: Vec<i64> = Vec::new();
+                    if let Some(s) = q.get("startTime") {
+                        let mut t: i64 = s.parse().unwrap();
+                        t += (step_ms - t.rem_euclid(step_ms)) % step_ms;
+                        while open_times.len() < limit && t <= last_open {
+                            open_times.push(t);
+                            t += step_ms;
+                        }
+                    } else {
+                        let mut t = q.get("endTime").map_or(last_open, |e| e.parse::<i64>().unwrap().min(last_open));
+                        t -= t.rem_euclid(step_ms);
+                        while open_times.len() < limit {
+                            open_times.push(t);
+                            t -= step_ms;
+                        }
+                        open_times.reverse();
+                    }
+                    let body = serde_json::Value::Array(
+                        open_times
+                            .iter()
+                            .map(|t| serde_json::json!([t, "1.0", "2.0", "0.5", "1.5", "10.0", t + step_ms - 1]))
+                            .collect(),
+                    )
+                    .to_string();
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// R-01: la serie debe acabar en la vela actual y cubrir el rango pedido (o subir de intervalo).
+    #[tokio::test]
+    async fn history_ends_at_current_candle_and_covers_range() {
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let base = fake_binance(hits.clone()).await;
+        let b = Binance::with_base(crate::http::build_client(std::time::Duration::from_secs(10)).unwrap(), base);
+        let id = AssetId::new(AssetClass::Crypto, "BTC");
+        let cases = [
+            (Range::Y5, Interval::D1),
+            (Range::Y10, Interval::D1),
+            (Range::M3, Interval::H1),
+            (Range::M1, Interval::M15),
+            (Range::D1, Interval::M1),
+            (Range::D5, Interval::M5),
+            (Range::Ytd, Interval::H1),
+            (Range::Y1, Interval::D1),
+            (Range::Max, Interval::W1),
+        ];
+        for (range, interval) in cases {
+            let now = Utc::now();
+            let c = b.history(&id, range, interval).await.unwrap();
+            let last = c.last().unwrap().t;
+            let (eff, _) = plan_history(range, interval, now);
+            assert!(now.timestamp() - last < 2 * eff.seconds(), "{range:?}/{interval:?}: acaba en el pasado ({last})");
+            assert!(c.windows(2).all(|w| w[0].t < w[1].t), "{range:?}/{interval:?}: desordenada o duplicada");
+            if let Some(start) = range_start_ms(range, now) {
+                assert!(c[0].t * 1000 <= start + eff.seconds() * 1000, "{range:?}/{interval:?}: no cubre el rango");
+            }
+        }
+    }
+
+    #[test]
+    fn plan_raises_interval_when_too_many_candles() {
+        let now = Utc::now();
+        assert_eq!(plan_history(Range::Y5, Interval::D1, now).0, Interval::D1);
+        assert_eq!(plan_history(Range::Y10, Interval::D1, now).0, Interval::D1);
+        assert_eq!(plan_history(Range::D5, Interval::M1, now).0, Interval::M5); // 7200 > 5000
+        assert_eq!(plan_history(Range::D1, Interval::M1, now).0, Interval::M1);
+        assert!(plan_history(Range::Y5, Interval::D1, now).1 > 1000, "5y/1d necesita paginar");
     }
 }

@@ -594,6 +594,11 @@ impl Hub {
 /// Intervalo del sondeo de un activo con el mercado cerrado y sin cambios desde el sondeo anterior.
 const CLOSED_POLL: Duration = Duration::from_secs(60);
 
+/// Cada cuánto se renueva el precio de referencia (cierre previo) mientras el WS está conectado y
+/// el sondeo de respaldo en pausa: sin esto, el cambio de los ticks se mediría contra un cierre
+/// antiguo si la pestaña sigue abierta al cambiar de sesión.
+const REFERENCE_REFRESH: Duration = Duration::from_secs(600);
+
 /// Sondeo de respaldo. Además fija el precio de referencia (cierre previo) para calcular el
 /// cambio de los ticks WS que no lo traen.
 async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
@@ -604,6 +609,7 @@ async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
     };
     let mut last: Option<(f64, DateTime<Utc>)> = None;
     let mut first = true;
+    let mut last_query = tokio::time::Instant::now();
     let mut wait = every;
     loop {
         let feed_ok = {
@@ -612,8 +618,11 @@ async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
                 .and_then(|e| e.feed)
                 .is_some_and(|i| inner.feeds[i].handle.is_connected())
         };
-        // La primera vuelta siempre consulta: fija la referencia y da un primer valor.
-        if first || !feed_ok {
+        // La primera vuelta siempre consulta: fija la referencia y da un primer valor. Con el WS
+        // conectado solo se consulta de vez en cuando para renovar la referencia.
+        let refresh_ref = feed_ok && last_query.elapsed() >= REFERENCE_REFRESH;
+        if first || !feed_ok || refresh_ref {
+            last_query = tokio::time::Instant::now();
             let fut = (inner.quote_fn)(id.clone());
             let q = tokio::select! {
                 () = cancel.cancelled() => return,
@@ -630,9 +639,9 @@ async fn poll_task(inner: Arc<Inner>, id: AssetId, cancel: CancellationToken) {
                 }
                 let mut map = inner.lock();
                 if let Some(e) = map.get_mut(&id)
-                    && e.reference.is_none()
+                    && let Some(prev) = q.prev_close.filter(|p| *p > 0.0)
                 {
-                    e.reference = q.prev_close.filter(|p| *p > 0.0);
+                    e.reference = Some(prev);
                 }
                 let changed = last.is_none_or(|(p, t)| p != q.price || t != q.timestamp);
                 if changed && (!feed_ok || first) {
@@ -863,6 +872,46 @@ mod tests {
         // El resto se colapsa en el último valor, emitido tras la ventana.
         let last = s.next().await.unwrap();
         assert_eq!(last.price, 120.0);
+        cancel.cancel();
+    }
+
+    /// R-06: con el WS conectado el sondeo se detiene y la referencia del cambio quedaba fija en
+    /// el cierre de la primera quote, aunque pasaran días. Debe renovarse periódicamente.
+    #[tokio::test(start_paused = true)]
+    async fn reference_is_refreshed_while_the_feed_is_connected() {
+        let cancel = CancellationToken::new();
+        let calls = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let c2 = calls.clone();
+        let qf: QuoteFn = Arc::new(move |id: AssetId| {
+            let n = c2.fetch_add(1, Ordering::SeqCst);
+            // Primera consulta: cierre previo 100. Las siguientes (otro día de mercado): 200.
+            let mut q = quote(&id.symbol, 100.0, 1000 + n as i64);
+            q.prev_close = Some(if n == 0 { 100.0 } else { 200.0 });
+            async move { Some(q) }.boxed()
+        });
+        let hub = HubBuilder::new()
+            .feed(
+                DummyFeed,
+                |id: &AssetId| Some(id.symbol.clone()),
+                |s: &str| vec![AssetId::new(AssetClass::Stock, s)],
+            )
+            .build(qf, cancel.clone());
+        hub.inner.feeds[0].handle.connected.store(true, Ordering::Relaxed);
+        let id = AssetId::new(AssetClass::Stock, "AAPL");
+        let mut s = hub.subscribe(std::slice::from_ref(&id));
+        let _ = s.next().await.unwrap(); // tick del sondeo inicial
+        tokio::time::sleep(Duration::from_secs(24 * 3600)).await;
+        let raw = RawTick {
+            symbol: "AAPL".into(),
+            price: 210.0,
+            open24h: None,
+            volume: None,
+            ts: Utc.timestamp_opt(90_000, 0).unwrap(),
+        };
+        hub.inner.on_raw(0, raw);
+        let t = s.next().await.unwrap();
+        assert_eq!(t.price, 210.0);
+        assert!((t.change_pct.unwrap() - 5.0).abs() < 1e-9, "cambio contra el cierre vigente: {:?}", t.change_pct);
         cancel.cancel();
     }
 }
