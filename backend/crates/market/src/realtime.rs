@@ -40,6 +40,9 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_WS_MESSAGE: usize = 1 << 20;
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
+/// Las altas/bajas que llegan juntas (varios activos suscritos a la vez) se agrupan en una sola
+/// tanda antes de hablar con el proveedor.
+const COALESCE: Duration = Duration::from_millis(40);
 
 // ---------------------------------------------------------------------------------------------
 // Feed WS genérico
@@ -63,6 +66,12 @@ pub trait WsFeed: Send + Sync + 'static {
     fn url(&self) -> String;
     /// Mensajes de (des)suscripción para estos símbolos.
     fn subscribe_msgs(&self, symbols: &[String], on: bool) -> Vec<String>;
+    /// Separación mínima entre mensajes de control enviados al proveedor. Binance admite 5
+    /// mensajes por segundo y conexión y, al pasarse, ignora los siguientes sin avisar y acaba
+    /// cerrando la conexión (medido: 10 `SUBSCRIBE` seguidos -> 5 acks, ningún tick, cierre).
+    fn min_msg_gap(&self) -> Duration {
+        Duration::ZERO
+    }
     /// Ticks contenidos en un mensaje de texto (vacío si es un ack u otro tipo de mensaje).
     fn parse(&self, text: &str) -> Vec<RawTick>;
 }
@@ -181,13 +190,8 @@ async fn ws_worker<F: WsFeed>(
 
         // Suscribe todo lo que se quiere escuchar.
         let all: Vec<String> = desired.iter().cloned().collect();
-        let mut ok = true;
-        for m in feed.subscribe_msgs(&all, true) {
-            if ws.send_text(m).await.is_err() {
-                ok = false;
-                break;
-            }
-        }
+        let mut last_control: Option<tokio::time::Instant> = None;
+        let ok = send_paced(&mut ws, feed.subscribe_msgs(&all, true), feed.min_msg_gap(), &mut last_control).await;
         if !ok {
             if !wait_backoff(&mut attempt, &mut desired, &mut cmds, &cancel).await {
                 return;
@@ -207,16 +211,42 @@ async fn ws_worker<F: WsFeed>(
                 }
                 c = cmds.recv() => {
                     let Some(c) = c else { return };
-                    if let Some((sym, on)) = apply(&mut desired, c) {
-                        let mut failed = false;
-                        for m in feed.subscribe_msgs(std::slice::from_ref(&sym), on) {
-                            if ws.send_text(m).await.is_err() { failed = true; break; }
+                    // Una ráfaga de altas (un cliente que se suscribe a 10 activos) se agrupa en
+                    // una tanda: un mensaje por activo desbordaría el límite del proveedor.
+                    let before = desired.clone();
+                    apply(&mut desired, c);
+                    let settle = tokio::time::sleep(COALESCE);
+                    tokio::pin!(settle);
+                    loop {
+                        tokio::select! {
+                            () = cancel.cancelled() => {
+                                connected.store(false, Ordering::Relaxed);
+                                let _ = ws.close(None).await;
+                                return;
+                            }
+                            () = &mut settle => break,
+                            c = cmds.recv() => match c {
+                                Some(c) => { apply(&mut desired, c); }
+                                None => return,
+                            },
                         }
-                        if failed { break "error al enviar"; }
-                        if desired.is_empty() {
-                            let _ = ws.close(None).await;
-                            break "sin suscripciones";
-                        }
+                    }
+                    let mut added: Vec<String> = desired.difference(&before).cloned().collect();
+                    let mut removed: Vec<String> = before.difference(&desired).cloned().collect();
+                    added.sort_unstable();
+                    removed.sort_unstable();
+                    let gap = feed.min_msg_gap();
+                    let mut sent = true;
+                    if !added.is_empty() {
+                        sent = send_paced(&mut ws, feed.subscribe_msgs(&added, true), gap, &mut last_control).await;
+                    }
+                    if sent && !removed.is_empty() {
+                        sent = send_paced(&mut ws, feed.subscribe_msgs(&removed, false), gap, &mut last_control).await;
+                    }
+                    if !sent { break "error al enviar"; }
+                    if desired.is_empty() {
+                        let _ = ws.close(None).await;
+                        break "sin suscripciones";
                     }
                 }
                 msg = tokio::time::timeout(IDLE_TIMEOUT, ws.next()) => {
@@ -290,6 +320,29 @@ fn ws_error_kind(e: &tokio_tungstenite::tungstenite::Error) -> &'static str {
         E::Http(_) | E::HttpFormat(_) => "HTTP",
         _ => "otro",
     }
+}
+
+/// Envía mensajes de control separados al menos `gap` entre sí (y del último enviado antes).
+/// `false` si el envío falla.
+async fn send_paced<W: SendText>(
+    ws: &mut W,
+    msgs: Vec<String>,
+    gap: Duration,
+    last: &mut Option<tokio::time::Instant>,
+) -> bool {
+    for m in msgs {
+        if let Some(prev) = *last {
+            let wait = gap.saturating_sub(prev.elapsed());
+            if !wait.is_zero() {
+                tokio::time::sleep(wait).await;
+            }
+        }
+        if ws.send_text(m).await.is_err() {
+            return false;
+        }
+        *last = Some(tokio::time::Instant::now());
+    }
+    true
 }
 
 trait SendText {
@@ -872,6 +925,118 @@ mod tests {
         // El resto se colapsa en el último valor, emitido tras la ventana.
         let last = s.next().await.unwrap();
         assert_eq!(last.price, 120.0);
+        cancel.cancel();
+    }
+
+    /// Feed contra un servidor WS local: cada mensaje de control lleva hasta 3 símbolos.
+    struct LocalFeed {
+        url: String,
+    }
+    impl WsFeed for LocalFeed {
+        fn name(&self) -> &'static str {
+            "local"
+        }
+        fn url(&self) -> String {
+            self.url.clone()
+        }
+        fn subscribe_msgs(&self, symbols: &[String], on: bool) -> Vec<String> {
+            symbols
+                .chunks(3)
+                .map(|c| format!("{}:{}", if on { "SUB" } else { "UNSUB" }, c.join(",")))
+                .collect()
+        }
+        fn min_msg_gap(&self) -> Duration {
+            Duration::from_millis(60)
+        }
+        fn parse(&self, _: &str) -> Vec<RawTick> {
+            vec![]
+        }
+    }
+
+    /// Medido con Binance real: 10 `SUBSCRIBE` en ráfaga (1 al conectar + 9 de otros activos) pasan
+    /// de 5 mensajes/s; solo se atienden 5, no llega ningún tick y la conexión se cierra. Un cliente
+    /// que se suscribe a varios activos a la vez debe producir pocos mensajes y espaciados.
+    #[tokio::test]
+    async fn burst_of_subscriptions_is_batched_and_paced() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/", listener.local_addr().unwrap());
+        let received: Arc<Mutex<Vec<(Instant, String)>>> = Arc::default();
+        let log = received.clone();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            while let Some(Ok(m)) = ws.next().await {
+                if let Message::Text(t) = m {
+                    log.lock().unwrap().push((Instant::now(), t.to_string()));
+                }
+            }
+        });
+        let cancel = CancellationToken::new();
+        let (ingest, _rx) = mpsc::channel(16);
+        let h = spawn_ws(LocalFeed { url }, ingest, 0, cancel.clone());
+        h.cmd_tx.send(Cmd::Sub("S0".into())).unwrap();
+        while !h.is_connected() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        // Ráfaga de 9 altas más, una a una, como hace el hub.
+        for i in 1..10 {
+            h.cmd_tx.send(Cmd::Sub(format!("S{i}"))).unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        let msgs = received.lock().unwrap().clone();
+        let symbols: HashSet<String> = msgs
+            .iter()
+            .flat_map(|(_, m)| m.strip_prefix("SUB:").unwrap_or_default().split(',').map(str::to_owned).collect::<Vec<_>>())
+            .collect();
+        assert_eq!(symbols.len(), 10, "llegan los 10 símbolos: {msgs:?}");
+        // 1 mensaje inicial + 9 símbolos en bloques de 3 = 4 (antes: 10).
+        assert!(msgs.len() <= 5, "demasiados mensajes de control: {msgs:?}");
+        for w in msgs.windows(2) {
+            assert!(w[1].0 - w[0].0 >= Duration::from_millis(50), "mensajes sin espaciar: {msgs:?}");
+        }
+        cancel.cancel();
+    }
+
+    /// Bajas en ráfaga (el último cliente se va): una tanda de `UNSUB`, no una por activo, y la
+    /// conexión se cierra al quedarse sin símbolos.
+    #[tokio::test]
+    async fn burst_of_unsubscriptions_is_batched() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/", listener.local_addr().unwrap());
+        let received: Arc<Mutex<Vec<String>>> = Arc::default();
+        let log = received.clone();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            while let Some(Ok(m)) = ws.next().await {
+                if let Message::Text(t) = m {
+                    log.lock().unwrap().push(t.to_string());
+                }
+            }
+        });
+        let cancel = CancellationToken::new();
+        let (ingest, _rx) = mpsc::channel(16);
+        let h = spawn_ws(LocalFeed { url }, ingest, 0, cancel.clone());
+        for i in 0..3 {
+            h.cmd_tx.send(Cmd::Sub(format!("S{i}"))).unwrap();
+        }
+        // Espera a que el proveedor haya recibido las 3 altas (algunas van en una segunda tanda).
+        for _ in 0..200 {
+            let n: usize = received.lock().unwrap().iter().filter(|m| m.starts_with("SUB:")).map(|m| m.matches(',').count() + 1).sum();
+            if n >= 3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        for i in 0..3 {
+            h.cmd_tx.send(Cmd::Unsub(format!("S{i}"))).unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let msgs = received.lock().unwrap().clone();
+        let unsubs: Vec<_> = msgs.iter().filter(|m| m.starts_with("UNSUB:")).collect();
+        assert_eq!(unsubs.len(), 1, "una sola tanda de bajas, no una por activo: {msgs:?}");
+        assert_eq!(unsubs[0].matches(',').count(), 2, "con los 3 símbolos: {msgs:?}");
+        assert!(!h.is_connected(), "sin suscripciones se cierra la conexión");
         cancel.cancel();
     }
 

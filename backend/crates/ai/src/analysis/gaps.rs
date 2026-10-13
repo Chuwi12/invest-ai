@@ -29,11 +29,11 @@ pub fn real_gaps(snap: &AssetSnapshot, card: &Scorecard, lang: Lang) -> Vec<Stri
                     "La cotización llega con {} s de retraso ({}).",
                     "The quote is delayed by {} s ({}).",
                     q.delay_secs.unwrap_or(0),
-                    q.source
+                    crate::fmt::provider_name(&q.source)
                 ));
             }
             if q.delay_secs.is_none() {
-                push(tr!(lang, "No se conoce el retraso de la cotización ({}).", "The quote delay is unknown ({}).", q.source));
+                push(tr!(lang, "No se conoce el retraso de la cotización ({}).", "The quote delay is unknown ({}).", crate::fmt::provider_name(&q.source)));
             }
         }
     }

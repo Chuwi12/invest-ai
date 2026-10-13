@@ -37,6 +37,43 @@ pub fn price_l(lang: crate::lang::Lang, x: f64) -> String {
     format!("{}{}{}", if neg { "-" } else { "" }, grouped, frac.map(|f| format!(",{f}")).unwrap_or_default())
 }
 
+/// Nombre de visualización de un proveedor de datos (los mismos que muestra la UI en
+/// `frontend/src/lib/sources.ts`): `binance` → «Binance», `yahoo` → «Yahoo Finance». Un id que no se
+/// conoce se deja como viene salvo que sea todo minúsculas, en cuyo caso se capitaliza («fixture» →
+/// «Fixture»). Solo para texto que ve el usuario: `SourceRef.provider` conserva el id, que la UI usa
+/// para elegir el enlace de verificación.
+pub fn provider_name(id: &str) -> String {
+    let key = id.trim().to_lowercase();
+    let key = key.strip_prefix("provider:").unwrap_or(&key);
+    let known = match key {
+        "yahoo" | "yahoo_rss" => "Yahoo Finance",
+        "binance" => "Binance",
+        "coingecko" => "CoinGecko",
+        "finnhub" => "Finnhub",
+        "alphavantage" => "Alpha Vantage",
+        "fmp" => "Financial Modeling Prep",
+        "twelvedata" => "Twelve Data",
+        "fred" => "FRED",
+        "sec" | "edgar" => "SEC EDGAR",
+        "gdelt" => "GDELT",
+        "google_news" => "Google News",
+        "newsapi" => "NewsAPI",
+        "marketaux" => "Marketaux",
+        "cryptopanic" => "CryptoPanic",
+        "ecb" => "BCE",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_string();
+    }
+    let id = id.trim();
+    if id.chars().any(char::is_uppercase) {
+        return id.to_string();
+    }
+    let mut cs = id.chars();
+    cs.next().map(|c| c.to_uppercase().chain(cs).collect()).unwrap_or_default()
+}
+
 /// Fecha corta legible: «12 oct 2026» / «12 Oct 2026».
 pub fn date_l(lang: crate::lang::Lang, d: chrono::NaiveDate) -> String {
     use chrono::Datelike;
@@ -60,6 +97,15 @@ pub fn pct(frac: f64) -> String {
         return "n/d".into();
     }
     format!("{:.1}%", frac * 100.0)
+}
+
+/// Fracción → porcentaje con DOS decimales (0.0003 → "0.03%"): para ratios pequeños (gastos de un
+/// ETF, rentabilidad por dividendo) que con un decimal se redondean a «0.0%».
+pub fn pct2(frac: f64) -> String {
+    if !frac.is_finite() {
+        return "n/d".into();
+    }
+    format!("{:.2}%", frac * 100.0)
 }
 
 /// Igual que `pct` pero con signo explícito (+1.2% / -3.4%).
@@ -115,6 +161,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_names_are_capitalised_for_the_user() {
+        assert_eq!(provider_name("binance"), "Binance");
+        assert_eq!(provider_name("yahoo"), "Yahoo Finance");
+        assert_eq!(provider_name("Yahoo"), "Yahoo Finance");
+        assert_eq!(provider_name("yahoo_rss"), "Yahoo Finance");
+        assert_eq!(provider_name("alphavantage"), "Alpha Vantage");
+        assert_eq!(provider_name("provider:marketaux"), "Marketaux");
+        assert_eq!(provider_name("fixture"), "Fixture");
+        // Lo que ya trae mayúsculas (un medio como Reuters) no se toca.
+        assert_eq!(provider_name("Reuters"), "Reuters");
+        assert_eq!(provider_name("Financial Times"), "Financial Times");
+        assert_eq!(provider_name(""), "");
+    }
+
+    #[test]
     fn prices_adapt_decimals() {
         assert_eq!(price(64231.5), "64231.5");
         assert_eq!(price(212.3), "212.3");
@@ -133,6 +194,8 @@ mod tests {
         assert_eq!(pct_signed(0.05), "+5.0%");
         assert_eq!(pct_signed(-0.0312), "-3.1%");
         assert_eq!(pct(f64::INFINITY), "n/d");
+        assert_eq!(pct2(0.0003), "0.03%");
+        assert_eq!(pct2(f64::NAN), "n/d");
     }
 
     #[test]

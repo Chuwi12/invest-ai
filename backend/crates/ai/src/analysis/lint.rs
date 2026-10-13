@@ -7,7 +7,8 @@
 
 use crate::fidelity::extract_numbers;
 
-/// Calcos y errores conocidos: (fragmento en minúsculas, sugerencia).
+/// Calcos y errores conocidos: (fragmento en minúsculas, sugerencia). Si el fragmento va precedido
+/// de `OK_BEFORE` es correcto («flujo de caja libre del año» no es el calco «caja libre del»).
 const BAD_PHRASES: &[(&str, &str)] = &[
     ("en por ", "preposición sobrante: «en por tramos» → «por tramos»"),
     ("(de forma escalonada)", "no repitas el término entre paréntesis"),
@@ -26,6 +27,15 @@ const BAD_PHRASES: &[(&str, &str)] = &[
     ("tradear", "«operar»"),
     ("en niveles bajistas", "frase sin sentido: precisa qué nivel"),
 ];
+
+/// Fragmentos de `BAD_PHRASES` que son válidos si van tras este prefijo.
+const OK_BEFORE: &[(&str, &str)] = &[("caja libre del", "flujo de ")];
+
+/// ¿Aparece `bad` en `lower` en algún sitio donde SÍ es un error (no precedido de su prefijo válido)?
+fn is_bad_occurrence(lower: &str, bad: &str) -> bool {
+    let ok_prefix = OK_BEFORE.iter().find(|(b, _)| *b == bad).map(|(_, p)| *p);
+    lower.match_indices(bad).any(|(i, _)| ok_prefix.is_none_or(|p| !lower[..i].ends_with(p)))
+}
 
 /// Palabras inglesas frecuentes que se cuelan (no existen en castellano).
 const ENGLISH: &[&str] = &[
@@ -64,7 +74,7 @@ pub fn spanish_issues(text: &str) -> Vec<Issue> {
     }
     let lower = text.to_lowercase();
     for (bad, fix) in BAD_PHRASES {
-        if lower.contains(bad) {
+        if is_bad_occurrence(&lower, bad) {
             push(format!("«{}» es incorrecto: usa {fix}", bad.trim()));
         }
     }
@@ -72,15 +82,23 @@ pub fn spanish_issues(text: &str) -> Vec<Issue> {
         .split(|c: char| !c.is_alphabetic() && c != '\'')
         .filter(|w| !w.is_empty())
         .collect();
-    for w in &words {
-        if ENGLISH.contains(w) {
+    // Inglés colado, salvo nombres propios: «T. Rowe Price», «Vanguard Growth ETF», «The Home Depot»
+    // llevan mayúscula a mitad de frase.
+    let mut sentence_start = true;
+    for tok in text.split_whitespace() {
+        let core = tok.trim_matches(|c: char| !c.is_alphabetic());
+        let capitalized = core.chars().next().is_some_and(char::is_uppercase);
+        let w = core.to_lowercase();
+        if ENGLISH.contains(&w.as_str()) && !(capitalized && !sentence_start) {
             push(format!("«{w}» está en inglés"));
         }
+        sentence_start = tok.ends_with(['.', '!', '?', ':', '¿', '¡']) && !tok.chars().next().is_some_and(|c| c.is_uppercase() && tok.len() <= 2);
     }
-    // Con dígitos pegados («SMA20 SMA50») no es una repetición.
-    let alnum: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    for pair in alnum.windows(2) {
-        if pair[0] == pair[1] && pair[0].len() >= 2 && !pair[0].chars().any(|c| c.is_ascii_digit()) {
+    // Palabra repetida: dos tokens seguidos y sin puntuación entre ellos («de de»). Una palabra al
+    // final de una frase y la misma al empezar la siguiente («…el soporte. Soporte que…») no lo es,
+    // ni con dígitos pegados («SMA20 SMA50»).
+    for pair in lower.split_whitespace().collect::<Vec<_>>().windows(2) {
+        if pair[0] == pair[1] && pair[0].chars().count() >= 2 && pair[0].chars().all(char::is_alphabetic) {
             push(format!("palabra repetida: «{} {}»", pair[0], pair[1]));
         }
     }
@@ -131,7 +149,8 @@ pub fn dedupe_sentences(text: &str) -> String {
             let words: std::collections::HashSet<String> = sent
                 .to_lowercase()
                 .split(|c: char| !c.is_alphanumeric() && c != '.')
-                .filter(|w| w.chars().count() >= 3)
+                // Las cifras cuentan aunque sean cortas: «PER 31» y «PER 29» son datos distintos.
+                .filter(|w| w.chars().count() >= 3 || w.chars().any(|c| c.is_ascii_digit()))
                 .map(str::to_string)
                 .collect();
             // Repetición literal o parafraseada: ≥ 70 % de palabras en común con una frase anterior.
@@ -237,6 +256,36 @@ mod tests {
     fn indicator_names_are_not_repeated_words() {
         assert!(spanish_issues("Sobre la SMA20 (335.7) y la SMA50 (323) y la SMA200").is_empty());
         assert!(spanish_issues("la SMA 20 SMA 50").is_empty() || true);
+    }
+
+    #[test]
+    fn valid_spanish_is_not_flagged() {
+        // «caja libre del» solo es un calco cuando falta «flujo de»: «flujo de caja libre del año» es correcto.
+        assert!(spanish_issues("El flujo de caja libre del último año fue de 100 M.").is_empty());
+        assert!(!spanish_issues("La caja libre del grupo es alta.").is_empty());
+        // Una palabra al final de una frase y la misma al principio de la siguiente no es una repetición.
+        assert!(spanish_issues("El nivel clave es el soporte. Soporte que se rompe con facilidad.").is_empty());
+        assert!(spanish_issues("Hay dos niveles: precio, precio objetivo y stop.").is_empty());
+        assert!(!spanish_issues("sube de de forma fuerte").is_empty());
+        // Nombres propios en inglés (empresas, fondos) no son inglés colado.
+        assert!(spanish_issues("T. Rowe Price y The Home Depot cotizan con descuento; Vanguard Growth ETF pesa un 5 %.").is_empty());
+        assert!(!spanish_issues("The price is high").is_empty());
+    }
+
+    #[test]
+    fn sentences_that_differ_only_in_a_short_number_are_not_duplicates() {
+        // El PER y la rentabilidad son datos distintos aunque «31» y «29» tengan dos cifras.
+        let t = "El PER es 31 veces las ganancias. El PER es 29 veces las ganancias.";
+        assert_eq!(dedupe_sentences(t), t);
+        // Pero la repetición literal sigue eliminándose.
+        assert_eq!(dedupe_sentences("El PER es 31 veces las ganancias. El PER es 31 veces las ganancias."), "El PER es 31 veces las ganancias.");
+    }
+
+    #[test]
+    fn spanish_formatted_figures_count_once_in_specificity() {
+        // «81.059,79» y «81059.79» son la misma cifra; «2057,45» no es «2057» + «45».
+        let s = specificity("El precio es 81.059,79 y el ATR 2057,45.\n\nEl soporte 81059.79 sigue.");
+        assert_eq!(s.figures, 2);
     }
 
     #[test]

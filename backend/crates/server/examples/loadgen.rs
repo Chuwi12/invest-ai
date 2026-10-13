@@ -2,11 +2,16 @@
 //!
 //! ```text
 //! loadgen http  http://127.0.0.1:8791 -n 2000 -c 50 [--gzip] /api/dashboard [otra/ruta ...]
-//! loadgen ws    http://127.0.0.1:8791 --clients 20 --secs 30 crypto:BTC crypto:ETH ...
+//! loadgen ws    http://127.0.0.1:8791 --clients 20 --secs 30 [--dump ticks.tsv] crypto:BTC crypto:ETH ...
 //! ```
 //! `http`: conexiones keep-alive, una por cliente; las rutas se reparten en round-robin.
 //! `ws`: cada cliente se suscribe a todos los ids; mide ticks/s y la latencia entre la marca de
-//! tiempo del proveedor (`ts`) y la recepción en el cliente.
+//! tiempo del proveedor (`ts`) y la recepción en el cliente, en conjunto y separando el primer tick
+//! de cada activo (`initial`: el hub reenvía el último tick conocido al que se suscribe tarde, con
+//! su hora original, que puede tener varios segundos en pares poco líquidos) de los ticks en vivo
+//! (`live`). Con `--dump FICHERO` guarda una fila
+//! TSV por tick (`cliente, id, fuente, precio, ts, recibido`, ambas horas en ms epoch) para
+//! analizar la latencia por activo y el espaciado entre ticks.
 
 use std::{
     sync::{
@@ -38,6 +43,7 @@ async fn main() {
     let base = args.get(1).cloned().unwrap_or_default();
     let addr = base.trim_start_matches("http://").trim_end_matches('/').to_owned();
     let (mut n, mut c, mut clients, mut secs, mut gzip) = (100usize, 1usize, 20usize, 30u64, false);
+    let mut dump: Option<String> = None;
     let mut rest = Vec::new();
     let mut it = args.into_iter().skip(2);
     while let Some(a) = it.next() {
@@ -47,12 +53,13 @@ async fn main() {
             "--clients" => clients = it.next().and_then(|v| v.parse().ok()).unwrap_or(clients),
             "--secs" => secs = it.next().and_then(|v| v.parse().ok()).unwrap_or(secs),
             "--gzip" => gzip = true,
+            "--dump" => dump = it.next(),
             _ => rest.push(a),
         }
     }
     match mode.as_str() {
         "http" => http(addr, n, c, gzip, rest).await,
-        "ws" => ws(addr, clients, secs, rest).await,
+        "ws" => ws(addr, clients, secs, dump, rest).await,
         _ => eprintln!("uso: loadgen http|ws BASE ..."),
     }
 }
@@ -170,15 +177,18 @@ async fn http(addr: String, n: usize, c: usize, gzip: bool, paths: Vec<String>) 
     );
 }
 
-async fn ws(addr: String, clients: usize, secs: u64, ids: Vec<String>) {
+async fn ws(addr: String, clients: usize, secs: u64, dump: Option<String>, ids: Vec<String>) {
     let end = Instant::now() + Duration::from_secs(secs);
     let mut tasks = Vec::new();
-    for _ in 0..clients {
+    for client in 0..clients {
         let (addr, ids) = (addr.clone(), ids.clone());
+        let dumping = dump.is_some();
         tasks.push(tokio::spawn(async move {
             let url = format!("ws://{addr}/api/ws");
-            let mut lat = Vec::new();
-            let Ok((mut sock, _)) = tokio_tungstenite::connect_async(url).await else { return (lat, 1usize) };
+            let mut lat: Vec<(f64, bool)> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            let mut rows = String::new();
+            let Ok((mut sock, _)) = tokio_tungstenite::connect_async(url).await else { return (lat, 1usize, rows) };
             let sub = serde_json::json!({ "type": "subscribe", "ids": ids }).to_string();
             sock.send(Message::text(sub)).await.ok();
             while Instant::now() < end {
@@ -190,33 +200,66 @@ async fn ws(addr: String, clients: usize, secs: u64, ids: Vec<String>) {
                             && let Some(ts) = v["tick"]["ts"].as_str()
                             && let Ok(ts) = chrono::DateTime::parse_from_rfc3339(ts)
                         {
-                            lat.push((now - ts.with_timezone(&chrono::Utc)).num_milliseconds() as f64);
+                            let initial = seen.insert(v["tick"]["id"].as_str().unwrap_or("").to_owned());
+                            lat.push(((now - ts.with_timezone(&chrono::Utc)).num_milliseconds() as f64, initial));
+                            if dumping {
+                                let t = &v["tick"];
+                                rows.push_str(&format!(
+                                    "{client}\t{}\t{}\t{}\t{}\t{}\n",
+                                    t["id"].as_str().unwrap_or(""),
+                                    t["source"].as_str().unwrap_or(""),
+                                    t["price"],
+                                    ts.timestamp_millis(),
+                                    now.timestamp_millis()
+                                ));
+                            }
                         }
                     }
                     Ok(Some(Ok(_))) => {}
                     _ => break,
                 }
             }
-            (lat, 0)
+            (lat, 0, rows)
         }));
     }
-    let (mut lat, mut failed) = (Vec::new(), 0);
+    let (mut lat, mut failed, mut all_rows): (Vec<(f64, bool)>, usize, String) = (Vec::new(), 0, String::new());
     for t in tasks {
-        let (l, f) = t.await.unwrap();
+        let (l, f, r) = t.await.unwrap();
         lat.extend(l);
         failed += f;
+        all_rows.push_str(&r);
     }
-    lat.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    if let Some(path) = dump
+        && let Err(e) = std::fs::write(&path, all_rows)
+    {
+        eprintln!("no se pudo escribir {path}: {e}");
+    }
+    let split = |initial: Option<bool>| {
+        let mut v: Vec<f64> = lat.iter().filter(|(_, i)| initial.is_none_or(|w| w == *i)).map(|(l, _)| *l).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v
+    };
+    let (all, initial, live) = (split(None), split(Some(true)), split(Some(false)));
+    let block = |v: &[f64]| {
+        format!(
+            "{{\"n\":{},\"p50\":{:.0},\"p95\":{:.0},\"p99\":{:.0},\"max\":{:.0}}}",
+            v.len(),
+            pct(v, 0.5),
+            pct(v, 0.95),
+            pct(v, 0.99),
+            pct(v, 1.0)
+        )
+    };
     println!(
-        "{{\"clients\":{},\"failed\":{},\"secs\":{},\"ticks\":{},\"ticks_per_sec_total\":{:.1},\"ticks_per_sec_per_client\":{:.2},\"ts_to_recv_ms\":{{\"p50\":{:.0},\"p95\":{:.0},\"p99\":{:.0}}}}}",
+        "{{\"clients\":{},\"failed\":{},\"secs\":{},\"ticks\":{},\"ticks_per_sec_total\":{:.1},\"ticks_per_sec_per_client\":{:.2},\"ts_to_recv_ms\":{},\"initial_ts_to_recv_ms\":{},\"live_ts_to_recv_ms\":{}}}",
         clients,
         failed,
         secs,
-        lat.len(),
-        lat.len() as f64 / secs as f64,
-        lat.len() as f64 / secs as f64 / clients as f64,
-        pct(&lat, 0.5),
-        pct(&lat, 0.95),
-        pct(&lat, 0.99)
+        all.len(),
+        all.len() as f64 / secs as f64,
+        all.len() as f64 / secs as f64 / clients as f64,
+        block(&all),
+        block(&initial),
+        block(&live)
     );
 }

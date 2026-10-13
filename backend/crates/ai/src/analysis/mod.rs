@@ -272,7 +272,23 @@ impl AnalysisEngine {
         let opts = ContextOptions { max_tokens, lang };
         // Contexto completo: fija la numeración de noticias y es el índice de verificación.
         let built = build_context(&snap, &card, &opts, &mut registry);
-        let stage_ctx = |sec: &Sections| build_context_sections(&snap, &card, &opts, &mut registry.clone(), sec).text;
+        // Contexto de cada etapa. TODOS se construyen con el MISMO registro: si el completo tuvo que
+        // reducirse, una etapa de solo noticias puede mostrar más (N9, N10…) y el verificador debe
+        // conocerlas y poder comprobar sus cifras (R-11).
+        let stages = stage_plan(depth);
+        let mut ctx_for = |sec: &Sections| build_context_sections(&snap, &card, &opts, &mut registry, sec).text;
+        let stage_texts: Vec<String> = stages
+            .iter()
+            .map(|st| match st {
+                Stage::Combined => built.text.clone(),
+                Stage::Technical => ctx_for(&Sections::technical()),
+                Stage::Fundamental => ctx_for(&Sections::fundamental()),
+                Stage::Sentiment => ctx_for(&Sections::sentiment()),
+                Stage::MacroRisk => ctx_for(&Sections::macro_risk()),
+            })
+            .collect();
+        // Compacto (cotización + puntuaciones): lo demás ya está en el digest. Sin noticias.
+        let judge_text = ctx_for(&Sections::judge());
         let lang_code = self.cfg.lang_code();
         let system = system_prompt(&lang_code);
         // Niveles: dos planes porque dependen del veredicto final (esperar ≠ comprar).
@@ -280,26 +296,21 @@ impl AnalysisEngine {
         let plan_wait = levels::plan(&snap, Verdict::Wait, lang);
         let levels_block = levels_block(plan_now.as_ref(), plan_wait.as_ref(), lang);
 
-        let mut v = Verifier::new(&built.text, &snap, &built.news, lang);
+        let mut v = Verifier::new(&built.text, &snap, &registry, lang);
+        for text in stage_texts.iter().chain([&judge_text]) {
+            v.idx.add_context(text);
+        }
         v.idx.add_text(&levels_block, Segment::Levels);
         let usage = Usage::default();
         let mut stage_notes: Vec<String> = Vec::new();
 
         // --- Etapas de análisis (independientes entre sí, cada una con su contexto) ---
-        let stages = stage_plan(depth);
         let par = self.cfg.parallel.max(1);
         let futs: Vec<BoxFuture<'_, (usize, std::result::Result<StageReport, CallError>)>> = stages
             .iter()
             .enumerate()
             .map(|(i, st)| {
-                let ctx = match st {
-                    Stage::Combined => built.text.clone(),
-                    Stage::Technical => stage_ctx(&Sections::technical()),
-                    Stage::Fundamental => stage_ctx(&Sections::fundamental()),
-                    Stage::Sentiment => stage_ctx(&Sections::sentiment()),
-                    Stage::MacroRisk => stage_ctx(&Sections::macro_risk()),
-                };
-                let user = format!("{}{}", data_block(&ctx), prompts::with_language(st.task(), &lang_code));
+                let user = format!("{}{}", data_block(&stage_texts[i]), prompts::with_language(st.task(), &lang_code));
                 let schema = stage_schema(st.combined(), if st.combined() { 6 } else { 4 });
                 let (system, caps, usage, prog) = (&system, &caps, &usage, &prog);
                 let id = st.id();
@@ -341,13 +352,12 @@ impl AnalysisEngine {
         if debated {
             prog.at("debate");
             let tasks = [prompts::bull_task(&digest), prompts::bear_task(&digest)];
-            // Contexto compacto (cotización + indicadores): lo demás ya está en el digest.
-            let debate_ctx = stage_ctx(&Sections::judge());
+            let debate_ctx = &judge_text;
             let futs: Vec<BoxFuture<'_, (usize, std::result::Result<DebateReport, CallError>)>> = tasks
                 .iter()
                 .enumerate()
                 .map(|(i, task)| {
-                    let user = format!("{}{}", data_block(&debate_ctx), prompts::with_language(task.clone(), &lang_code));
+                    let user = format!("{}{}", data_block(debate_ctx), prompts::with_language(task.clone(), &lang_code));
                     let (system, caps, usage) = (&system, &caps, &usage);
                     async move { (i, self.structured::<DebateReport>(caps, system, user, &debate_schema(), 450, usage).await) }.boxed()
                 })
@@ -388,7 +398,7 @@ impl AnalysisEngine {
         // --- Juez ---
         prog.at("judge");
         let deep = depth == AnalysisDepth::Deep;
-        let judge_ctx = format!("{}\n{levels_block}", stage_ctx(&Sections::judge()));
+        let judge_ctx = format!("{judge_text}\n{levels_block}");
         let judge_user = format!(
             "{}{}",
             data_block(&judge_ctx),
@@ -784,7 +794,7 @@ fn explain_scenarios(sc: &mut [Scenario], plan: &LevelPlan, snap: &AssetSnapshot
         let mut kept = Vec::new();
         let mut dropped = 0;
         for sent in s.description.split_inclusive(". ").map(str::trim).filter(|x| !x.is_empty()) {
-            if extract_numbers(sent).iter().filter(|n| !n.exempt).all(|n| matches(n.value.abs()) || matches(n.value)) {
+            if extract_numbers(sent).iter().filter(|n| !n.exempt).all(|n| n.values().any(|v| matches(v.abs()) || matches(v))) {
                 kept.push(sent);
             } else {
                 dropped += 1;
@@ -1056,6 +1066,23 @@ mod scenario_text_tests {
         let d = &sc[0].description;
         assert!(d.starts_with("Precio = SMA50 81.059,79 (Binance, 12 oct 2026). Si el MACD"), "{d}");
         assert!(d.contains("volatilidad persista"));
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    #[test]
+    fn spanish_formatted_figures_of_the_scenario_are_kept() {
+        // TODO 4: el modelo escribió «81.059,79» y «-1,1 %»: antes se leían como 81.059 / 79 / 1 y 1
+        // y la frase se descartaba por «citar cifras ajenas».
+        let (sc, notes) = run("Si el MACD sigue negativo, el precio cedería hasta 81.059,79 (-1,1 %). Dependería de la volatilidad.");
+        let d = &sc[0].description;
+        assert!(d.contains("cedería hasta 81.059,79 (-1,1 %)") && d.contains("volatilidad"), "{d}");
+        assert!(notes.is_empty(), "{notes:?}");
+        // Y una cifra española ajena sí se descarta.
+        let (sc, notes) = run("Podría caer hasta el soporte 79.769,92.");
+        assert!(!sc[0].description.contains("79.769"), "{}", sc[0].description);
+        assert_eq!(notes.len(), 1);
+        // Formato inglés intacto.
+        let (_, notes) = run("Cedería hasta 81059.79 (-1.1%).");
         assert!(notes.is_empty(), "{notes:?}");
     }
 

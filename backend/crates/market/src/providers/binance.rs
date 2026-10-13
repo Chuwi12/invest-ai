@@ -335,6 +335,11 @@ impl WsFeed for BinanceFeed {
         format!("{}/ws", self.ws_base)
     }
 
+    fn min_msg_gap(&self) -> std::time::Duration {
+        // Límite de Binance: 5 mensajes por segundo y conexión. 250 ms = 4/s, con margen para los pong.
+        std::time::Duration::from_millis(250)
+    }
+
     fn subscribe_msgs(&self, symbols: &[String], on: bool) -> Vec<String> {
         // Binance admite hasta 1024 streams por conexión; se envían en bloques de 100.
         symbols

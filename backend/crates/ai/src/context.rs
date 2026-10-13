@@ -437,7 +437,8 @@ fn render_quote(out: &mut String, q: &Quote, now: DateTime<Utc>, l: Lang) {
     );
     t.row(
         l.t("Variación del día", "Day change"),
-        vec![val(q.change_pct, fmt::pct_signed), val(q.change, |c| format!("({})", fmt::price(c)))],
+        // `change_pct` está en puntos porcentuales (1.2 = +1,2 %), `pct_signed` espera una fracción.
+        vec![val(q.change_pct, |c| fmt::pct_signed(c / 100.0)), val(q.change, |c| format!("({})", fmt::price(c)))],
     );
     t.row(
         "Open / High / Low / Prev close",
@@ -586,7 +587,36 @@ fn render_fundamentals(
         && let Some(d) = &f.description {
             let _ = writeln!(out, "{}", truncate_chars(d, 240));
         }
+    // Las cuentas (ingresos, flujo de caja, caja, deuda) van en `financialCurrency`, que en un ADR
+    // no es la de cotización: se rotulan con su moneda para que no se comparen con el precio (R-12).
+    let price_cur = f
+        .currency
+        .as_deref()
+        .or(snap.quote.as_ref().and_then(|q| q.currency.as_deref()))
+        .or(snap.summary.currency.as_deref());
+    let fin_cur = f
+        .extra
+        .get("financialCurrency")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && price_cur.is_some_and(|p| !p.eq_ignore_ascii_case(c)));
+    let amount = |v: f64| match fin_cur {
+        Some(c) => format!("{} {c}", fmt::big(v)),
+        None => fmt::big(v),
+    };
     let mut t = Table::default();
+    if let (Some(fc), Some(pc)) = (fin_cur, price_cur) {
+        t.one(
+            l.t("Monedas", "Currencies"),
+            Some(tr!(
+                l,
+                "ingresos, flujo de caja, caja y deuda en {}; precio, capitalización y objetivos de analistas en {}",
+                "revenue, free cash flow, cash and debt in {}; price, market cap and analyst targets in {}",
+                fc,
+                pc
+            )),
+        );
+    }
     t.row(
         l.t("Valoración", "Valuation"),
         vec![
@@ -606,7 +636,7 @@ fn render_fundamentals(
     t.row(
         l.t("Resultados", "Earnings"),
         vec![
-            lab("revenue TTM", f.revenue_ttm, fmt::big),
+            lab("revenue TTM", f.revenue_ttm, amount),
             lab("revenue growth YoY", f.revenue_growth_yoy, fmt::pct_signed),
             lab("earnings growth YoY", f.earnings_growth_yoy, fmt::pct_signed),
         ],
@@ -624,9 +654,9 @@ fn render_fundamentals(
     t.row(
         l.t("Caja y deuda", "Cash and debt"),
         vec![
-            lab("FCF", f.free_cash_flow, fmt::big),
-            lab("cash", f.total_cash, fmt::big),
-            lab("debt", f.total_debt, fmt::big),
+            lab("FCF", f.free_cash_flow, amount),
+            lab("cash", f.total_cash, amount),
+            lab("debt", f.total_debt, amount),
             lab("debt/equity", f.debt_to_equity, fmt::num),
             lab("current ratio", f.current_ratio, fmt::num),
         ],
@@ -634,7 +664,7 @@ fn render_fundamentals(
     t.row(
         l.t("Accionista", "Shareholders"),
         vec![
-            lab("dividend yield", f.dividend_yield, fmt::pct),
+            lab("dividend yield", f.dividend_yield, fmt::pct2),
             lab("payout", f.payout_ratio, fmt::pct),
             lab("beta", f.beta, fmt::num),
             lab("short % float", f.short_pct_float, fmt::pct),
@@ -685,7 +715,7 @@ fn render_fundamentals(
         t.row(
             l.t("Fondo", "Fund"),
             vec![
-                lab("expense ratio", f.expense_ratio, fmt::pct),
+                lab("expense ratio", f.expense_ratio, fmt::pct2),
                 lab("assets", f.total_assets, fmt::big),
             ],
         );
@@ -933,6 +963,55 @@ mod tests {
         assert_eq!(c.tokens, estimate_tokens(t));
     }
 
+    /// R-10: `Quote.change_pct` viene en PUNTOS porcentuales (Yahoo `(p/prev-1)*100`, Binance
+    /// `priceChangePercent`: 0.201 = +0,2 %), pero el contexto lo pasaba por `pct_signed`, que espera
+    /// una fracción: el modelo veía «+20.1%» donde el dato real es +0,2 %.
+    #[test]
+    fn day_change_is_shown_in_percent_points_not_multiplied_by_100() {
+        let mut snap = fixture::stock_snapshot();
+        {
+            let q = snap.quote.as_mut().unwrap();
+            q.change_pct = Some(0.201);
+            q.change = Some(0.46);
+        }
+        let c = build(&snap, 6000);
+        assert!(c.text.contains("| Variación del día | +0.2%, (0.46) |"), "{}", c.text);
+        snap.quote.as_mut().unwrap().change_pct = Some(-3.456);
+        snap.quote.as_mut().unwrap().change = Some(-8.2);
+        let c = build(&snap, 6000);
+        assert!(c.text.contains("| Variación del día | -3.5%, (-8.2) |"), "{}", c.text);
+        // Y la fuente de verdad de la cifra (la herramienta del chat) dice lo mismo.
+        let tool = render_part(&snap, Part::Quote, Lang::Es);
+        assert!(tool.contains("-3.5%") && !tool.contains("-345.6%"), "{tool}");
+    }
+
+    /// R-12: en un ADR las cuentas están en otra moneda (`extra.financialCurrency`, p. ej. TWD en TSM)
+    /// que el precio y la capitalización (USD). El contexto mostraba ingresos, caja y deuda sin moneda,
+    /// justo al lado de una capitalización en USD: el modelo los comparaba como si fueran la misma.
+    #[test]
+    fn statement_amounts_carry_their_currency_when_it_differs_from_the_price_currency() {
+        let mut snap = fixture::stock_snapshot();
+        let f = snap.fundamentals.as_mut().unwrap();
+        f.extra.insert("financialCurrency".into(), serde_json::json!("TWD"));
+        let (rev, fcf, cash, debt) = (f.revenue_ttm.unwrap(), f.free_cash_flow.unwrap(), f.total_cash.unwrap(), f.total_debt.unwrap());
+        let c = build(&snap, 6000);
+        for (label, v) in [("revenue TTM", rev), ("FCF", fcf), ("cash", cash), ("debt", debt)] {
+            let needle = format!("{label} {} TWD", fmt::big(v));
+            assert!(c.text.contains(&needle), "falta «{needle}» en:\n{}", c.text);
+        }
+        assert!(c.text.contains("| Monedas | "), "{}", c.text);
+        // Los objetivos de analistas siguen en la moneda de cotización: sin sufijo.
+        let line = c.text.lines().find(|l| l.contains("target mean")).expect("consenso");
+        assert!(!line.contains("TWD"), "{line}");
+        // Misma moneda (o desconocida): sin ruido.
+        let f = snap.fundamentals.as_mut().unwrap();
+        f.extra.insert("financialCurrency".into(), serde_json::json!("USD"));
+        let c = build(&snap, 6000);
+        assert!(!c.text.contains("TWD") && !c.text.contains("| Monedas |"), "{}", c.text);
+        snap.fundamentals.as_mut().unwrap().extra.clear();
+        assert!(!build(&snap, 6000).text.contains("| Monedas |"));
+    }
+
     #[test]
     fn dump_context() {
         let c = build(&fixture::stock_snapshot(), 6000);
@@ -1055,11 +1134,12 @@ mod tests {
             weight: 0.07,
         }];
         let c = build(&etf, 6000);
-        assert!(
-            c.text.contains("expense ratio 0.0%") || c.text.contains("expense ratio 0.03%"),
-            "{}",
-            c.text
-        );
+        // R-13: con un decimal, 0,03 % salía «0.0%» (un ETF casi gratis parecía gratis del todo).
+        assert!(c.text.contains("expense ratio 0.03%"), "{}", c.text);
+        etf.fundamentals.as_mut().unwrap().expense_ratio = Some(0.000945);
+        etf.fundamentals.as_mut().unwrap().dividend_yield = Some(0.0032);
+        let c = build(&etf, 6000);
+        assert!(c.text.contains("expense ratio 0.09%") && c.text.contains("dividend yield 0.32%"), "{}", c.text);
         assert!(c.text.contains("Mayores posiciones | AAPL 7.0%"));
     }
 

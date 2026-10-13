@@ -32,6 +32,8 @@ pub struct MockState {
     /// Retardo entre líneas de la respuesta de chat (para probar cancelación y timeouts).
     pub line_delay: Mutex<Duration>,
     pub open_streams: std::sync::atomic::AtomicUsize,
+    /// Máximo de respuestas de chat abiertas A LA VEZ (mide el solapamiento sin depender del reloj).
+    pub max_open_streams: std::sync::atomic::AtomicUsize,
 }
 
 pub struct MockOllama {
@@ -111,7 +113,8 @@ async fn chat(State(s): State<Arc<MockState>>, Json(body): Json<Value>) -> Respo
     let delay = *s.line_delay.lock().unwrap();
     let st = s.clone();
     let stream = async_stream::stream! {
-        st.open_streams.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let now_open = st.open_streams.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        st.max_open_streams.fetch_max(now_open, std::sync::atomic::Ordering::SeqCst);
         struct Guard(Arc<MockState>);
         impl Drop for Guard {
             fn drop(&mut self) {

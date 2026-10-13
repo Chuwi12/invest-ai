@@ -372,9 +372,10 @@ impl Provider for Yahoo {
     ) -> PResult<Vec<Candle>> {
         let symbol = to_yahoo_symbol(id).ok_or(ProviderError::Unsupported)?;
         let interval = coerce_interval(range, interval);
-        let data = self
+        let mut data = self
             .chart(&symbol, range.as_str(), yahoo_interval(interval))
             .await?;
+        fold_live_point(&mut data.candles, interval);
         Ok(data.candles)
     }
 
@@ -756,6 +757,39 @@ pub fn parse_chart(text: &str) -> PResult<ChartData> {
         meta: result.meta,
         candles,
     })
+}
+
+/// Con la sesión abierta, Yahoo añade al final de las series intradía un punto «en vivo» que no
+/// es una vela: su hora es la del último trade (`regularMarketTime`, p. ej. 15:47:31 en una
+/// serie de 5 min), `o=h=l=c` y volumen 0. Medido con el mercado abierto (13-oct-2026): sin
+/// tratarlo, el gráfico recibe una vela fantasma desalineada dentro del tramo en curso.
+///
+/// Se reconoce porque su separación con la vela anterior no es múltiplo del intervalo (una vela
+/// real, aunque haya un hueco, siempre cae en una frontera). Se pliega en el tramo que le
+/// corresponde: si ese tramo ya tiene vela, actualiza su cierre/máximo/mínimo (el volumen no se
+/// toca: el punto no trae ninguno); si no, pasa a ser la vela de ese tramo, alineada a su inicio.
+/// Los intervalos diarios o mayores no llevan este punto.
+pub fn fold_live_point(candles: &mut Vec<Candle>, interval: Interval) {
+    let step = interval.seconds();
+    if step >= Interval::D1.seconds() || candles.len() < 2 {
+        return;
+    }
+    let (prev, last) = (candles[candles.len() - 2], candles[candles.len() - 1]);
+    let delta = last.t - prev.t;
+    if delta <= 0 || delta % step == 0 {
+        return;
+    }
+    candles.pop();
+    let bucket = prev.t + (delta / step) * step;
+    if bucket == prev.t {
+        if let Some(p) = candles.last_mut() {
+            p.c = last.c;
+            p.h = p.h.max(last.h);
+            p.l = p.l.min(last.l);
+        }
+    } else {
+        candles.push(Candle { t: bucket, ..last });
+    }
 }
 
 fn state_from_periods(now_ts: i64, p: &TradingPeriods) -> MarketState {
@@ -1248,6 +1282,79 @@ mod tests {
                 .all(|c| c.l <= c.o && c.o <= c.h && c.l <= c.c && c.c <= c.h)
         );
         assert!(d.candles.iter().all(|c| c.v.is_some()));
+    }
+
+    const CHART_5M_LIVE: &str = include_str!("../../tests/fixtures/yahoo_chart_aapl_5m_live.json");
+
+    fn candle(t: i64, o: f64, h: f64, l: f64, c: f64, v: f64) -> Candle {
+        Candle { t, o, h, l, c, v: Some(v) }
+    }
+
+    #[test]
+    fn live_point_of_an_open_session_is_folded_into_its_bucket() {
+        // Respuesta real de Yahoo con la sesión abierta (13-oct-2026): la última «vela» es el punto
+        // en vivo de las 15:47:36 con volumen 0, dentro del tramo de las 15:45.
+        let mut d = parse_chart(CHART_5M_LIVE).unwrap();
+        let n = d.candles.len();
+        let [.., prev, live] = d.candles[..] else { panic!("faltan velas") };
+        assert_eq!(live.v, Some(0.0));
+        assert_ne!((live.t - prev.t) % 300, 0, "el punto en vivo no está alineado");
+        fold_live_point(&mut d.candles, Interval::M5);
+        assert_eq!(d.candles.len(), n - 1);
+        let last = d.candles[n - 2];
+        assert_eq!(last.t, prev.t);
+        assert_eq!(last.c, live.c, "el cierre pasa a ser el último precio");
+        assert_eq!(last.v, prev.v, "el volumen no se toca");
+        assert!(last.h >= prev.h && last.l <= prev.l && last.l <= last.c && last.c <= last.h);
+        assert!(d.candles.windows(2).all(|w| (w[1].t - w[0].t) % 300 == 0), "todas las velas alineadas");
+    }
+
+    #[test]
+    fn live_point_in_a_new_bucket_becomes_that_buckets_candle() {
+        // 1 min: la vela de las 15:46 aún no existe; el punto de las 15:46:41 la abre, alineado.
+        let mut c = vec![
+            candle(1_791_906_240, 1.0, 2.0, 0.5, 1.5, 100.0), // 15:44:00
+            candle(1_791_906_300, 1.5, 3.0, 1.0, 2.5, 80.0),  // 15:45:00
+            candle(1_791_906_401, 2.6, 2.6, 2.6, 2.6, 0.0),   // 15:46:41
+        ];
+        fold_live_point(&mut c, Interval::M1);
+        assert_eq!(c.len(), 3);
+        assert_eq!(c[2], candle(1_791_906_360, 2.6, 2.6, 2.6, 2.6, 0.0)); // 15:46:00
+    }
+
+    #[test]
+    fn aligned_or_daily_series_are_left_alone() {
+        // Con huecos (halt) pero todo en fronteras: nada que plegar.
+        let gap = vec![
+            candle(0, 1.0, 1.0, 1.0, 1.0, 5.0),
+            candle(300, 1.0, 1.0, 1.0, 1.0, 5.0),
+            candle(1200, 1.0, 1.0, 1.0, 1.0, 0.0),
+        ];
+        let mut c = gap.clone();
+        fold_live_point(&mut c, Interval::M5);
+        assert_eq!(c, gap);
+        // Diario: nunca se toca, aunque la separación no sea múltiplo.
+        let mut d = vec![candle(0, 1.0, 1.0, 1.0, 1.0, 5.0), candle(100_000, 2.0, 2.0, 2.0, 2.0, 5.0)];
+        let before = d.clone();
+        fold_live_point(&mut d, Interval::D1);
+        assert_eq!(d, before);
+        // Menos de 2 velas: no hay con qué comparar.
+        let mut one = vec![candle(7, 1.0, 1.0, 1.0, 1.0, 0.0)];
+        fold_live_point(&mut one, Interval::M5);
+        assert_eq!(one.len(), 1);
+    }
+
+    #[test]
+    fn hourly_series_with_half_hour_offset_folds_the_live_point() {
+        // 60 min con inicio a :30 (apertura de EE. UU.): 15:30 + punto a las 15:46:47.
+        let mut c = vec![
+            candle(1_791_901_800, 1.0, 2.0, 0.5, 1.5, 100.0), // 14:30:00
+            candle(1_791_905_400, 1.5, 3.0, 1.0, 2.5, 80.0),  // 15:30:00
+            candle(1_791_906_407, 2.0, 2.0, 2.0, 2.0, 0.0),   // 15:46:47
+        ];
+        fold_live_point(&mut c, Interval::H1);
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[1], candle(1_791_905_400, 1.5, 3.0, 1.0, 2.0, 80.0));
     }
 
     #[test]

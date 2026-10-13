@@ -63,7 +63,7 @@ pub struct LevelPlan {
 /// «Binance, 12 oct 2026»: de dónde y de cuándo es el precio sobre el que se calcula.
 pub fn source_label(snap: &AssetSnapshot, lang: Lang) -> String {
     match &snap.quote {
-        Some(q) => format!("{}, {}", q.source, fmt::date_l(lang, q.timestamp.date_naive())),
+        Some(q) => format!("{}, {}", fmt::provider_name(&q.source), fmt::date_l(lang, q.timestamp.date_naive())),
         None => fmt::date_l(lang, snap.generated_at.date_naive()),
     }
 }
@@ -552,6 +552,22 @@ mod tests {
         let bear = sc.bearish.unwrap();
         assert!(bull.value > p.price && bear.value < p.price);
         assert!(sc.base.is_some());
+    }
+
+    #[test]
+    fn the_source_in_the_notes_uses_the_provider_display_name() {
+        // TODO 4: «(binance, 13 oct 2026)» → «(Binance, 13 oct 2026)».
+        let mut snap = fixture::stock_snapshot();
+        {
+            let q = snap.quote.as_mut().unwrap();
+            q.source = "binance".into();
+            q.timestamp = "2026-10-13T10:00:00Z".parse().unwrap();
+        }
+        let p = plan(&snap, Verdict::Accumulate, Lang::Es).unwrap();
+        assert_eq!(p.source, "Binance, 13 oct 2026");
+        assert!(p.note().contains("(Binance, 13 oct 2026)") && !p.note().contains("binance"), "{}", p.note());
+        snap.quote.as_mut().unwrap().source = "yahoo".into();
+        assert_eq!(source_label(&snap, Lang::Es), "Yahoo Finance, 13 oct 2026");
     }
 
     #[test]

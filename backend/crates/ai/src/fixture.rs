@@ -82,15 +82,17 @@ fn quote(
     market_cap: Option<f64>,
     state: MarketState,
 ) -> Quote {
+    // Como los proveedores reales: `change_pct` en PUNTOS porcentuales (0.8 = +0,8 %).
+    let frac = change_pct / 100.0;
     Quote {
         id: id.clone(),
         price,
-        change: Some(price * change_pct / (1.0 + change_pct)),
+        change: Some(price * frac / (1.0 + frac)),
         change_pct: Some(change_pct),
         open: Some(price * 0.997),
         high: Some(price * 1.006),
         low: Some(price * 0.99),
-        prev_close: Some(price / (1.0 + change_pct)),
+        prev_close: Some(price / (1.0 + frac)),
         volume: Some(48_200_000.0),
         market_cap,
         currency: Some(currency.into()),
@@ -158,7 +160,7 @@ pub fn stock_snapshot() -> AssetSnapshot {
     let s = summary(AssetClass::Stock, "AAPL", "Apple Inc.", "NASDAQ", "USD");
     let id = s.id.clone();
     AssetSnapshot {
-        quote: Some(quote(&id, 228.40, 0.008, "USD", Some(3.45e12), MarketState::Regular)),
+        quote: Some(quote(&id, 228.40, 0.8, "USD", Some(3.45e12), MarketState::Regular)),
         fundamentals: Some(Fundamentals {
             description: Some(
                 "Diseña y vende smartphones, ordenadores, wearables y servicios digitales.".into(),
@@ -301,7 +303,7 @@ pub fn crypto_snapshot() -> AssetSnapshot {
     let s = summary(AssetClass::Crypto, "BTC", "Bitcoin", "CRYPTO", "USD");
     let id = s.id.clone();
     AssetSnapshot {
-        quote: Some(quote(&id, 98_450.0, 0.021, "USD", Some(1.95e12), MarketState::Continuous)),
+        quote: Some(quote(&id, 98_450.0, 2.1, "USD", Some(1.95e12), MarketState::Continuous)),
         fundamentals: Some(Fundamentals {
             market_cap: Some(1.95e12),
             circulating_supply: Some(19.8e6),
@@ -370,7 +372,7 @@ pub fn sparse_snapshot() -> AssetSnapshot {
     let s = summary(AssetClass::Stock, "ZZZ", "Zeta Zeta Holdings", "NYSE", "USD");
     let id = s.id.clone();
     AssetSnapshot {
-        quote: Some(quote(&id, 12.5, -0.004, "USD", None, MarketState::Regular)),
+        quote: Some(quote(&id, 12.5, -0.4, "USD", None, MarketState::Regular)),
         fundamentals: None,
         indicators: None,
         news: vec![],
@@ -399,7 +401,7 @@ fn derived_stock(
     let ratio = price / 228.40;
     s.summary = summary(AssetClass::Stock, symbol, name, exchange, "USD");
     let id = s.summary.id.clone();
-    s.quote = Some(quote(&id, price, 0.004, "USD", Some(1.2e12), MarketState::Regular));
+    s.quote = Some(quote(&id, price, 0.4, "USD", Some(1.2e12), MarketState::Regular));
     if let Some(f) = s.fundamentals.as_mut() {
         f.pe_forward = Some(pe);
         f.pe_trailing = Some(pe * 1.15);

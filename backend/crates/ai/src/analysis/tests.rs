@@ -383,6 +383,8 @@ async fn thinking_models_get_think_false_and_others_none() {
 
 #[tokio::test]
 async fn parallel_stages_overlap_when_configured() {
+    // Se mide cuántas respuestas hubo abiertas A LA VEZ, no el tiempo total: un umbral de reloj
+    // (< 600 ms) fallaba cuando la máquina iba cargada.
     let f = facts();
     let e = env_with("qwen2.5:7b", 4).await;
     *e.mock.state.line_delay.lock().unwrap() = Duration::from_millis(40);
@@ -390,10 +392,18 @@ async fn parallel_stages_overlap_when_configured() {
         e.mock.push_chat(stage("neutral", vec![]));
     }
     e.mock.push_chat(judge(&f, false));
-    let t = std::time::Instant::now();
     e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Standard)).await.unwrap();
-    // 4 etapas de ~3 líneas x 40 ms en paralelo + juez: bastante menos que en serie (≥ 0.6 s).
-    assert!(t.elapsed() < Duration::from_millis(600), "{:?}", t.elapsed());
+    let peak = e.mock.state.max_open_streams.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(peak >= 2, "con parallel = 4 las etapas deben solaparse (pico {peak})");
+
+    // En serie (parallel = 1) nunca hay dos a la vez.
+    let e = env_with("qwen2.5:7b", 1).await;
+    for _ in 0..4 {
+        e.mock.push_chat(stage("neutral", vec![]));
+    }
+    e.mock.push_chat(judge(&f, false));
+    e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Standard)).await.unwrap();
+    assert_eq!(e.mock.state.max_open_streams.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -431,4 +441,48 @@ fn thesis_fields_are_joined_into_three_paragraphs() {
     assert_eq!(j.full_thesis(), "A 1.5.\n\nB 2.5.\n\nC 3.5.");
     let old: JudgeOut = serde_json::from_value(json!({"verdict": "hold", "confidence": 0.5, "horizon": "short", "summary": "x", "thesis": "Única"})).unwrap();
     assert_eq!(old.full_thesis(), "Única");
+}
+
+/// R-11: cada etapa construía su contexto con su propio presupuesto y una COPIA del registro de
+/// noticias. Si el contexto completo tenía que reducirse (menos noticias), la etapa de sentimiento
+/// seguía viendo más (hasta 10) y el verificador no conocía las últimas: citar `[N10]` o una cifra de
+/// su titular descartaba un hallazgo correcto («la noticia [N10] no existe»).
+#[tokio::test]
+async fn news_shown_to_a_stage_can_be_cited_even_if_the_full_context_was_trimmed() {
+    let mock = MockOllama::start().await;
+    let cfg = AiConfig { base_url: mock.url.clone(), model: "qwen2.5:7b".into(), num_ctx: 4096, ..AiConfig::default() };
+    let client = OllamaClient::new(&mock.url, Duration::from_secs(10)).unwrap();
+    let models = Arc::new(ModelManager::new(client.clone(), cfg.clone(), Arc::new(MemSettings::default())));
+    let engine = AnalysisEngine::new(client, models, cfg);
+
+    let mut snap = fixture::stock_snapshot();
+    let base = snap.news[0].clone();
+    snap.news = (0..14i64)
+        .map(|i| {
+            let mut n = base.clone();
+            n.id = format!("n{i}");
+            n.url = format!("https://news.example.com/n{i}");
+            n.title = format!("Titular {i}: Foxconn entrega {} unidades del nuevo modelo", 4000 + i * 137);
+            n.summary = Some(format!("Resumen largo de la noticia {i} sobre la cadena de suministro y la demanda del trimestre. ").repeat(3));
+            n.published_at = base.published_at - chrono::Duration::minutes(i * 10);
+            n
+        })
+        .collect();
+
+    // La noticia 9 (0-based) es [N10]: titular «… entrega 5233 unidades …».
+    let f = facts();
+    mock.push_chat(stage("neutral", vec![]));
+    mock.push_chat(stage("neutral", vec![]));
+    mock.push_chat(stage("bullish", vec![finding("Foxconn entrega 5233 unidades del nuevo modelo [N10]")]));
+    mock.push_chat(stage("neutral", vec![]));
+    mock.push_chat(judge(&f, false));
+    let a = engine.analyze(&snap, Some(AnalysisDepth::Standard)).await.unwrap();
+
+    let reqs = mock.chat_requests();
+    let sent = user_of(&reqs[2]);
+    assert!(sent.contains("[N10] ") && sent.contains("5233 unidades"), "la etapa de sentimiento sí ve [N10]:\n{sent}");
+    let judge_user = user_of(&reqs[4]);
+    assert!(judge_user.contains("Foxconn entrega 5233 unidades"), "el hallazgo citable no debe descartarse:\n{judge_user}");
+    let q = a.quality_notes.unwrap_or_default();
+    assert!(q.iter().all(|w| !w.contains("no existe")), "{q:?}");
 }

@@ -5,8 +5,9 @@ use domain::{AssetSnapshot, SourceRef, Verdict};
 
 use super::types::Claim;
 use crate::{
-    context::{NewsRegistry, extract_citations, news_source},
+    context::{NewsRegistry, extract_citations, news_source, parse_tag},
     fidelity::{NumberIndex, Segment, extract_numbers},
+    fmt,
     lang::{Lang, tr},
     scoring::{Scorecard, verdict_rank},
     tokens::truncate_chars,
@@ -215,7 +216,9 @@ impl<'a> Verifier<'a> {
         let mut tags = Vec::new();
         for s in segs {
             if let Segment::News(t) = s {
-                if !text.contains(&format!("[{t}]")) && !text.contains(t.as_str()) && !tags.contains(t) {
+                // Comparar por número de cita, no por subcadena: «N1» está dentro de «N10».
+                let cited = parse_tag(t).is_some_and(|n| extract_citations(text).contains(&n));
+                if !cited && !tags.contains(t) {
                     tags.push(t.clone());
                 }
                 if !self.used.contains(s) {
@@ -254,7 +257,7 @@ impl<'a> Verifier<'a> {
             Segment::Quote => {
                 let q = snap.quote.as_ref()?;
                 Some((
-                    format!("{} {} {}", l.t("cotización", "quote"), q.source, Self::ts(q.timestamp)),
+                    format!("{} {} {}", l.t("cotización", "quote"), fmt::provider_name(&q.source), Self::ts(q.timestamp)),
                     SourceRef {
                         title: format!("{} {id}", l.t("Cotización", "Quote")),
                         url: None,
@@ -279,8 +282,9 @@ impl<'a> Verifier<'a> {
                 let f = snap.fundamentals.as_ref()?;
                 let at = f.as_of.unwrap_or(snap.generated_at);
                 let provider = if f.sources.is_empty() { "market".to_string() } else { f.sources.join(", ") };
+                let shown = if f.sources.is_empty() { provider.clone() } else { f.sources.iter().map(|s| fmt::provider_name(s)).collect::<Vec<_>>().join(", ") };
                 Some((
-                    format!("{} {provider} {}", l.t("fundamentales", "fundamentals"), Self::ts(at)),
+                    format!("{} {shown} {}", l.t("fundamentales", "fundamentals"), Self::ts(at)),
                     SourceRef {
                         title: format!("{} {id}", l.t("Fundamentales", "Fundamentals")),
                         url: None,
@@ -296,8 +300,9 @@ impl<'a> Verifier<'a> {
                 srcs.sort_unstable();
                 srcs.dedup();
                 let provider = if srcs.is_empty() { "market".to_string() } else { srcs.join(", ") };
+                let shown = if srcs.is_empty() { provider.clone() } else { srcs.iter().map(|s| fmt::provider_name(s)).collect::<Vec<_>>().join(", ") };
                 Some((
-                    format!("macro {provider} {}", Self::ts(at)),
+                    format!("macro {shown} {}", Self::ts(at)),
                     SourceRef {
                         title: l.t("Contexto macroeconómico", "Macro context").to_string(),
                         url: None,
@@ -406,6 +411,48 @@ mod tests {
         let srcs = v.sources();
         assert!(srcs.iter().any(|s| s.title.contains("Indicadores")));
         assert!(srcs.iter().all(|s| s.published_at.is_some()));
+    }
+
+    #[test]
+    fn citations_show_the_provider_display_name_but_sources_keep_the_id() {
+        // TODO 4: la cita visible dice «Yahoo Finance», no «yahoo»; `SourceRef.provider` sigue siendo
+        // el id (la UI lo usa para el enlace de verificación).
+        let mut f = fx();
+        f.snap.quote.as_mut().unwrap().source = "yahoo".into();
+        f.snap.fundamentals.as_mut().unwrap().sources = vec!["yahoo".into(), "fmp".into()];
+        let mut v = Verifier::new(&f.text, &f.snap, &f.reg, Lang::Es);
+        let price = crate::fmt::price(f.snap.quote.as_ref().unwrap().price);
+        let c = v.claim(&claim(&format!("Cotiza a {price}"), &[&price])).expect("verificada");
+        assert!(c.text.contains("cotización Yahoo Finance 20") && !c.text.contains("yahoo"), "{}", c.text);
+        let pe = crate::fmt::num(f.snap.fundamentals.as_ref().unwrap().pe_trailing.unwrap());
+        let c = v.claim(&claim(&format!("PER {pe}"), &[&pe])).expect("verificada");
+        assert!(c.text.contains("fundamentales Yahoo Finance, Financial Modeling Prep 20"), "{}", c.text);
+        let srcs = v.sources();
+        assert!(srcs.iter().any(|s| s.provider == "yahoo") && srcs.iter().any(|s| s.provider == "yahoo, fmp"), "{srcs:?}");
+    }
+
+    /// R-14: la cita de una noticia se omitía si el texto contenía su etiqueta como subcadena
+    /// («N1» dentro de «N10»), así que una cifra que solo respalda N1 salía sin su [N1].
+    #[test]
+    fn news_tag_is_added_even_when_another_tag_contains_it_as_a_prefix() {
+        let mut f = fx();
+        // Un registro con 10+ noticias: N1 con una cifra propia y N10 citada en el texto.
+        let base = f.snap.news[0].clone();
+        let mut reg = NewsRegistry::new();
+        for i in 0..10 {
+            let mut n = base.clone();
+            n.id = format!("n{i}");
+            n.url = format!("https://news.example.com/{i}");
+            n.title = if i == 0 { "Foxconn entrega 5233 unidades".to_string() } else { format!("Titular {i} sobre cadena de suministro") };
+            n.summary = None;
+            reg.tag_of(&n);
+        }
+        let mut text = f.text.clone();
+        text.push_str("\n## Noticias (más recientes primero)\n[N1] 2026-10-09 12:30 · Reuters · +0.10 positive: Foxconn entrega 5233 unidades\n");
+        f.reg = reg;
+        let mut v = Verifier::new(&text, &f.snap, &f.reg, Lang::Es);
+        let c = v.claim(&claim("Foxconn entrega 5233 unidades y el titular 9 sobre cadena de suministro [N10]", &[])).expect("verificada");
+        assert!(c.text.contains("[N10]") && c.text.contains("[N1]"), "{}", c.text);
     }
 
     #[test]
