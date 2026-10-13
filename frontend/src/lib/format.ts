@@ -270,6 +270,12 @@ export interface FundamentalsCurrency {
   fallback: boolean
   /** Texto de tooltip cuando la moneda no es la propia de los fundamentales. */
   note: string | undefined
+  /**
+   * Moneda de los estados financieros (ingresos, caja, deuda, flujo de caja) si el proveedor la da aparte
+   * (`extra.financialCurrency` de Yahoo) y difiere de `currency`: un ADR cotiza en USD pero publica en otra.
+   */
+  statements: string | null
+  statementsNote: string | undefined
 }
 
 /**
@@ -277,15 +283,20 @@ export interface FundamentalsCurrency {
  * summary del activo, avisando de que es una deducción (puede diferir de la moneda de cotización).
  */
 export function fundamentalsCurrency(
-  f: { currency?: string | null | undefined },
+  f: { currency?: string | null | undefined; extra?: Record<string, unknown> | null | undefined },
   summaryCurrency: string | null | undefined,
 ): FundamentalsCurrency {
   const own = f.currency?.trim()
-  if (own) return { currency: own, fallback: false, note: currencyNote(own) }
-  const cur = summaryCurrency?.trim() || null
+  const cur = own || summaryCurrency?.trim() || null
+  const fin = f.extra?.['financialCurrency']
+  const finCur = typeof fin === 'string' && fin.trim() && fin.trim() !== cur ? fin.trim() : null
   return {
     currency: cur,
-    fallback: true,
-    note: cur ? `Moneda tomada del resumen del activo (${cur}): el proveedor no indicó la de los fundamentales.` : undefined,
+    fallback: !own,
+    note: own
+      ? currencyNote(own)
+      : cur ? `Moneda tomada del resumen del activo (${cur}): el proveedor no indicó la de los fundamentales.` : undefined,
+    statements: finCur,
+    statementsNote: finCur ? `Estados financieros en ${finCur} (moneda en que la empresa publica sus cuentas); la capitalización y los objetivos van en ${cur ?? 'la moneda de cotización'}.` : undefined,
   }
 }

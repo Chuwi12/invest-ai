@@ -342,7 +342,7 @@ export function genAnalysis(id: AssetId, serial = 0, generatedAt: Date = new Dat
     scenarios,
     expectedReturnPct,
     wouldChangeIf: changeIf,
-    horizonNote: `Horizonte ${horizon === 'short' ? 'corto' : horizon === 'long' ? 'largo' : 'medio'} porque los catalizadores identificados se concentran en las próximas semanas y la volatilidad a 30 días es del ${fmt((ind.volatility30d ?? 0) * 100)} %.`,
+    horizonNote: `Los catalizadores identificados se concentran en las próximas semanas y la volatilidad a 30 días es del ${fmt((ind.volatility30d ?? 0) * 100)} %.`,
     positionSizing,
     method,
     qualityNotes,

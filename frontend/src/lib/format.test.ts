@@ -3,6 +3,7 @@ import {
   NBSP,
   formatChange,
   formatCompact,
+  fundamentalsCurrency,
   formatCompactCurrency,
   currencyNote,
   currencySymbol,
@@ -182,5 +183,28 @@ describe('moneda de la cotización', () => {
     expect(currencyNote('USDT')).toBe('Tether (stablecoin ≈ USD), cotización de Binance')
     expect(currencyNote('USD')).toBeUndefined()
     expect(currencyNote(null)).toBeUndefined()
+  })
+})
+
+describe('fundamentalsCurrency', () => {
+  it('usa la moneda propia de los fundamentales, aunque difiera de la del activo', () => {
+    expect(fundamentalsCurrency({ currency: 'USD' }, 'EUR')).toMatchObject({ currency: 'USD', fallback: false, note: undefined, statements: null })
+  })
+  it('sin moneda propia cae a la del summary y lo indica en el tooltip', () => {
+    const r = fundamentalsCurrency({ currency: null }, 'EUR')
+    expect(r.currency).toBe('EUR')
+    expect(r.fallback).toBe(true)
+    expect(r.note).toMatch(/resumen del activo/)
+    expect(fundamentalsCurrency({}, 'EUR').fallback).toBe(true)
+  })
+  it('estados financieros en otra moneda (ADR: cotiza en USD, publica en TWD)', () => {
+    const r = fundamentalsCurrency({ currency: 'USD', extra: { financialCurrency: 'TWD' } }, 'USD')
+    expect(r.currency).toBe('USD')
+    expect(r.statements).toBe('TWD')
+    expect(r.statementsNote).toMatch(/TWD/)
+    expect(fundamentalsCurrency({ currency: 'USD', extra: { financialCurrency: 'USD' } }, 'USD').statements).toBeNull()
+  })
+  it('sin ninguna moneda no inventa una', () => {
+    expect(fundamentalsCurrency({}, null)).toMatchObject({ currency: null, fallback: true, note: undefined })
   })
 })

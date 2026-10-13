@@ -38,14 +38,16 @@ export function FundamentalsPanel({ summary }: { summary: AssetSummary }) {
   const f: Fundamentals | null = q.data
   if (!f) return <div className="empty">No hay fundamentales para este tipo de activo ({summary.class}).</div>
   const fr = fundamentalsFreshness(f)
-  const { currency: cur, note, fallback } = fundamentalsCurrency(f, summary.currency)
+  const { currency: cur, note, fallback, statements, statementsNote } = fundamentalsCurrency(f, summary.currency)
+  const scur = statements ?? cur
+  const snote = statementsNote ?? note
   const extra = Object.entries(f.extra ?? {}).filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
 
   return (
     <div className="stack" style={{ gap: '0.5rem' }}>
       <div className="row wrap">
         <Provenance provider={f.sources} asOf={f.asOf} assetId={summary.id} href={f.sourceUrl} verifyUrl={f.sourceUrl} origin={f.timestampOrigin} stale={fr.stale} staleReason={fr.reason} label="Fuentes" />
-        {cur ? <span className="small muted" title={note}>Cifras monetarias en {cur}{fallback ? ' (deducida del activo)' : ''}</span> : null}
+        {cur ? <span className="small muted" title={note}>Cifras monetarias en {cur}{fallback ? ' (deducida del activo)' : ''}{statements ? `; estados financieros en ${statements}` : ''}</span> : null}
       </div>
       {f.description ? <p className="small" style={{ maxWidth: '70ch' }}>{f.description}</p> : null}
       <div className="row wrap small muted">
@@ -61,14 +63,14 @@ export function FundamentalsPanel({ summary }: { summary: AssetSummary }) {
         ['Precio / valor contable', n(f.priceToBook)], ['Precio / ventas', n(f.priceToSales)], ['EV / EBITDA', n(f.evToEbitda, 1)],
       ])}
       {group('Resultados', [
-        ['BPA (12 m)', n(f.epsTrailing)], ['BPA (previsto)', n(f.epsForward)], ['Ingresos (12 m)', c(f.revenueTtm, cur), full(f.revenueTtm, cur, note)],
+        ['BPA (12 m)', n(f.epsTrailing)], ['BPA (previsto)', n(f.epsForward)], ['Ingresos (12 m)', c(f.revenueTtm, scur), full(f.revenueTtm, scur, snote)],
         ['Crec. ingresos', p(f.revenueGrowthYoy)], ['Crec. beneficios', p(f.earningsGrowthYoy)],
         ['Margen bruto', p(f.grossMargin)], ['Margen operativo', p(f.operatingMargin)], ['Margen neto', p(f.profitMargin)],
         ['ROE', p(f.roe)], ['ROA', p(f.roa)], ['Próximos resultados', f.nextEarningsDate ? formatDate(f.nextEarningsDate) : null],
       ])}
       {group('Balance', [
-        ['Caja', c(f.totalCash, cur), full(f.totalCash, cur, note)], ['Deuda', c(f.totalDebt, cur), full(f.totalDebt, cur, note)], ['Deuda / capital', n(f.debtToEquity, 1)],
-        ['Ratio corriente', n(f.currentRatio)], ['Flujo de caja libre', c(f.freeCashFlow, cur), full(f.freeCashFlow, cur, note)],
+        ['Caja', c(f.totalCash, scur), full(f.totalCash, scur, snote)], ['Deuda', c(f.totalDebt, scur), full(f.totalDebt, scur, snote)], ['Deuda / capital', n(f.debtToEquity, 1)],
+        ['Ratio corriente', n(f.currentRatio)], ['Flujo de caja libre', c(f.freeCashFlow, scur), full(f.freeCashFlow, scur, snote)],
       ])}
       {group('Dividendo y riesgo', [
         ['Rentab. por dividendo', p(f.dividendYield)], ['Payout', p(f.payoutRatio, 0)], ['Beta', n(f.beta)],
