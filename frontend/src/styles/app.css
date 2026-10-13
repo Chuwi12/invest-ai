@@ -171,6 +171,7 @@ kbd {
 .mock-banner {
   background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid var(--line);
   font-size: 0.8125rem; font-weight: 500; text-align: center; padding: 0.3rem 1rem;
+  margin: -1.25rem -1.25rem 1rem; /* compensa el padding de .main */
 }
 .mobile-nav { display: none; grid-area: nav; }
 
@@ -179,6 +180,7 @@ kbd {
   .rail { display: none; }
   .top { padding: 0 0.75rem; }
   .main { padding: 0.9rem 0.75rem 1.5rem; }
+  .mock-banner { margin: -0.9rem -0.75rem 1rem; }
   .foot { padding: 0 0.75rem; bottom: 3.5rem; }
   .mobile-nav {
     display: grid; grid-template-columns: repeat(5, 1fr); position: sticky; bottom: 0; z-index: 16;
@@ -240,7 +242,14 @@ button.chip:hover { background: var(--surface-2); }
 .seg button[aria-pressed='true'], .seg button[aria-selected='true'] { background: var(--accent-soft); color: var(--accent); }
 .seg button:hover { background: var(--surface-2); }
 
-.tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line-strong); overflow-x: auto; }
+.tabs {
+  display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line-strong); overflow-x: auto;
+  background:
+    linear-gradient(to right, var(--bg), var(--bg)) left center / 1.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--bg), var(--bg)) right center / 1.5rem 100% no-repeat local,
+    linear-gradient(to right, rgb(128 128 128 / 0.5), transparent) left center / 0.9rem 100% no-repeat scroll,
+    linear-gradient(to left, rgb(128 128 128 / 0.5), transparent) right center / 0.9rem 100% no-repeat scroll;
+}
 .tabs button { border: 0; background: transparent; padding: 0.55rem 0.8rem; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .tabs button[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--accent); }
 .tabs button:hover { color: var(--ink); }
@@ -274,7 +283,16 @@ textarea { resize: vertical; width: 100%; }
 .tbl td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .tbl th.r, .tbl td.r { text-align: right; }
 .tbl tbody tr:hover { background: var(--surface-2); }
-.table-wrap { overflow-x: auto; }
+/* position:relative evita que el desbordamiento interno de la tabla ensanche el documento en móvil.
+   Las sombras laterales (scroll-shadow con background-attachment) indican que hay más contenido a ese lado. */
+.table-wrap {
+  position: relative; overflow-x: auto; max-width: 100%;
+  background:
+    linear-gradient(to right, var(--surface), var(--surface)) left center / 1.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--surface), var(--surface)) right center / 1.5rem 100% no-repeat local,
+    linear-gradient(to right, rgb(128 128 128 / 0.5), transparent) left center / 0.9rem 100% no-repeat scroll,
+    linear-gradient(to left, rgb(128 128 128 / 0.5), transparent) right center / 0.9rem 100% no-repeat scroll;
+}
 
 /* ----------------------------------------------------------- price display */
 .tick { border-radius: 3px; padding: 0 0.15em; margin: 0 -0.15em; }
@@ -415,6 +433,18 @@ textarea { resize: vertical; width: 100%; }
 .warn-text { color: var(--warn); }
 .seg { max-width: 100%; overflow-x: auto; }
 .seg button { flex: none; }
+/* Selector de profundidad: en pantallas estrechas ocupa todo el ancho y cada opción reparte el espacio,
+   con el estimado en una segunda línea. */
+@media (max-width: 520px) {
+  .depth-field { flex: 1 1 100%; min-width: 0; }
+  .depth-field ~ .btn { flex: 1 1 100%; justify-content: center; margin-left: 0; }
+  .seg.depth-seg { display: flex; width: 100%; overflow: visible; }
+  .seg.depth-seg button { flex: 1 1 0; min-width: 0; white-space: normal; padding: 0.35rem 0.3rem; line-height: 1.25; }
+  .seg.depth-seg button .muted { display: block; }
+  .tabs { scroll-padding: 0 1rem; scrollbar-width: none; }
+  .tabs button { padding: 0.55rem 0.6rem; }
+}
+.mock-banner { overflow-wrap: anywhere; }
 @media (max-width: 880px) {
   .foot .long { display: none; }
   .big-price { font-size: 2.1rem; }

@@ -94,9 +94,9 @@ export function AnalysisPanel({ summary, quote }: { summary: AssetSummary; quote
     <div className="stack" style={{ gap: '1.25rem' }}>
       <div className="panel stack" style={{ gap: '0.7rem' }}>
         <div className="row wrap">
-          <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+          <fieldset className="depth-field" style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="small muted" style={{ padding: 0, marginBottom: 4 }}>Profundidad</legend>
-            <div className="seg" role="radiogroup" aria-label="Profundidad del análisis">
+            <div className="seg depth-seg" role="radiogroup" aria-label="Profundidad del análisis">
               {ANALYSIS_DEPTHS.map((d) => (
                 <button key={d} type="button" role="radio" aria-checked={depth === d} aria-pressed={depth === d} onClick={() => setDepth(d)} disabled={gen.isPending} title={DEPTH_INFO[d].hint}>
                   {DEPTH_INFO[d].label} {estimates[d] ? <span className="muted tiny">≈ {formatDurationMs(estimates[d].ms)}</span> : null}

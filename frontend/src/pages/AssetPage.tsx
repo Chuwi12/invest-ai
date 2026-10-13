@@ -42,6 +42,11 @@ function AssetView({ id }: { id: AssetId }) {
     window.scrollTo({ top: 0 })
   }, [id])
 
+  // La pestaña activa siempre visible cuando la barra desborda (móvil).
+  useEffect(() => {
+    document.getElementById(`tab-${tab}`)?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  }, [tab, detail.isSuccess])
+
   if (detail.isPending) {
     return (
       <div className="page">

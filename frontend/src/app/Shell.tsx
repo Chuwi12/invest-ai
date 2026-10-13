@@ -74,7 +74,7 @@ export function Shell() {
 
       <main className="main" id="main">
         {IS_MOCK ? (
-          <div className="mock-banner" role="status" style={{ margin: '-1.25rem -1.25rem 1rem' }}>
+          <div className="mock-banner" role="status">
             Modo demostración: todos los datos, precios y análisis son simulados.
           </div>
         ) : null}
