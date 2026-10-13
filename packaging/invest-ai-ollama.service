@@ -11,10 +11,15 @@ Environment=OLLAMA_HOST=127.0.0.1:11434
 Restart=on-failure
 RestartSec=3
 # Ollama necesita /dev/nvidia* y escribir en ~/.ollama (modelos): endurecimiento moderado.
+# ~/.ollama puede no existir (con Ollama como servicio del sistema los modelos están en
+# /var/lib/ollama): `ReadWritePaths` a una ruta ausente hacía fallar la unidad en NAMESPACE (226)
+# y el ExecCondition lo enmascaraba como «condición no cumplida», así que nunca arrancaba. Se crea
+# antes del arranque, fuera de la jaula (prefijo `+`), y el `-` tolera que falte en el ExecCondition.
+ExecStartPre=+/usr/bin/mkdir -p -m 700 %h/.ollama
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=%h/.ollama
+ReadWritePaths=-%h/.ollama
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes

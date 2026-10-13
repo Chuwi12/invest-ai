@@ -228,13 +228,37 @@ describe('reconexión', () => {
     await vi.advanceTimersByTimeAsync(8000) // tope
     expect(FakeSocket.all).toHaveLength(6)
 
-    // al abrir, se reenvían las suscripciones y el backoff se reinicia
+    // al abrir, se reenvían las suscripciones; el backoff se reinicia cuando la conexión resulta estable
     last().open()
     expect(c.getStatus()).toBe('open')
     expect(last().subs()).toEqual([[BTC, AAPL]])
+    await vi.advanceTimersByTimeAsync(10_000)
     last().drop()
     await vi.advanceTimersByTimeAsync(1000)
     expect(FakeSocket.all).toHaveLength(7)
+  })
+
+  it('un servidor que acepta y cierra enseguida no reinicia el backoff (sin bucle de reconexión a ritmo fijo)', async () => {
+    const c = make({ backoff: { initialMs: 1000, maxMs: 8000, factor: 2, jitter: 0 } })
+    c.subscribe(BTC)
+    last().open()
+    last().drop() // cae nada más abrir
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(FakeSocket.all).toHaveLength(2)
+    last().open()
+    await vi.advanceTimersByTimeAsync(2000) // abierta solo 2 s: aún no es estable
+    last().drop()
+    // Antes: 1 s otra vez (attempt = 0 al abrir). Ahora: 2 s.
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(FakeSocket.all).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(FakeSocket.all).toHaveLength(3)
+    // Tras 10 s abierta sin caerse, el siguiente corte vuelve a empezar desde el retardo inicial.
+    last().open()
+    await vi.advanceTimersByTimeAsync(10_000)
+    last().drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(FakeSocket.all).toHaveLength(4)
   })
 
   it('tras reconectar solo reenvía lo que sigue suscrito', async () => {
@@ -275,6 +299,25 @@ describe('reconexión', () => {
     expect(FakeSocket.all).toHaveLength(1)
     c.reconnectNow()
     expect(FakeSocket.all).toHaveLength(2)
+  })
+
+  it('reconnectNow con un reintento aún conectando no deja un socket huérfano', async () => {
+    const c = make({ backoff: { initialMs: 1000, jitter: 0 } })
+    c.subscribe(BTC)
+    last().open()
+    last().drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    const connecting = last() // reintento en curso: el handshake no ha terminado
+    expect(FakeSocket.all).toHaveLength(2)
+    expect(connecting.readyState).toBe(0)
+    c.reconnectNow() // p. ej. `visibilitychange` o `online` justo ahora
+    // Debe quedar UN solo socket vivo: el del intento anterior se cierra.
+    expect(FakeSocket.all.filter((s) => !s.closed && s.readyState !== 3)).toHaveLength(1)
+    expect(connecting.closed).toBe(true)
+    // Y el nuevo funciona y reenvía las suscripciones.
+    last().open()
+    expect(c.getStatus()).toBe('open')
+    expect(last().subs()).toEqual([[BTC]])
   })
 
   it('si createSocket lanza, reintenta con backoff', async () => {

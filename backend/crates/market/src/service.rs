@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::MarketConfig,
-    http::build_client,
+    http::{build_client, build_slow_client},
     indicators,
     news::{self, Relevance},
     options::OptionsChain,
@@ -72,6 +72,11 @@ const SLOW_CANCEL: Duration = Duration::from_millis(1000);
 const TIMEOUT_BLOCK: Duration = Duration::from_secs(60);
 /// Tras la primera lista de noticias válida, cuánto se espera al resto de proveedores.
 const NEWS_GRACE: Duration = Duration::from_millis(1500);
+/// Proveedores de noticias demasiado lentos para esperarlos (GDELT: 8-10 s solo en el apretón de
+/// manos TLS, 11-15 s por petición, medido el 13-oct-2026). No cuentan para la latencia de la
+/// respuesta: se lanzan en segundo plano, terminan solos y sus noticias se fusionan en las lecturas
+/// siguientes de la misma clave (`late_news`).
+const BACKGROUND_NEWS: &[&str] = &["gdelt"];
 const MAX_QUERY_LEN: usize = 64;
 
 // ---------------------------------------------------------------------------------------------
@@ -354,7 +359,7 @@ struct HistEntry {
 }
 
 struct Inner {
-    slots: Vec<Slot>,
+    slots: Vec<Arc<Slot>>,
     yahoo: Arc<Yahoo>,
     sec: Arc<Sec>,
     quotes: Cache<String, Quote>,
@@ -365,6 +370,8 @@ struct Inner {
     indicators: Cache<String, Indicators>,
     fundamentals: Cache<String, Option<Fundamentals>>,
     news: Cache<String, Arc<Vec<NewsItem>>>,
+    /// Noticias de los proveedores en segundo plano, ya filtradas por relevancia, por clave de `news`.
+    late_news: Cache<String, Arc<Vec<NewsItem>>>,
     macros: Cache<String, MacroContext>,
     search: Cache<String, Arc<Vec<AssetSummary>>>,
     summaries: Cache<String, AssetSummary>,
@@ -372,7 +379,7 @@ struct Inner {
 }
 
 impl Inner {
-    fn slot(&self, name: &str) -> Option<&Slot> {
+    fn slot(&self, name: &str) -> Option<&Arc<Slot>> {
         self.slots.iter().find(|s| s.name() == name)
     }
 
@@ -768,7 +775,7 @@ impl Inner {
         }
         let limit = limit.clamp(1, 50);
         let key = id.map_or_else(|| "general".to_string(), ToString::to_string);
-        let arc = cached(&self.news, key, async {
+        let arc = cached(&self.news, key.clone(), async {
             let name = match id {
                 Some(id) => tokio::time::timeout(Duration::from_secs(6), self.summary(id, None))
                     .await
@@ -784,23 +791,29 @@ impl Inner {
                 limit: 50,
             };
             let class = id.map_or(AssetClass::Other, |i| i.class);
-            let names = order_for(class, Capability::News);
-            let futs = names
+            let rel = id.map(|i| Relevance::new(i, name.as_deref()));
+            let (background, foreground): (Vec<&Arc<Slot>>, Vec<&Arc<Slot>>) = order_for(class, Capability::News)
                 .iter()
                 .filter_map(|n| self.slot(n))
                 .filter(|s| s.provider.info().enabled())
-                .map(|slot| {
-                    let q = q.clone();
-                    async move {
-                        let r = slot
-                            .run(&|p: Arc<dyn Provider>| {
-                                let q = q.clone();
-                                async move { p.news(&q).await }
-                            })
-                            .await;
-                        (slot.name(), r)
-                    }
-                });
+                .partition(|s| BACKGROUND_NEWS.contains(&s.name()));
+            // Los lentos corren por su cuenta: no retrasan esta respuesta ni se cancelan al
+            // cerrarse la ventana de gracia (si no, nunca llegarían a contestar).
+            for slot in background {
+                self.spawn_late_news(slot.clone(), q.clone(), key.clone(), rel.clone());
+            }
+            let futs = foreground.into_iter().map(|slot| {
+                let q = q.clone();
+                async move {
+                    let r = slot
+                        .run(&|p: Arc<dyn Provider>| {
+                            let q = q.clone();
+                            async move { p.news(&q).await }
+                        })
+                        .await;
+                    (slot.name(), r)
+                }
+            });
             let results = collect_with_grace(futs, NEWS_GRACE).await;
             let mut lists = Vec::new();
             let mut err = None;
@@ -818,11 +831,44 @@ impl Inner {
             if !answered && let Some(e) = err {
                 return Err(e);
             }
-            let rel = id.map(|i| Relevance::new(i, name.as_deref()));
             Ok(Arc::new(news::merge(lists, rel.as_ref(), 50, Utc::now())))
         })
         .await?;
-        Ok(arc.iter().take(limit).cloned().collect())
+        // Noticias de los proveedores en segundo plano que ya han llegado (ya filtradas).
+        let list = match self.late_news.get(&key).await {
+            Some(late) => Arc::new(news::merge(vec![arc.to_vec(), late.to_vec()], None, 50, Utc::now())),
+            None => arc,
+        };
+        Ok(list.iter().take(limit).cloned().collect())
+    }
+
+    /// Lanza a un proveedor lento en una tarea propia: al terminar con éxito deja sus noticias en
+    /// `late_news` (fusionadas con las que ya hubiera de otros proveedores en segundo plano). El
+    /// fallo o el timeout los anota el propio `Slot` (circuit breaker), igual que en primer plano.
+    fn spawn_late_news(&self, slot: Arc<Slot>, q: NewsQuery, key: String, rel: Option<Relevance>) {
+        let late = self.late_news.clone();
+        tokio::spawn(async move {
+            let r = slot
+                .run(&|p: Arc<dyn Provider>| {
+                    let q = q.clone();
+                    async move { p.news(&q).await }
+                })
+                .await;
+            match r {
+                Ok(list) => {
+                    let mut lists = vec![list];
+                    if let Some(prev) = late.get(&key).await {
+                        lists.push(prev.to_vec());
+                    }
+                    let kept = news::merge(lists, rel.as_ref(), 50, Utc::now());
+                    tracing::debug!(provider = slot.name(), items = kept.len(), "noticias del proveedor lento");
+                    if !kept.is_empty() {
+                        late.insert(key, Arc::new(kept)).await;
+                    }
+                }
+                Err(e) => tracing::debug!(provider = slot.name(), error = %e, "proveedor lento sin noticias"),
+            }
+        });
     }
 
     // ---- macro ------------------------------------------------------------------------
@@ -1018,6 +1064,8 @@ impl MarketService {
     /// hub de tiempo real).
     pub fn new(config: MarketConfig) -> anyhow::Result<Arc<Self>> {
         let http = build_client(config.request_timeout).map_err(|e| anyhow::anyhow!("{e}"))?;
+        // Por debajo de `OP_TIMEOUT` (25 s): si no, el tope por operación cortaría antes que el cliente.
+        let slow_http = build_slow_client(Duration::from_secs(24)).map_err(|e| anyhow::anyhow!("{e}"))?;
         let secrets = Arc::new(config.secrets());
         if config.uses_default_sec_contact() {
             tracing::warn!(
@@ -1034,7 +1082,7 @@ impl MarketService {
             )),
             Arc::new(CoinGecko::new(http.clone(), config.coingecko_key.clone())),
             Arc::new(GoogleNews::new(http.clone(), config.news_languages.clone())),
-            Arc::new(Gdelt::new(http.clone())),
+            Arc::new(Gdelt::new(slow_http)),
             sec.clone(),
             Arc::new(Fred::new(http.clone(), config.fred_key.clone())),
             Arc::new(Finnhub::new(http.clone(), config.finnhub_key.clone())),
@@ -1048,9 +1096,9 @@ impl MarketService {
             Arc::new(Marketaux::new(http.clone(), config.marketaux_key.clone())),
             Arc::new(CryptoPanic::new(http, config.cryptopanic_key.clone())),
         ];
-        let slots: Vec<Slot> = providers
+        let slots: Vec<Arc<Slot>> = providers
             .into_iter()
-            .map(|p| Slot::new(p, secrets.clone()))
+            .map(|p| Arc::new(Slot::new(p, secrets.clone())))
             .collect();
         for s in &slots {
             let i = s.provider.info();
@@ -1069,6 +1117,7 @@ impl MarketService {
             indicators: cache(Duration::from_secs(15 * 60), 1_000),
             fundamentals: cache(Duration::from_secs(6 * 3600), 1_000),
             news: cache(Duration::from_secs(3 * 60), 500),
+            late_news: cache(Duration::from_secs(3 * 60), 500),
             macros: cache(Duration::from_secs(3600), 4),
             search: cache(Duration::from_secs(10 * 60), 1_000),
             summaries: cache(Duration::from_secs(24 * 3600), 5_000),
@@ -1435,7 +1484,7 @@ mod latency_tests {
         };
         let prov = Arc::new(CountingBinance { info, calls: Default::default() });
         let inner = Arc::new(Inner {
-            slots: vec![Slot::new(prov.clone(), Arc::new(Vec::new()))],
+            slots: vec![Arc::new(Slot::new(prov.clone(), Arc::new(Vec::new())))],
             yahoo: Arc::new(Yahoo::new(http.clone())),
             sec: Arc::new(Sec::new(http, "test test@example.com".into())),
             quotes: cache(Duration::from_secs(3), 100),
@@ -1445,6 +1494,7 @@ mod latency_tests {
             indicators: cache(Duration::from_secs(60), 10),
             fundamentals: cache(Duration::from_secs(60), 10),
             news: cache(Duration::from_secs(60), 10),
+            late_news: cache(Duration::from_secs(60), 10),
             macros: cache(Duration::from_secs(60), 4),
             search: cache(Duration::from_secs(60), 10),
             summaries: cache(Duration::from_secs(60), 10),
@@ -1463,6 +1513,129 @@ mod latency_tests {
             assert_eq!(t.await.unwrap(), 2);
         }
         assert_eq!(prov.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    fn test_inner(slots: Vec<Arc<Slot>>) -> Arc<Inner> {
+        let http = build_client(Duration::from_secs(5)).unwrap();
+        Arc::new(Inner {
+            slots,
+            yahoo: Arc::new(Yahoo::new(http.clone())),
+            sec: Arc::new(Sec::new(http, "test test@example.com".into())),
+            quotes: cache(Duration::from_secs(3), 100),
+            quote_batches: cache(Duration::from_millis(200), 10),
+            history_intraday: cache(Duration::from_secs(60), 10),
+            history_daily: cache(Duration::from_secs(60), 10),
+            indicators: cache(Duration::from_secs(60), 10),
+            fundamentals: cache(Duration::from_secs(60), 10),
+            news: cache(Duration::from_secs(60), 10),
+            late_news: cache(Duration::from_secs(60), 10),
+            macros: cache(Duration::from_secs(60), 4),
+            search: cache(Duration::from_secs(60), 10),
+            summaries: cache(Duration::from_secs(60), 10),
+            options: cache(Duration::from_secs(60), 10),
+        })
+    }
+
+    /// Proveedor de noticias falso: responde tras `delay` con sus noticias (o con un fallo).
+    struct FakeNews {
+        info: ProviderInfo,
+        delay: Duration,
+        items: Option<Vec<NewsItem>>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl Provider for FakeNews {
+        fn info(&self) -> &ProviderInfo {
+            &self.info
+        }
+
+        async fn news(&self, _q: &NewsQuery) -> PResult<Vec<NewsItem>> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::time::sleep(self.delay).await;
+            self.items.clone().ok_or_else(|| ProviderError::upstream("boom"))
+        }
+    }
+
+    fn news_item(title: &str, provider: &str, age_min: i64) -> NewsItem {
+        let url = format!("https://example.com/{provider}/{}", title.replace(' ', "-"));
+        NewsItem {
+            id: news::item_id(&url),
+            title: title.into(),
+            summary: None,
+            url,
+            publisher: None,
+            published_at: Utc::now() - chrono::Duration::minutes(age_min),
+            image_url: None,
+            tickers: vec![],
+            sentiment: None,
+            provider: provider.into(),
+            language: None,
+        }
+    }
+
+    fn fake_news(name: &'static str, delay_ms: u64, items: Option<Vec<NewsItem>>) -> Arc<FakeNews> {
+        Arc::new(FakeNews {
+            info: ProviderInfo {
+                name,
+                requires_key: false,
+                has_key: false,
+                capabilities: vec![],
+                classes: vec![],
+                rate_per_sec: 1000.0,
+                burst: 1000,
+            },
+            delay: Duration::from_millis(delay_ms),
+            items,
+            calls: Default::default(),
+        })
+    }
+
+    fn providers_of(items: &[NewsItem]) -> Vec<&str> {
+        let mut p: Vec<&str> = items.iter().map(|n| n.provider.as_str()).collect();
+        p.sort_unstable();
+        p.dedup();
+        p
+    }
+
+    /// GDELT tarda 11-15 s por petición (8-10 s de TLS). No debe retrasar la respuesta, pero si al
+    /// final contesta sus noticias SÍ se fusionan en la siguiente lectura (sin volver a pedirlas).
+    #[tokio::test(start_paused = true)]
+    async fn slow_background_provider_does_not_delay_news_and_is_merged_once_it_answers() {
+        let fast = fake_news("google_news", 50, Some(vec![news_item("alfa", "google_news", 5), news_item("beta", "google_news", 20)]));
+        let slow = fake_news("gdelt", 12_000, Some(vec![news_item("gamma", "gdelt", 10)]));
+        let inner = test_inner(vec![
+            Arc::new(Slot::new(fast.clone(), Arc::new(Vec::new()))),
+            Arc::new(Slot::new(slow.clone(), Arc::new(Vec::new()))),
+        ]);
+        let t0 = tokio::time::Instant::now();
+        let first = inner.news(None, 50).await.unwrap();
+        assert!(t0.elapsed() < Duration::from_millis(500), "la respuesta esperó al lento: {:?}", t0.elapsed());
+        assert_eq!(providers_of(&first), ["google_news"]);
+        // Mientras GDELT sigue en vuelo, otra lectura no lo ve ni lo vuelve a pedir.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(providers_of(&inner.news(None, 50).await.unwrap()), ["google_news"]);
+        // Llega a los ~12 s: ahora se fusiona, ordenado por fecha, sin nuevas peticiones.
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        let merged = inner.news(None, 50).await.unwrap();
+        assert_eq!(providers_of(&merged), ["gdelt", "google_news"]);
+        assert_eq!(merged.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), ["alfa", "gamma", "beta"]);
+        assert_eq!(slow.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(fast.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failing_background_provider_leaves_news_intact_and_is_accounted() {
+        let fast = fake_news("google_news", 50, Some(vec![news_item("alfa", "google_news", 5)]));
+        let bad = fake_news("gdelt", 100, None);
+        let bad_slot = Arc::new(Slot::new(bad.clone(), Arc::new(Vec::new())));
+        let inner = test_inner(vec![Arc::new(Slot::new(fast, Arc::new(Vec::new()))), bad_slot.clone()]);
+        let first = inner.news(None, 50).await.unwrap();
+        assert_eq!(providers_of(&first), ["google_news"]);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(providers_of(&inner.news(None, 50).await.unwrap()), ["google_news"]);
+        // El fallo del proveedor en segundo plano queda anotado como el de cualquier otro.
+        assert!(bad_slot.state().last_error.is_some());
     }
 
     type Fut = std::pin::Pin<Box<dyn Future<Output = (&'static str, PResult<u8>)> + Send>>;

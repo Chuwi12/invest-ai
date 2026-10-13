@@ -36,7 +36,7 @@ export const qk = {
   health: ['health'] as const,
   status: ['status'] as const,
   models: ['models'] as const,
-  search: (q: string, cls?: AssetClass) => ['search', q, cls ?? 'all'] as const,
+  search: (q: string, cls?: AssetClass, limit = 20) => ['search', q, cls ?? 'all', limit] as const,
   asset: (id: AssetId) => ['asset', id] as const,
   quote: (id: AssetId) => ['quote', id] as const,
   quotes: (ids: readonly AssetId[]) => ['quotes', ...ids] as const,
@@ -87,10 +87,11 @@ export function useStatus() {
 
 export function useSearch(q: string, opts?: { class?: AssetClass; limit?: number; enabled?: boolean }) {
   const term = q.trim()
+  const limit = opts?.limit ?? 20
   return useQuery({
-    queryKey: qk.search(term, opts?.class),
+    queryKey: qk.search(term, opts?.class, limit),
     queryFn: ({ signal }) => {
-      const o: { limit?: number; class?: AssetClass } = { limit: opts?.limit ?? 20 }
+      const o: { limit?: number; class?: AssetClass } = { limit }
       if (opts?.class) o.class = opts.class
       return api.search(term, o, signal)
     },
@@ -127,7 +128,9 @@ export function useHistory(id: AssetId, range: Range, interval?: Interval) {
     queryFn: ({ signal }) => api.history(id, range, interval, signal),
     staleTime: STALE.history(range),
     gcTime: 30 * MIN,
-    placeholderData: keepPreviousData,
+    // Al cambiar de rango o intervalo se conservan las velas anteriores mientras llegan las nuevas,
+    // pero solo si son del MISMO activo: las de otro activo no deben pintarse como si fueran suyas.
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === id ? prev : undefined),
   })
 }
 

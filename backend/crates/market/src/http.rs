@@ -39,10 +39,21 @@ pub fn outbound_stats() -> Vec<(String, u64, f64)> {
 
 /// Un único cliente para todo el crate: pool de conexiones, HTTP/2, gzip y brotli.
 pub fn build_client(timeout: Duration) -> Result<reqwest::Client, DomainError> {
+    build_client_with(timeout, Duration::from_secs(6))
+}
+
+/// Cliente para proveedores muy lentos (GDELT): su apretón de manos TLS tarda 8-10 s (medido con
+/// curl, openssl y Python: es del servidor, no del cliente ni de IPv6), así que con el
+/// `connect_timeout` de 6 s del cliente común SIEMPRE daba «timeout» a los 6,0 s exactos.
+pub fn build_slow_client(timeout: Duration) -> Result<reqwest::Client, DomainError> {
+    build_client_with(timeout, Duration::from_secs(20))
+}
+
+fn build_client_with(timeout: Duration, connect_timeout: Duration) -> Result<reqwest::Client, DomainError> {
     reqwest::Client::builder()
         .user_agent(BROWSER_UA)
         .timeout(timeout)
-        .connect_timeout(Duration::from_secs(6))
+        .connect_timeout(connect_timeout)
         .pool_idle_timeout(Duration::from_secs(90))
         .pool_max_idle_per_host(8)
         .tcp_nodelay(true)

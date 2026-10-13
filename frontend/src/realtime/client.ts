@@ -47,6 +47,12 @@ export interface RealtimeOptions {
   unsubscribeGraceMs?: number
   backoff?: Partial<BackoffOptions>
   random?: () => number
+  /**
+   * Tiempo que una conexión debe seguir abierta para darla por estable y reiniciar el backoff. Si
+   * se reiniciara al abrir, un servidor que acepta y cierra enseguida provocaría reconexiones a
+   * ritmo fijo (≈ `initialMs`) para siempre.
+   */
+  stableAfterMs?: number
 }
 
 const OPEN = 1
@@ -86,6 +92,7 @@ export class RealtimeClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private pongTimer: ReturnType<typeof setTimeout> | null = null
+  private stableTimer: ReturnType<typeof setTimeout> | null = null
   private syncScheduled = false
   private disposed = false
 
@@ -96,6 +103,7 @@ export class RealtimeClient {
       pingIntervalMs: options.pingIntervalMs ?? 25_000,
       pongTimeoutMs: options.pongTimeoutMs ?? 10_000,
       unsubscribeGraceMs: options.unsubscribeGraceMs ?? 1500,
+      stableAfterMs: options.stableAfterMs ?? 10_000,
       random: options.random ?? Math.random,
       backoff: { initialMs: 500, maxMs: 30_000, factor: 2, jitter: 0.3, ...options.backoff },
     }
@@ -171,7 +179,25 @@ export class RealtimeClient {
     if (this.disposed || this.state !== 'reconnecting') return
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
+    // Un intento que sigue en el handshake probablemente no llegue a buen puerto (la red acaba de
+    // volver): se sustituye, pero cerrando el socket anterior; si no, queda huérfano y abierto.
+    this.discardSocket()
     this.connect()
+  }
+
+  /** Suelta el socket actual (sin disparar `handleClose`) y lo cierra. */
+  private discardSocket(): void {
+    const old = this.socket
+    if (!old) return
+    this.detach(old)
+    this.socket = null
+    this.serverSubs = new Set()
+    this.stopPing()
+    try {
+      old.close()
+    } catch {
+      /* ya cerrado */
+    }
   }
 
   dispose(): void {
@@ -251,11 +277,16 @@ export class RealtimeClient {
     this.socket = socket
     socket.onopen = () => {
       if (this.socket !== socket) return
-      this.attempt = 0
       this.serverSubs = new Set()
       this.setState('open')
       this.syncSubscriptions() // reenvía todas las suscripciones activas
       this.startPing()
+      // El backoff solo se reinicia si la conexión aguanta; ver `stableAfterMs`.
+      this.stopStable()
+      this.stableTimer = setTimeout(() => {
+        this.stableTimer = null
+        this.attempt = 0
+      }, this.opts.stableAfterMs)
     }
     socket.onmessage = (ev) => {
       if (this.socket !== socket) return
@@ -276,6 +307,7 @@ export class RealtimeClient {
     this.socket = null
     this.serverSubs = new Set()
     this.stopPing()
+    this.stopStable()
     if (this.disposed) return
     if (this.refs.size === 0) {
       this.attempt = 0
@@ -337,6 +369,11 @@ export class RealtimeClient {
     this.clearPong()
   }
 
+  private stopStable(): void {
+    if (this.stableTimer) clearTimeout(this.stableTimer)
+    this.stableTimer = null
+  }
+
   private clearPong(): void {
     if (this.pongTimer) clearTimeout(this.pongTimer)
     this.pongTimer = null
@@ -344,6 +381,7 @@ export class RealtimeClient {
 
   private clearTimers(): void {
     this.stopPing()
+    this.stopStable()
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
   }

@@ -39,8 +39,18 @@ describe('applyTickToCandle', () => {
     const next = applyTickToCandle(last, 12, 1000 + 300 * 2 + 10, 300)
     expect(next).toMatchObject({ t: 1600, o: 12, h: 12, l: 12, c: 12 })
   })
-  it('las velas diarias o mayores siempre se actualizan', () => {
-    expect(applyTickToCandle(last, 13, 1000 + 86_400 * 3, 86_400).t).toBe(1000)
+  it('en velas diarias y semanales, un tick del día/semana siguiente abre vela nueva (no reescribe la anterior)', () => {
+    // Cripto con la pestaña abierta al cruzar las 00:00 UTC: antes todos los ticks de hoy pisaban la vela de ayer.
+    const day = 86_400
+    expect(applyTickToCandle(last, 13, 1000 + day - 1, day)).toEqual({ ...last, h: 13, c: 13 }) // aún el mismo día
+    expect(applyTickToCandle(last, 13, 1000 + day + 5, day)).toMatchObject({ t: 1000 + day, o: 13, h: 13, l: 13, c: 13 })
+    expect(applyTickToCandle(last, 13, 1000 + day * 3 + 5, day).t).toBe(1000 + day * 3)
+    const week = 604_800
+    expect(applyTickToCandle(last, 13, 1000 + week - 1, week).t).toBe(1000)
+    expect(applyTickToCandle(last, 13, 1000 + week + 5, week).t).toBe(1000 + week)
+  })
+  it('las velas mensuales (duración variable) siempre se actualizan', () => {
+    expect(applyTickToCandle(last, 13, 1000 + 86_400 * 40, 2_592_000).t).toBe(1000)
   })
   it('sin velas previas crea una', () => {
     expect(applyTickToCandle(undefined, 5, 1234, 300)).toMatchObject({ t: 1200, c: 5 })

@@ -395,7 +395,9 @@ fn is_index_name(text: &str, start: usize, base: f64) -> bool {
         ("nikkei", &[225.0]),
         ("dow", &[30.0]),
     ];
-    let before = text[..start].trim_end_matches(|c: char| is_space(c) || c == '-').to_lowercase();
+    // Solo importa el final del texto previo (no se copia el contexto entero por cada cifra).
+    let tail: String = text[..start].chars().rev().take(24).collect::<Vec<_>>().into_iter().rev().collect();
+    let before = tail.trim_end_matches(|c: char| is_space(c) || c == '-').to_lowercase();
     NAMES.iter().any(|(n, vals)| before.ends_with(n) && vals.iter().any(|v| (base - v).abs() < 1e-9))
 }
 
@@ -542,7 +544,13 @@ pub fn extract_numbers(text: &str) -> Vec<Num> {
         let date = is_date_or_time(&chars, i, body_end, &body);
         let integer = body.decimals == 0 && scale == 1.0 && !has_percent;
         let small_int = integer && body.plain && base <= 12.0;
-        let year = integer && body.plain && (1990.0..=2100.0).contains(&base);
+        // Un entero entre 1990 y 2100 es un año… salvo que lleve moneda («ETH a 2050 USD», «$2050»).
+        let priced = prev.is_some_and(|p| matches!(p, '$' | '€' | '£'))
+            || {
+                let t: String = text[end..].trim_start_matches(is_space).chars().take(4).collect::<String>().to_lowercase();
+                ["usd", "eur", "$", "€", "£", "dóla", "pts", "punt"].iter().any(|c| t.starts_with(c))
+            };
+        let year = integer && body.plain && (1990.0..=2100.0).contains(&base) && !priced;
         let conventional = integer && body.plain && is_conventional_threshold(text, start, end, base);
         let index_name = integer && body.plain && is_index_name(text, start, base);
         let exempt = attached_before || attached_after || date || word_hyphen || small_int || year || conventional || index_name;
@@ -752,6 +760,15 @@ mod tests {
     }
 
 
+    #[test]
+    fn thresholds_need_the_indicator_as_a_word_not_as_a_substring() {
+        let ex = |t: &str| super::extract_numbers(t).iter().filter(|n| !n.exempt).count();
+        // «ema» está dentro de «sistema»/«problema», «atr» dentro de «atractivo»: no son indicadores.
+        assert_eq!(ex("el sistema tiene 50 nodos y el problema es de 200 casos"), 2);
+        assert_eq!(ex("un precio atractivo de 14 euros"), 1);
+        assert_eq!(ex("la SMA200 y la EMA 20, la media de 50 sesiones, el ATR14 y el MACD 12/26/9"), 0);
+    }
+
     use super::*;
 
     const CTX: &str = "# Apple (stock:AAPL) — stock\n\
@@ -952,6 +969,63 @@ mod tests {
         assert_eq!(vals("PER de 31.2x"), [(31.2, 1)]);
         assert_eq!(vals("2.1bps"), [(2.1, 1)]);
         assert!(vals("52w 200d 5G").is_empty());
+    }
+
+    /// Todo lo que escribe el contexto (`fmt::*`) debe leerse como UNA cifra con su valor exacto, en
+    /// cualquier magnitud: el parser nuevo (formato español, sufijos, ambigüedad `1.234`) no puede
+    /// reinterpretar lo que el propio sistema genera.
+    #[test]
+    fn every_figure_the_context_prints_parses_back_to_itself() {
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..4000 {
+            let mag = 10f64.powf(-6.0 + next() * 19.0);
+            let x = if next() < 0.3 { -mag } else { mag };
+            let cases = [
+                crate::fmt::price(x),
+                crate::fmt::num(x),
+                crate::fmt::pct_signed(x / 100.0),
+                crate::fmt::pct2(x / 100.0),
+                crate::fmt::big(x),
+            ];
+            for printed in cases {
+                let n = extract_numbers(&format!("| Etiqueta | {printed}, otro 7 |"));
+                assert!(!n.is_empty(), "{printed}");
+                let first = &n[0];
+                let body = printed.trim_end_matches('%');
+                let (digits, scale) = match body.chars().last() {
+                    Some('T') => (&body[..body.len() - 1], 1e12),
+                    Some('B') => (&body[..body.len() - 1], 1e9),
+                    Some('M') => (&body[..body.len() - 1], 1e6),
+                    Some('K') => (&body[..body.len() - 1], 1e3),
+                    _ => (body, 1.0),
+                };
+                let expected: f64 = digits.trim_start_matches('+').parse().unwrap();
+                let got = first.value / scale;
+                assert!((got - expected).abs() <= 1e-9 * expected.abs().max(1e-9), "{printed}: leído {} (esperado {expected}); {first:?}", first.value);
+                assert_eq!(first.raw, printed.trim_end_matches('%'));
+                // El índice la reconoce a sí misma.
+                let idx = NumberIndex::from_context(&format!("## Cotización\n| Etiqueta | {printed} |\n"));
+                if !first.exempt {
+                    assert!(!idx.find(first).is_empty(), "{printed}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_price_that_looks_like_a_year_is_still_a_figure() {
+        // Oro, ETH o MELI cotizan entre 1990 y 2100: con moneda al lado no son un año.
+        assert_eq!(vals("ETH cotiza a 2050 USD"), [(2050.0, 0)]);
+        assert_eq!(vals("oro en $2050"), [(2050.0, 0)]);
+        assert_eq!(vals("soporte en 2050 dólares"), [(2050.0, 0)]);
+        // Los años de verdad siguen exentos.
+        assert!(vals("en 2026 y desde 2019 hasta 2030, el 12 de octubre de 2026").is_empty());
     }
 
     #[test]

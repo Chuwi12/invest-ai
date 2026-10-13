@@ -116,6 +116,24 @@ async fn unverified_figures_in_the_answer_are_flagged() {
     assert!(!text_of(&ev).contains('⚠'));
 }
 
+/// En el chat el modelo responde en castellano y escribe «81.059,79» o «-0,4 %»: se leían como
+/// 81.059 y 79 (o se eximían por ser enteros pequeños) y salía un aviso ⚠ sobre cifras correctas.
+#[tokio::test]
+async fn spanish_formatted_figures_that_are_in_the_data_are_not_flagged() {
+    let e = env().await;
+    // El fixture de AAPL: precio 228.4, cambio del día +0.8 %, RSI14 61.3.
+    e.mock.push_chat(reply("AAPL cotiza a 228,4 USD (+0,8 % hoy) y el RSI14 está en 61,3."));
+    let ev = collect(&e, request(&e, "¿cómo está Apple?", &["stock:AAPL"])).await;
+    let t = text_of(&ev);
+    assert!(!t.contains('⚠'), "cifras correctas en formato español marcadas como inventadas: {t}");
+    // Una cifra española inventada sí se marca, entera (no troceada).
+    let e = env().await;
+    e.mock.push_chat(reply("AAPL cotiza a 281,4 USD."));
+    let ev = collect(&e, request(&e, "¿cómo está Apple?", &["stock:AAPL"])).await;
+    let t = text_of(&ev);
+    assert!(t.contains('⚠') && t.contains("281,4"), "{t}");
+}
+
 #[tokio::test]
 async fn tool_budget_is_enforced_and_final_answer_has_no_tools() {
     let e = env_with(2).await;

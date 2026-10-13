@@ -10,7 +10,8 @@ Type=simple
 WorkingDirectory=@ROOT@
 # Valida .env (solo loopback), espera a Ollama y descarga el modelo si falta.
 ExecStartPre=@ROOT@/invest-ai _prestart
-ExecStart=@ROOT@/backend/target/release/invest-ai
+# El binario que compiló `./invest-ai install` (respeta CARGO_TARGET_DIR).
+ExecStart=@BIN@
 Restart=on-failure
 RestartSec=3
 TimeoutStartSec=30min

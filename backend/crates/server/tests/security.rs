@@ -158,8 +158,11 @@ async fn s02bis_optional_json_requires_json_content_type() {
 
 // ---------- S-03: cabeceras ----------
 
+/// `frontend/dist`, o la carpeta de `INVEST_AI_DIST_DIR` (para probar otra compilación, p. ej. una
+/// con el CSS de lightweight-charts alterado y comprobar que el test del hash la detecta).
 fn dist_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../frontend/dist")
+    std::env::var_os("INVEST_AI_DIST_DIR")
+        .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../frontend/dist"), PathBuf::from)
 }
 
 fn temp_static() -> PathBuf {

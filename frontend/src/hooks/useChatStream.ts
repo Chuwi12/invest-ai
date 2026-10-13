@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/api'
 import { isAbortError } from '@/api/client'
 import { qk } from '@/api/hooks'
-import type { Analysis, AssetId, ToolCallRecord } from '@/api/types'
+import type { Analysis, AssetId, ConversationWithMessages, ToolCallRecord } from '@/api/types'
 import { errorText } from '@/lib/errors'
 
 export interface StreamState {
@@ -15,6 +15,17 @@ export interface StreamState {
   analysis: Analysis | null
   error: string | null
   done: boolean
+  /**
+   * Mensajes (usuario + asistente) que ya tenía guardados el hilo al enviar. Cuando el hilo guardado
+   * pasa de `base + 2`, el servidor ya tiene esta respuesta (entera o truncada por un error) y la
+   * burbuja en vivo sobra; si no se pintaría dos veces. `Infinity` = se desconocía (no se oculta).
+   */
+  base: number
+}
+
+/** Mensajes visibles (usuario y asistente) de un hilo cargado. */
+export function visibleCount(thread: ConversationWithMessages | undefined): number {
+  return thread ? thread.messages.filter((m) => m.role === 'user' || m.role === 'assistant').length : Number.POSITIVE_INFINITY
 }
 
 /** Estado de UNA respuesta en curso (SSE). Los tokens se agrupan por fotograma para no re-renderizar por cada trozo. */
@@ -42,11 +53,16 @@ export function useChatStream() {
       ctrl.current?.abort()
       const ac = new AbortController()
       ctrl.current = ac
+      // ¿Sigue siendo ésta la respuesta vigente? Otra `send` (o `clear`) la sustituye; sus eventos
+      // pendientes (un chunk de red trae varios) ya no deben tocar ni el búfer ni el estado.
+      const current = () => ctrl.current === ac
       buf.current = { text: '', thinking: '' }
-      setState({ cid, user: content, text: '', thinking: '', tools: [], analysis: null, error: null, done: false })
+      const base = visibleCount(qc.getQueryData<ConversationWithMessages>(qk.conversation(cid)))
+      setState({ cid, user: content, text: '', thinking: '', tools: [], analysis: null, error: null, done: false, base })
       const patch = (f: (s: StreamState) => StreamState) => setState((s) => (s && s.cid === cid ? f(s) : s))
       try {
         for await (const ev of api.sendMessage(cid, { content, ...(assetIds?.length ? { assetIds } : {}) }, ac.signal)) {
+          if (!current()) break
           switch (ev.type) {
             case 'token': buf.current.text += ev.text; schedule(); break
             case 'thinking': buf.current.thinking += ev.text; schedule(); break
@@ -66,17 +82,20 @@ export function useChatStream() {
             default: break
           }
         }
+        if (!current()) return
         // Refresca el hilo guardado y suelta el estado local cuando el servidor ya lo devuelve.
         await Promise.all([qc.refetchQueries({ queryKey: qk.conversation(cid) }), qc.invalidateQueries({ queryKey: qk.conversations })])
         setState((s) => (s && s.cid === cid && !s.error ? null : s))
       } catch (e) {
         if (isAbortError(e) || ac.signal.aborted) {
-          flush()
           void qc.invalidateQueries({ queryKey: qk.conversation(cid) })
           void qc.invalidateQueries({ queryKey: qk.conversations })
+          if (!current()) return // sustituida por otra respuesta: el búfer y el estado ya son de ésta
+          flush()
           setState((s) => (s && s.cid === cid ? { ...s, done: true } : s))
           return
         }
+        if (!current()) return
         patch((s) => ({ ...s, error: errorText(e) }))
         void qc.invalidateQueries({ queryKey: qk.conversation(cid) })
       }

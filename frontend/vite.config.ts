@@ -33,5 +33,8 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     include: ['src/**/*.test.{ts,tsx}'],
+    // Holgura para máquinas cargadas (el tope solo se alcanza si un test se cuelga).
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 })

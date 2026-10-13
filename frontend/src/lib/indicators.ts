@@ -54,8 +54,10 @@ export function applyTickToCandle(
   volume?: number | null,
 ): Candle {
   if (!last) return { t: tsSecs - (tsSecs % intervalSecs), o: price, h: price, l: price, c: price, v: volume ?? null }
-  // Velas ≥ 1 día (semanal, mensual): el tick siempre actualiza la última.
-  const sameBucket = intervalSecs >= 86_400 || tsSecs < last.t + intervalSecs
+  // Velas mensuales (duración variable): el tick siempre actualiza la última. Diarias y semanales
+  // tienen duración fija: un tick del día/semana siguiente abre vela (si no, con una pestaña abierta
+  // al cruzar las 00:00 UTC en cripto, los ticks de hoy reescribirían el máximo/mínimo/cierre de ayer).
+  const sameBucket = intervalSecs > 604_800 || tsSecs < last.t + intervalSecs
   if (sameBucket) {
     return { ...last, h: Math.max(last.h, price), l: Math.min(last.l, price), c: price }
   }

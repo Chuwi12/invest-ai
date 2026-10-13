@@ -74,6 +74,10 @@ export default function ChatPage() {
   const messages = useMemo(() => (thread.data?.messages ?? []).filter((m) => m.role === 'user' || m.role === 'assistant'), [thread.data])
   const assets = conv?.assetIds ?? ctxIds
   const live = state && state.cid === cid ? state : null
+  // El hilo guardado ya trae la pregunta (base + 1) y la respuesta, entera o truncada (base + 2):
+  // la burbuja en vivo correspondiente sobra (si no, se pinta dos veces tras un error o al detener).
+  const userSaved = !!live && messages.length >= live.base + 1
+  const answerSaved = !!live && messages.length >= live.base + 2
   const nearBottom = () => {
     const el = scroller.current
     return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 140
@@ -153,9 +157,9 @@ export default function ChatPage() {
             </div>
           ) : null}
           {messages.map((m) => <MessageView key={m.id} m={m} />)}
-          {live ? (
+          {live && !answerSaved ? (
             <>
-              {!live.done && !live.error ? <div className="msg user"><div style={{ whiteSpace: 'pre-wrap' }}>{live.user}</div></div> : null}
+              {!live.done && !live.error && !userSaved ? <div className="msg user"><div style={{ whiteSpace: 'pre-wrap' }}>{live.user}</div></div> : null}
               <div className="msg assistant" aria-busy={streaming}>
                 <ToolCallList calls={live.tools} />
                 {live.thinking && !live.text ? (

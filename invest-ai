@@ -518,10 +518,10 @@ cmd_logs() {
 }
 
 # ---------- servicio systemd de usuario + lanzador de KDE ----------
-render() { # render PLANTILLA DESTINO : sustituye @ROOT@, @DATA@ y @OLLAMA@
+render() { # render PLANTILLA DESTINO : sustituye @ROOT@, @BIN@, @DATA@ y @OLLAMA@
   local ollama_bin
   ollama_bin="$(command -v ollama || printf /usr/bin/ollama)"
-  sed -e "s|@ROOT@|$ROOT|g" -e "s|@DATA@|$DATA_DIR|g" -e "s|@OLLAMA@|$ollama_bin|g" -- "$1" >"$2"
+  sed -e "s|@ROOT@|$ROOT|g" -e "s|@BIN@|$BIN|g" -e "s|@DATA@|$DATA_DIR|g" -e "s|@OLLAMA@|$ollama_bin|g" -- "$1" >"$2"
 }
 
 cmd_install() {
@@ -535,7 +535,7 @@ cmd_install() {
   have systemctl || die "no hay systemd"
   check_prereqs
   prepare_files
-  [[ $ROOT != *[[:space:]%\$\"\'\\\|]* && $DATA_DIR != *[[:space:]%\$\"\'\\\|]* ]] \
+  [[ $ROOT != *[[:space:]%\$\"\'\\\|]* && $DATA_DIR != *[[:space:]%\$\"\'\\\|]* && $BIN != *[[:space:]%\$\"\'\\\|]* ]] \
     || die "la ruta del proyecto o de los datos tiene caracteres que los ficheros de unidad no admiten; muévelos."
   ensure_frontend 1
   ensure_backend release
