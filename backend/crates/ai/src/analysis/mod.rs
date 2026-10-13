@@ -834,10 +834,6 @@ fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifie
         thesis.push_str(&format!("\n\n{}: {u}", lang.t("Incertidumbre", "Uncertainty")));
     }
     let change: Vec<String> = j.would_change_if.iter().filter(|s| !s.trim().is_empty()).map(|s| v.prose(s, lang.t("qué cambiaría", "what would change"))).collect();
-    if !change.is_empty() {
-        thesis.push_str(&format!("\n\n{}:\n", lang.t("La conclusión cambiaría si", "The conclusion would change if")));
-        thesis.push_str(&change.iter().map(|c| format!("- {c}")).collect::<Vec<_>>().join("\n"));
-    }
     let horizon_note = (!j.horizon_note.trim().is_empty()).then(|| v.prose(&j.horizon_note, lang.t("horizonte", "horizon")));
 
     let mut strategy_parts = Vec::new();

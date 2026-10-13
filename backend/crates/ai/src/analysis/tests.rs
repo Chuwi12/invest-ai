@@ -163,7 +163,7 @@ async fn deep_pipeline_runs_all_stages_and_verifies_figures() {
     assert!(a.bull_case[0].contains("fuente: indicadores técnicos") && a.bull_case[0].contains("UTC"));
     assert!(a.thesis.contains('⚠'), "cifra sin verificar marcada: {}", a.thesis);
     assert!(a.thesis.contains("fuente: indicadores técnicos"), "cada párrafo de la tesis lleva su fuente: {}", a.thesis);
-    assert!(a.thesis.contains("La conclusión cambiaría si") && a.thesis.contains("Incertidumbre"));
+    assert!(!a.thesis.contains("La conclusión cambiaría si") && a.thesis.contains("Incertidumbre:"));
     assert_eq!(a.would_change_if.as_deref(), Some(&["Cae bajo el stop".to_string()][..]));
     assert!(a.horizon_note.as_deref().unwrap().contains("ATR14"));
     // dataWarnings: solo carencias reales; método y avisos de calidad van aparte.

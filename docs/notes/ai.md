@@ -57,12 +57,12 @@ snapshot ─▶ saneado ─▶ puntuación (scoring.rs) + niveles (levels.rs, Ru
   redacción, eventos), `server/tests/analysis_stream.rs`.
 
 ## Pendiente / límites conocidos (qwen2.5:7b)
-- El 7B a veces escribe descripciones de escenario incoherentes con su precio objetivo. La repetición entre párrafos
+- Las descripciones de escenario del 7B son flojas, pero ya no pueden contradecir su precio (ver «Coherencia de escenarios»). La repetición entre párrafos
   de la tesis se elimina (Jaccard ≥ 0,7 por frase, `lint::dedupe_sentences`).
 - El lint de castellano es heurístico: no detecta frases sin sentido ni palabras inexistentes que no estén en la lista.
 - El análisis de BTC/cripto y la prueba de chat con tools: ver «Prueba real».
-- `analysis.thesis` sigue incluyendo «Incertidumbre» y «La conclusión cambiaría si» (compatibilidad con el frontend
-  actual); `wouldChangeIf` repite lo segundo. Cuando el frontend pinte el campo, se puede quitar de la tesis.
+- `analysis.thesis` conserva «Incertidumbre:» (prefijo exacto; el frontend lo extrae). «La conclusión cambiaría si» ya NO
+  va en la tesis: solo en `wouldChangeIf`.
 
 ## Decisiones
 - Unidades de memoria: GiB (2^30 bytes) en todos los `*_gb`.
@@ -117,3 +117,31 @@ system prompt la regla 70/30 (no re-medido en chat).
 Defectos que quedan con el 7B (medidos): a veces repite ideas entre párrafos de la tesis (se eliminan frases idénticas,
 solo parafraseadas casi literales); inventa porcentajes derivados («3.4 %») que se descartan/marcan con ⚠ y bajan la confianza;
 descripciones de escenarios flojas; en `quick` la tesis sigue siendo poco específica más veces de lo deseable.
+
+## Coherencia de escenarios y bases de los niveles (Rust)
+- Formato para el usuario: `fmt::price_l` (castellano: `81.059,79`, sin punto de millares con 4 cifras) y `fmt::date_l`
+  («12 oct 2026»). El prompt del juez sigue con punto decimal (`prompt_notes`), porque la verificación compara texto.
+- `levels::Level` lleva `refs` (cifras de las que sale) y `derived` (la base ya incluye sus cifras). Zona de entrada,
+  stop y objetivos (`levelsNote`) explican su base con cifras y «(proveedor, fecha)».
+- Escenarios: `explain_scenarios` antepone «Precio = SMA50 81.059,79 (Binance, 12 oct 2026).» (derivados: «Precio X =
+  punto medio entre el soporte A y la resistencia B (…)»). Del texto del modelo se conservan solo las frases cuyas cifras
+  sean el precio, los niveles de ESE escenario, el precio de partida, su variación o su probabilidad; las demás se
+  descartan y se anota en `qualityNotes` («Escenario bajista: 1 frase(s) … descartada(s) …»).
+- Límite: si el modelo escribe cifras en formato español («81.059,79») su frase se descarta (se parsea mal); el prompt
+  le da las cifras con punto, así que en la práctica no ocurre.
+- Tests: `scenario_text_tests` (caso BTC exacto → solo la frase de Rust + nota; coherente → se conserva; una frase
+  ajena entre varias → solo esa cae), `levels::level_notes_...`, `fmt::spanish_prices_...`.
+
+Extracto real (BTC deep, qwen2.5:7b, hoy). Antes: «Precio objetivo 82113.96 = soporte (binance, 2026-10-13).» sin el
+valor del nivel ni formato español; el caso del defecto (descripción con el soporte 79769.92 y objetivo SMA50) se
+reproduce en el test. Después:
+```
+bearish 30% | Precio = soporte 82.113,96 (binance, 13 oct 2026). Si el MACD histograma se desvía a valores positivos y supera el cero, esto invalidaría el caso alcista y podría llevar a una caída del precio.
+base    40% | Precio 83.432,07 = punto medio entre el soporte 82.850 y la resistencia 84.014,13 (binance, 13 oct 2026).
+levelsNote  | Stop 80.691,34 = soporte 82.850 − 1×ATR14 2158,66 (binance, 13 oct 2026). Objetivos: 84.014,13 = SMA20; 86.369,77 = banda de Bollinger superior; ... (binance, 13 oct 2026).
+qualityNotes| Escenario alcista: 1 frase(s) del modelo descartada(s) por citar cifras que no son las de este escenario (precio 86.369,77).
+```
+AAPL deep: «Precio = resistencia 344,96 (yahoo, 12 oct 2026).», «Precio 339,25 = punto medio entre el soporte 335,78 y la
+resistencia 342,72 (…)»; los tres escenarios tuvieron una frase del 7B descartada (cifras ajenas): con el 7B el
+descarte es frecuente. Pendiente conocido: el nombre del proveedor sale tal cual del snapshot («binance», «yahoo»
+en minúsculas).
