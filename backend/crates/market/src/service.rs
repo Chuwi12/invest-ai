@@ -67,6 +67,8 @@ const MAX_BLOCK: Duration = Duration::from_secs(300);
 /// Timeouts consecutivos tras los que se aparta a un proveedor (sin esto, uno caído añade su
 /// timeout completo a cada petición en frío: GDELT medía 6 s por noticia).
 const TIMEOUT_STRIKES: u32 = 2;
+/// Una operación cancelada tras tanto tiempo se considera un timeout.
+const SLOW_CANCEL: Duration = Duration::from_millis(1000);
 const TIMEOUT_BLOCK: Duration = Duration::from_secs(60);
 /// Tras la primera lista de noticias válida, cuánto se espera al resto de proveedores.
 const NEWS_GRACE: Duration = Duration::from_millis(1500);
@@ -84,6 +86,32 @@ struct SlotState {
     blocked_until: Option<Instant>,
     /// Timeouts seguidos; al llegar a `TIMEOUT_STRIKES` se aparta al proveedor un rato.
     timeouts_in_a_row: u32,
+}
+
+impl SlotState {
+    /// Anota un timeout; al llegar a `TIMEOUT_STRIKES` seguidos aparta al proveedor un rato.
+    fn strike(&mut self) {
+        self.timeouts_in_a_row += 1;
+        if self.timeouts_in_a_row >= TIMEOUT_STRIKES {
+            self.blocked_until = Some(Instant::now() + TIMEOUT_BLOCK);
+        }
+    }
+}
+
+/// Si una operación se cancela (p. ej. `collect_with_grace` descarta al proveedor lento) tras
+/// llevar mucho tiempo en vuelo, cuenta como timeout: si no, el lento nunca acumularía fallos.
+struct CancelGuard<'a> {
+    slot: &'a Slot,
+    t0: Instant,
+    armed: bool,
+}
+
+impl Drop for CancelGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed && self.t0.elapsed() >= SLOW_CANCEL {
+            self.slot.state().strike();
+        }
+    }
 }
 
 struct Slot {
@@ -133,10 +161,12 @@ impl Slot {
             return Err(ProviderError::RateLimited { retry_after: None });
         }
         let t0 = Instant::now();
+        let mut guard = CancelGuard { slot: self, t0, armed: true };
         let res = match tokio::time::timeout(OP_TIMEOUT, f(self.provider.clone())).await {
             Ok(r) => r,
             Err(_) => Err(ProviderError::upstream("timeout")),
         };
+        guard.armed = false;
         let ms = t0.elapsed().as_millis() as u64;
         let mut st = self.state();
         match &res {
@@ -156,10 +186,7 @@ impl Slot {
                 st.last_error = Some(redact(m, &self.secrets));
                 st.last_latency_ms = Some(ms);
                 if m == "timeout" {
-                    st.timeouts_in_a_row += 1;
-                    if st.timeouts_in_a_row >= TIMEOUT_STRIKES {
-                        st.blocked_until = Some(Instant::now() + TIMEOUT_BLOCK);
-                    }
+                    st.strike();
                 } else {
                     st.timeouts_in_a_row = 0;
                 }
@@ -1337,6 +1364,104 @@ mod latency_tests {
         s.run(&|_p: Arc<dyn Provider>| async { Ok::<_, ProviderError>(()) }).await.unwrap();
         let _ = timing_out(&s).await;
         assert!(s.state().blocked_until.is_none());
+    }
+
+    #[tokio::test]
+    async fn cancelled_slow_operations_count_as_timeouts() {
+        let s = slot();
+        for _ in 0..TIMEOUT_STRIKES {
+            let slow = s.run(&|_p: Arc<dyn Provider>| async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Ok::<_, ProviderError>(())
+            });
+            // Se descarta tras 1,1 s, como hace `collect_with_grace`.
+            let _ = tokio::time::timeout(Duration::from_millis(1100), slow).await;
+        }
+        assert!(s.state().blocked_until.is_some());
+    }
+
+    /// Proveedor "binance" falso que cuenta las llamadas al lote de cotizaciones.
+    struct CountingBinance {
+        info: ProviderInfo,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl Provider for CountingBinance {
+        fn info(&self) -> &ProviderInfo {
+            &self.info
+        }
+
+        async fn quotes(&self, ids: &[AssetId]) -> PResult<Vec<Quote>> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(ids
+                .iter()
+                .map(|id| Quote {
+                    id: id.clone(),
+                    price: 1.0,
+                    change: None,
+                    change_pct: None,
+                    open: None,
+                    high: None,
+                    low: None,
+                    prev_close: None,
+                    volume: None,
+                    market_cap: None,
+                    currency: None,
+                    market_state: domain::MarketState::Unknown,
+                    timestamp: Utc::now(),
+                    source: "binance".into(),
+                    delay_secs: None,
+                    source_url: None,
+                    timestamp_origin: None,
+                })
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn simultaneous_identical_batches_hit_the_provider_once() {
+        let http = build_client(Duration::from_secs(5)).unwrap();
+        let info = ProviderInfo {
+            name: "binance",
+            requires_key: false,
+            has_key: false,
+            capabilities: vec![],
+            classes: vec![],
+            rate_per_sec: 1000.0,
+            burst: 1000,
+        };
+        let prov = Arc::new(CountingBinance { info, calls: Default::default() });
+        let inner = Arc::new(Inner {
+            slots: vec![Slot::new(prov.clone(), Arc::new(Vec::new()))],
+            yahoo: Arc::new(Yahoo::new(http.clone())),
+            sec: Arc::new(Sec::new(http, "test test@example.com".into())),
+            quotes: cache(Duration::from_secs(3), 100),
+            quote_batches: cache(Duration::from_millis(200), 10),
+            history_intraday: cache(Duration::from_secs(60), 10),
+            history_daily: cache(Duration::from_secs(60), 10),
+            indicators: cache(Duration::from_secs(60), 10),
+            fundamentals: cache(Duration::from_secs(60), 10),
+            news: cache(Duration::from_secs(60), 10),
+            macros: cache(Duration::from_secs(60), 4),
+            search: cache(Duration::from_secs(60), 10),
+            summaries: cache(Duration::from_secs(60), 10),
+            options: cache(Duration::from_secs(60), 10),
+        });
+        let ids = vec![AssetId::new(AssetClass::Crypto, "BTC"), AssetId::new(AssetClass::Crypto, "ETH")];
+        let reordered = vec![ids[1].clone(), ids[0].clone()];
+        let tasks: Vec<_> = (0..30)
+            .map(|i| {
+                let inner = inner.clone();
+                let ids = if i % 2 == 0 { ids.clone() } else { reordered.clone() };
+                tokio::spawn(async move { inner.quotes(&ids).await.len() })
+            })
+            .collect();
+        for t in tasks {
+            assert_eq!(t.await.unwrap(), 2);
+        }
+        assert_eq!(prov.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     type Fut = std::pin::Pin<Box<dyn Future<Output = (&'static str, PResult<u8>)> + Send>>;
