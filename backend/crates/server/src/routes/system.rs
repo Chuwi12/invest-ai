@@ -25,5 +25,10 @@ pub async fn status(State(state): State<AppState>) -> Json<Value> {
             error: Some("tiempo de espera agotado consultando al LLM".into()),
         },
     };
-    Json(json!({ "llm": llm, "providers": state.market.providers_status() }))
+    // `outbound`: peticiones HTTP salientes a proveedores desde el arranque (diagnóstico de caché).
+    let outbound: Vec<Value> = market::http::outbound_stats()
+        .into_iter()
+        .map(|(host, requests, avg_ms)| json!({ "host": host, "requests": requests, "avgMs": (avg_ms * 10.0).round() / 10.0 }))
+        .collect();
+    Json(json!({ "llm": llm, "providers": state.market.providers_status(), "outbound": outbound }))
 }

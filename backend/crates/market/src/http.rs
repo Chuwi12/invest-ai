@@ -14,6 +14,29 @@ pub const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
 /// Tope de tamaño de respuesta que aceptamos leer (company_tickers de la SEC pesa ~1 MB).
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
+/// Contadores de peticiones salientes por host (cabeceras recibidas, sin leer el cuerpo).
+/// Solo hay un puñado de hosts distintos (los de los proveedores), así que el mapa no crece.
+static OUTBOUND: std::sync::Mutex<Vec<(String, u64, u64)>> = std::sync::Mutex::new(Vec::new());
+
+fn record_outbound(host: &str, elapsed: Duration) {
+    let micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
+    let mut v = OUTBOUND.lock().unwrap_or_else(|p| p.into_inner());
+    match v.iter_mut().find(|(h, ..)| h == host) {
+        Some((_, n, total)) => {
+            *n += 1;
+            *total = total.saturating_add(micros);
+        }
+        None => v.push((host.to_owned(), 1, micros)),
+    }
+}
+
+/// Peticiones HTTP salientes desde el arranque: `(host, peticiones, latencia media en ms hasta
+/// recibir cabeceras)`. Sirve para medir el single-flight y la caché sin depender de los logs.
+pub fn outbound_stats() -> Vec<(String, u64, f64)> {
+    let v = OUTBOUND.lock().unwrap_or_else(|p| p.into_inner());
+    v.iter().map(|(h, n, t)| (h.clone(), *n, *t as f64 / *n as f64 / 1000.0)).collect()
+}
+
 /// Un único cliente para todo el crate: pool de conexiones, HTTP/2, gzip y brotli.
 pub fn build_client(timeout: Duration) -> Result<reqwest::Client, DomainError> {
     reqwest::Client::builder()
@@ -122,7 +145,13 @@ pub async fn send(req: RequestBuilder) -> PResult<Body> {
 }
 
 async fn send_limited(req: RequestBuilder, max: usize) -> PResult<Body> {
-    let resp = req.send().await.map_err(map_reqwest)?;
+    let (client, built) = req.build_split();
+    let built = built.map_err(map_reqwest)?;
+    let host = built.url().host_str().unwrap_or("?").to_owned();
+    let t0 = std::time::Instant::now();
+    let sent = client.execute(built).await;
+    record_outbound(&host, t0.elapsed());
+    let resp = sent.map_err(map_reqwest)?;
     let status = resp.status();
     if status == StatusCode::TOO_MANY_REQUESTS {
         return Err(ProviderError::RateLimited {

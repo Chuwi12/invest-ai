@@ -64,6 +64,12 @@ const OP_TIMEOUT: Duration = Duration::from_secs(25);
 /// Pausa mínima de un proveedor tras un 429 sin `Retry-After`.
 const DEFAULT_BLOCK: Duration = Duration::from_secs(30);
 const MAX_BLOCK: Duration = Duration::from_secs(300);
+/// Timeouts consecutivos tras los que se aparta a un proveedor (sin esto, uno caído añade su
+/// timeout completo a cada petición en frío: GDELT medía 6 s por noticia).
+const TIMEOUT_STRIKES: u32 = 2;
+const TIMEOUT_BLOCK: Duration = Duration::from_secs(60);
+/// Tras la primera lista de noticias válida, cuánto se espera al resto de proveedores.
+const NEWS_GRACE: Duration = Duration::from_millis(1500);
 const MAX_QUERY_LEN: usize = 64;
 
 // ---------------------------------------------------------------------------------------------
@@ -76,6 +82,8 @@ struct SlotState {
     last_error: Option<String>,
     last_latency_ms: Option<u64>,
     blocked_until: Option<Instant>,
+    /// Timeouts seguidos; al llegar a `TIMEOUT_STRIKES` se aparta al proveedor un rato.
+    timeouts_in_a_row: u32,
 }
 
 struct Slot {
@@ -133,6 +141,7 @@ impl Slot {
         let mut st = self.state();
         match &res {
             Ok(_) | Err(ProviderError::NotFound(_)) => {
+                st.timeouts_in_a_row = 0;
                 st.last_ok = Some(Utc::now());
                 st.last_error = None;
                 st.last_latency_ms = Some(ms);
@@ -146,6 +155,14 @@ impl Slot {
             Err(ProviderError::Upstream(m)) => {
                 st.last_error = Some(redact(m, &self.secrets));
                 st.last_latency_ms = Some(ms);
+                if m == "timeout" {
+                    st.timeouts_in_a_row += 1;
+                    if st.timeouts_in_a_row >= TIMEOUT_STRIKES {
+                        st.blocked_until = Some(Instant::now() + TIMEOUT_BLOCK);
+                    }
+                } else {
+                    st.timeouts_in_a_row = 0;
+                }
             }
         }
         res
@@ -267,6 +284,34 @@ where
         .map_err(|e: Arc<DomainError>| clone_err(&e))
 }
 
+/// Recoge los resultados de varios proveedores a la vez. En cuanto uno responde bien, los demás
+/// tienen `grace` para llegar; los que no, se descartan (se cancelan al soltar el futuro). Así un
+/// proveedor lento no fija la latencia de toda la respuesta.
+async fn collect_with_grace<T, F>(futs: impl IntoIterator<Item = F>, grace: Duration) -> Vec<(&'static str, PResult<T>)>
+where
+    F: Future<Output = (&'static str, PResult<T>)>,
+{
+    use futures::stream::FuturesUnordered;
+    let mut pending: FuturesUnordered<F> = futs.into_iter().collect();
+    let mut out = Vec::new();
+    let mut deadline: Option<tokio::time::Instant> = None;
+    loop {
+        let next = match deadline {
+            Some(d) => match tokio::time::timeout_at(d, pending.next()).await {
+                Ok(n) => n,
+                Err(_) => break,
+            },
+            None => pending.next().await,
+        };
+        let Some(item) = next else { break };
+        if item.1.is_ok() && deadline.is_none() {
+            deadline = Some(tokio::time::Instant::now() + grace);
+        }
+        out.push(item);
+    }
+    out
+}
+
 fn cache<T: Clone + Send + Sync + 'static>(ttl: Duration, cap: u64) -> Cache<String, T> {
     Cache::builder().time_to_live(ttl).max_capacity(cap).build()
 }
@@ -286,6 +331,8 @@ struct Inner {
     yahoo: Arc<Yahoo>,
     sec: Arc<Sec>,
     quotes: Cache<String, Quote>,
+    /// Lotes de cotizaciones en vuelo (vida de 200 ms): peticiones iguales y simultáneas comparten una.
+    quote_batches: Cache<String, Arc<Vec<Quote>>>,
     history_intraday: Cache<String, Arc<HistEntry>>,
     history_daily: Cache<String, Arc<HistEntry>>,
     indicators: Cache<String, Indicators>,
@@ -392,7 +439,17 @@ impl Inner {
         .await
     }
 
+    /// Cotizaciones de varios activos; las llamadas simultáneas con el mismo conjunto de ids
+    /// comparten una sola ejecución (single-flight), como las cachés de un solo recurso.
     async fn quotes(&self, ids: &[AssetId]) -> Vec<Quote> {
+        let mut key: Vec<String> = ids.iter().map(ToString::to_string).collect();
+        key.sort_unstable();
+        key.dedup();
+        let batch = self.quote_batches.get_with(key.join(","), async { Arc::new(self.quotes_uncached(ids).await) }).await;
+        (*batch).clone()
+    }
+
+    async fn quotes_uncached(&self, ids: &[AssetId]) -> Vec<Quote> {
         let mut seen = std::collections::HashSet::new();
         let ids: Vec<&AssetId> = ids
             .iter()
@@ -716,7 +773,7 @@ impl Inner {
                         (slot.name(), r)
                     }
                 });
-            let results = futures::future::join_all(futs).await;
+            let results = collect_with_grace(futs, NEWS_GRACE).await;
             let mut lists = Vec::new();
             let mut err = None;
             let mut answered = false;
@@ -978,6 +1035,7 @@ impl MarketService {
             yahoo,
             sec,
             quotes: cache(Duration::from_secs(3), 5_000),
+            quote_batches: cache(Duration::from_millis(200), 200),
             history_intraday: cache(Duration::from_secs(60), 500),
             history_daily: cache(Duration::from_secs(15 * 60), 500),
             indicators: cache(Duration::from_secs(15 * 60), 1_000),
@@ -1226,5 +1284,88 @@ mod provenance_tests {
         assert_eq!(blocked_secs(None), None);
         assert_eq!(blocked_secs(Some(Instant::now() - Duration::from_secs(1))), None);
         assert!(blocked_secs(Some(Instant::now() + Duration::from_secs(30))).unwrap() >= 29);
+    }
+}
+
+#[cfg(test)]
+mod latency_tests {
+    use super::*;
+    use crate::providers::ProviderInfo;
+
+    struct Dummy(ProviderInfo);
+
+    #[async_trait]
+    impl Provider for Dummy {
+        fn info(&self) -> &ProviderInfo {
+            &self.0
+        }
+    }
+
+    fn slot() -> Slot {
+        let info = ProviderInfo {
+            name: "dummy",
+            requires_key: false,
+            has_key: false,
+            capabilities: vec![],
+            classes: vec![],
+            rate_per_sec: 1000.0,
+            burst: 1000,
+        };
+        Slot::new(Arc::new(Dummy(info)), Arc::new(Vec::new()))
+    }
+
+    async fn timing_out(s: &Slot) -> PResult<()> {
+        s.run(&|_p: Arc<dyn Provider>| async { Err::<(), _>(ProviderError::upstream("timeout")) }).await
+    }
+
+    #[tokio::test]
+    async fn repeated_timeouts_bench_the_provider() {
+        let s = slot();
+        assert!(matches!(timing_out(&s).await, Err(ProviderError::Upstream(_))));
+        // Un solo timeout no aparta al proveedor.
+        assert!(s.state().blocked_until.is_none());
+        assert!(matches!(timing_out(&s).await, Err(ProviderError::Upstream(_))));
+        assert!(s.state().blocked_until.is_some());
+        // Apartado: responde al instante sin llamar al proveedor.
+        assert!(matches!(timing_out(&s).await, Err(ProviderError::RateLimited { .. })));
+    }
+
+    #[tokio::test]
+    async fn a_success_resets_the_timeout_streak() {
+        let s = slot();
+        let _ = timing_out(&s).await;
+        s.run(&|_p: Arc<dyn Provider>| async { Ok::<_, ProviderError>(()) }).await.unwrap();
+        let _ = timing_out(&s).await;
+        assert!(s.state().blocked_until.is_none());
+    }
+
+    type Fut = std::pin::Pin<Box<dyn Future<Output = (&'static str, PResult<u8>)> + Send>>;
+
+    fn after(ms: u64, name: &'static str, ok: bool) -> Fut {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            (name, if ok { Ok(1) } else { Err(ProviderError::upstream("x")) })
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_provider_is_dropped_after_the_grace_period() {
+        let t0 = tokio::time::Instant::now();
+        let out = collect_with_grace(vec![after(300, "fast", true), after(6000, "slow", true)], Duration::from_millis(1500)).await;
+        assert_eq!(out.iter().map(|(n, _)| *n).collect::<Vec<_>>(), ["fast"]);
+        assert!(t0.elapsed() < Duration::from_millis(2000), "tardó {:?}", t0.elapsed());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn waits_for_everyone_when_nobody_has_answered_yet() {
+        // Un fallo rápido no abre la ventana de gracia: se espera al que sí responde.
+        let out = collect_with_grace(vec![after(100, "bad", false), after(5000, "slow", true)], Duration::from_millis(1500)).await;
+        assert_eq!(out.len(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn providers_arriving_within_grace_are_kept() {
+        let out = collect_with_grace(vec![after(100, "a", true), after(900, "b", true)], Duration::from_millis(1500)).await;
+        assert_eq!(out.len(), 2);
     }
 }

@@ -36,7 +36,7 @@ async fn health_and_status() {
 
     let (status, body) = app.get("/api/status").await;
     assert_eq!(status, StatusCode::OK);
-    assert_keys(&body, &["llm", "providers"]);
+    assert_keys(&body, &["llm", "providers", "outbound"]);
     assert_eq!(
         body["llm"],
         json!({
