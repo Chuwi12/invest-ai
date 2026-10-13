@@ -149,7 +149,7 @@ pub fn judge_task(lang: Lang, digest: &str, provisional: Verdict, debated: bool,
     let scen = if deep {
         "\n- scenarios: EXACTLY three objects {kind: bullish|base|bearish, probability: integer percentage, description}. \
 The three probabilities must sum to 100 and reflect the evidence (not a default 33/33/33). description = 2 sentences with \
-figures: bullish = what has to happen for the price to rise towards the next resistances; base = what keeps the price ranging between support and resistance; bearish = what would push the price down towards the supports. Each description must match its kind. Do NOT write price targets for \
+figures: bullish = what has to happen for the price to rise towards the next resistances; base = what keeps the price ranging between support and resistance; bearish = what would push the price down towards the supports. Each description must match its kind and explain WHY only, in words: do not write prices, levels or percentages in it (the system states the target price and its basis). Do NOT write price targets for \
 scenarios: the system derives them from the data's levels."
     } else {
         ""

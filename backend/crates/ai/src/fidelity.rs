@@ -52,6 +52,22 @@ impl Num {
     }
 }
 
+/// Umbrales y periodos convencionales de los indicadores (RSI 70/30, estocástico 80/20, medias de
+/// 20/50/200 sesiones, ATR14, MACD 12/26/9, Bollinger 2σ) cuando aparecen junto a su indicador: no
+/// son datos del activo y no se exige que estén en el contexto.
+fn is_conventional_threshold(text: &str, start: usize, end: usize, base: f64) -> bool {
+    let before: String = text[..start].chars().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect();
+    let after: String = text[end..].chars().take(14).collect();
+    let near = format!("{} {}", before.to_lowercase(), after.to_lowercase());
+    let has = |keys: &[&str]| keys.iter().any(|k| near.contains(k));
+    let is = |vals: &[f64]| vals.iter().any(|v| (base - v).abs() < 1e-9);
+    (has(&["rsi", "estoc", "stochastic", "mfi"]) && is(&[20.0, 30.0, 70.0, 80.0]))
+        || (has(&["sma", "ema", "media", "moving average"]) && is(&[5.0, 10.0, 20.0, 50.0, 100.0, 150.0, 200.0]))
+        || (has(&["atr", "adx", "rsi"]) && is(&[14.0]))
+        || (has(&["bollinger"]) && is(&[2.0, 20.0]))
+        || (has(&["macd"]) && is(&[9.0, 12.0, 26.0]))
+}
+
 /// Extrae los números de un texto.
 pub fn extract_numbers(text: &str) -> Vec<Num> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
@@ -133,7 +149,8 @@ pub fn extract_numbers(text: &str) -> Vec<Num> {
                 && chars.get(j + 1).is_some_and(|(_, d)| d.is_ascii_digit()));
         let small_int = decimals == 0 && scale == 1.0 && !has_percent && base <= 12.0;
         let year = decimals == 0 && scale == 1.0 && !has_percent && (1990.0..=2100.0).contains(&base);
-        let exempt = attached_before || attached_after || in_date_or_time || small_int || year;
+        let conventional = decimals == 0 && scale == 1.0 && !has_percent && is_conventional_threshold(text, start, end, base);
+        let exempt = attached_before || attached_after || in_date_or_time || small_int || year || conventional;
         if value.is_finite() {
             out.push(Num {
                 raw: text[start..end].to_string(),
@@ -278,6 +295,17 @@ fn news_tag(line: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn conventional_indicator_thresholds_are_exempt_only_next_to_their_indicator() {
+        let ex = |t: &str| super::extract_numbers(t).iter().filter(|n| !n.exempt).count();
+        assert_eq!(ex("Si el RSI14 se sitúa por encima de 70, indicaría sobrecompra"), 0);
+        assert_eq!(ex("el RSI por debajo de 30 es sobreventa; estocástico sobre 80"), 0);
+        assert_eq!(ex("precio sobre la media de 200 sesiones y la SMA 50"), 0);
+        // Un 70 cualquiera, sin su indicador, sigue necesitando respaldo en los datos.
+        assert_eq!(ex("El beneficio sube un 70 millones"), 1);
+        assert_eq!(ex("El RSI14 está en 71"), 1);
+    }
+
     use super::*;
 
     const CTX: &str = "# Apple (stock:AAPL) — stock\n\

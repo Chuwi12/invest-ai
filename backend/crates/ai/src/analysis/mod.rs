@@ -465,6 +465,7 @@ impl AnalysisEngine {
             analysis.position_sizing = levels::sizing(plan, &snap, &card, analysis.verdict, lang);
             if let Some(sc) = analysis.scenarios.as_mut() {
                 price_scenarios(sc, plan, analysis_price(&snap), lang);
+                explain_scenarios(sc, &snap, lang);
                 analysis.expected_return_pct = expected_return(sc);
             }
         } else {
@@ -747,6 +748,34 @@ fn price_scenarios(sc: &mut [Scenario], plan: &LevelPlan, price: Option<f64>, la
     }
 }
 
+/// Antepone a cada escenario la frase de base del precio, generada en Rust (de dónde sale el
+/// número, con proveedor y fecha), y conserva el texto del modelo solo si todas sus cifras son el
+/// precio objetivo, el precio de partida o la variación calculada: el modelo redacta el porqué.
+fn explain_scenarios(sc: &mut [Scenario], snap: &AssetSnapshot, lang: Lang) {
+    let src = snap
+        .quote
+        .as_ref()
+        .map(|q| format!("{}, {}", q.source, q.timestamp.format("%Y-%m-%d")))
+        .unwrap_or_else(|| snap.generated_at.format("%Y-%m-%d").to_string());
+    let start = analysis_price(snap);
+    for s in sc.iter_mut() {
+        let (Some(target), Some(basis)) = (s.target_price, s.target_basis.clone()) else { continue };
+        let allowed: Vec<f64> = [Some(target), start, s.return_pct, s.return_pct.map(f64::abs)].into_iter().flatten().collect();
+        let matches = |v: f64| allowed.iter().any(|a| (a - v).abs() <= (a.abs() * 0.0006).max(0.06));
+        let model_ok = extract_numbers(&s.description).iter().filter(|n| !n.exempt).all(|n| matches(n.value.abs()) || matches(n.value));
+        let base = tr!(
+            lang,
+            "Precio objetivo {} = {} ({}).",
+            "Target price {} = {} ({}).",
+            crate::fmt::price(target),
+            basis,
+            src
+        );
+        let why = s.description.trim().to_string();
+        s.description = if model_ok && !why.is_empty() { format!("{base} {why}") } else { base };
+    }
+}
+
 fn expected_return(sc: &[Scenario]) -> Option<f64> {
     if sc.is_empty() || sc.iter().any(|s| s.return_pct.is_none()) {
         return None;
@@ -938,6 +967,43 @@ pub(crate) fn parse_json<T: DeserializeOwned>(content: &str) -> std::result::Res
         return Ok(v);
     }
     Err(err)
+}
+
+#[cfg(test)]
+mod scenario_text_tests {
+    use super::*;
+    use crate::fixture;
+
+    fn sc(desc: &str) -> Vec<Scenario> {
+        vec![Scenario {
+            kind: "bearish".into(),
+            probability: 30.0,
+            description: desc.into(),
+            target_price: Some(81059.79),
+            target_basis: Some("SMA50".into()),
+            return_pct: Some(-1.7),
+        }]
+    }
+
+    #[test]
+    fn rust_states_the_price_basis_and_model_text_is_kept_only_if_its_figures_match() {
+        let snap = fixture::stock_snapshot();
+        let mut ok = sc("Si el MACD sigue negativo, el precio cedería hasta 81059.79 (-1.7%).");
+        explain_scenarios(&mut ok, &snap, Lang::Es);
+        assert!(ok[0].description.starts_with("Precio objetivo 81059.79 = SMA50 (fixture, "), "{}", ok[0].description);
+        assert!(ok[0].description.contains("Si el MACD sigue negativo"));
+
+        // El modelo cita otro nivel (79769.92) distinto del precio del escenario: se descarta su frase.
+        let mut bad = sc("El precio podría caer hacia el soporte 79769.92.");
+        explain_scenarios(&mut bad, &snap, Lang::Es);
+        assert!(bad[0].description.starts_with("Precio objetivo 81059.79 = SMA50"));
+        assert!(!bad[0].description.contains("79769.92"), "{}", bad[0].description);
+
+        // Sin cifras, el porqué cualitativo se conserva.
+        let mut plain = sc("Si el MACD sigue negativo y la volatilidad persiste.");
+        explain_scenarios(&mut plain, &snap, Lang::Es);
+        assert!(plain[0].description.contains("volatilidad persiste"));
+    }
 }
 
 #[cfg(test)]
