@@ -1,0 +1,6 @@
+# Configuración de `cargo audit` (https://rustsec.org).
+[advisories]
+# RUSTSEC-2023-0071 (rsa, Marvin Attack): `rsa` solo llega al Cargo.lock como dependencia de
+# `sqlx-mysql`, que no se compila (usamos solo SQLite; `cargo tree -i rsa --target all` no imprime
+# nada). Revisar si algún día se activa la feature `mysql` de sqlx.
+ignore = ["RUSTSEC-2023-0071"]
