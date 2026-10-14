@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AssetSummary, Quote } from '@/api/types'
 import { renderApp } from '@/test/utils'
@@ -60,5 +60,27 @@ describe('AssetHeader: antigüedad medida frente a retraso declarado', () => {
   it.each([0, null])('sin retraso declarado (%s) no hay nota', (delaySecs) => {
     header(quote({ delaySecs }))
     expect(screen.queryByRole('img', { name: /retraso/i })).toBeNull()
+  })
+})
+
+// R-35: el aviso se calculaba solo al renderizar. Si el feed se para, la cotización no cambia, React Query
+// conserva la misma referencia y nada vuelve a renderizar: justo el caso que «retrasado» debe detectar.
+describe('AssetHeader: el paso del tiempo sin datos nuevos', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('un dato que deja de actualizarse acaba marcándose «retrasado» y su antigüedad avanza, sin nuevas props', () => {
+    const q = quote()
+    const { container } = header(q)
+    expect(screen.queryByText('retrasado')).toBeNull()
+    expect(container.querySelector('.prov time')).toHaveTextContent('ahora mismo')
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000)
+    })
+    expect(screen.getByText('retrasado')).toBeInTheDocument()
+    expect(container.querySelector('.prov time')).toHaveTextContent(/5 minutos/)
   })
 })

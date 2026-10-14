@@ -1,6 +1,7 @@
 import { memo, type ReactNode } from 'react'
 import type { AssetSummary, Quote } from '@/api/types'
 import { assetHrefLabel } from '@/lib/assets'
+import { useClock } from '@/hooks/useClock'
 import { quoteFreshness } from '@/lib/freshness'
 import { formatRelative } from '@/lib/format'
 import { sourceName } from '@/lib/sources'
@@ -15,7 +16,8 @@ export interface WatchRow {
 }
 
 const Row = memo(function Row({ row }: { row: WatchRow }) {
-  const f = quoteFreshness(row.quote)
+  const now = useClock()
+  const f = quoteFreshness(row.quote, now)
   return (
     <tr>
       <td><AssetCell id={row.summary.id} name={row.summary.name} /></td>
@@ -26,7 +28,7 @@ const Row = memo(function Row({ row }: { row: WatchRow }) {
       <td className="small muted">
         {row.quote ? (
           <span title={`Cotización de ${sourceName(row.quote.source)} · ${row.quote.timestamp}`}>
-            {sourceName(row.quote.source)} · {formatRelative(row.quote.timestamp)}
+            {sourceName(row.quote.source)} · {formatRelative(row.quote.timestamp, now)}
             {f.stale ? <span className="stale-badge" style={{ marginLeft: 4 }} title={f.reason ?? ''}>retrasado</span> : null}
           </span>
         ) : '—'}

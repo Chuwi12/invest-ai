@@ -134,3 +134,6 @@ Regla de presentación (honesta con la procedencia):
 - `QuoteFreshness` añade `measured` y `declaredDelaySecs` a `Freshness`; `Dashboard` y `WatchTable` siguen usando `stale`/`reason` sin cambios.
 - Tests: `freshness.test.ts` (medida < declarada, > declarada + margen y el límite exacto, feed diferido de verdad, sin hora del proveedor, origen desconocido, mercado cerrado/pre/post, cripto), `AssetHeader.test.tsx` (la cabecera no contiene «Retraso de 15 s», muestra «ahora mismo», el 15 solo en el tooltip, «retrasado» con 10 min de antigüedad, sin hora de proveedor, mercado cerrado), `Provenance.test.tsx` (nota secundaria) y `format.test.ts`.
 - Límites: la antigüedad se mide con el reloj de este equipo (un reloj desajustado la falsea). El pie de la cabecera usa la hora de la cotización REST (sondeo de 15 s), no la del último tick WS que pinta `LivePrice`: con ticks más recientes el precio puede ser más nuevo que la antigüedad mostrada.
+
+## Reloj de frescura (R-35, 14-oct)
+`hooks/useClock.ts` fuerza un render periódico para que la antigüedad («hace N min») y «retrasado» avancen aunque el dato no cambie (React Query conserva la misma referencia si la respuesta es idéntica). Úsalo en cualquier componente que calcule `ahora − hora del dato`.

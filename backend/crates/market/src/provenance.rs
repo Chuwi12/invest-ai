@@ -39,7 +39,7 @@ pub fn infer_interval(candles: &[Candle]) -> Option<Interval> {
         return None;
     }
     gaps.sort_unstable();
-    let median = gaps[gaps.len() / 2] as f64;
+    let median = gaps[(gaps.len() - 1) / 2] as f64; // mediana INFERIOR: con 2 separaciones [1 d, 3 d] no gana el fin de semana
     [
         Interval::M1,
         Interval::M5,
@@ -105,6 +105,16 @@ mod tests {
 
     fn at(ts: &[i64]) -> Vec<Candle> {
         ts.iter().map(|t| Candle { t: *t, o: 1.0, h: 1.0, l: 1.0, c: 1.0, v: None }).collect()
+    }
+
+    #[test]
+    fn a_short_series_with_a_weekend_gap_is_still_daily() {
+        // Vie, lun, mar: separaciones [1 d, 3 d]. Con la mediana SUPERIOR salía 3 d -> «1wk».
+        let day = 86_400;
+        assert_eq!(infer_interval(&at(&[0, day, 4 * day])), Some(Interval::D1));
+        assert_eq!(infer_interval(&at(&[0, 3 * day, 4 * day])), Some(Interval::D1));
+        // Semanal con un festivo (lunes festivo: 8 d) y 3 velas.
+        assert_eq!(infer_interval(&at(&[0, 7 * day, 15 * day])), Some(Interval::W1));
     }
 
     #[test]

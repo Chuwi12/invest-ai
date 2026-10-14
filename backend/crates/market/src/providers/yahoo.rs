@@ -776,6 +776,21 @@ pub fn fold_live_point(candles: &mut Vec<Candle>, interval: Interval) {
     }
     let (prev, last) = (candles[candles.len() - 2], candles[candles.len() - 1]);
     let delta = last.t - prev.t;
+    // Cierre de sesión: Yahoo añade el último precio oficial como punto plano de volumen 0 JUSTO en
+    // la frontera siguiente a la última vela (16:00:00 tras la de 15:55 en 5 min; medido el 13-oct
+    // con AAPL en 5m/15m/30m). Alineado, no se reconoce por la separación: es una vela fantasma
+    // fuera de sesión cuyo cierre además difiere del de la última vela real (341,27 frente a 341,37).
+    // También el punto en vivo que cae exactamente en la frontera de la vela ya existente (delta 0).
+    let flat_empty = last.o == last.h && last.o == last.l && last.o == last.c && last.v.unwrap_or(0.0) == 0.0;
+    if flat_empty && (delta == step || delta == 0) {
+        candles.pop();
+        if let Some(p) = candles.last_mut() {
+            p.c = last.c;
+            p.h = p.h.max(last.c);
+            p.l = p.l.min(last.c);
+        }
+        return;
+    }
     if delta <= 0 || delta % step == 0 {
         return;
     }
@@ -1365,6 +1380,32 @@ mod tests {
         let mut one = vec![candle(7, 1.0, 1.0, 1.0, 1.0, 0.0)];
         fold_live_point(&mut one, Interval::M5);
         assert_eq!(one.len(), 1);
+    }
+
+    #[test]
+    fn closing_print_on_the_next_boundary_is_not_a_phantom_candle() {
+        // AAPL 13-oct-2026 (5m): última vela real 15:55 (cierre 341,37) y, a las 16:00:00 exactas,
+        // el precio oficial de cierre como punto plano de volumen 0 (341,27).
+        let mut c = vec![
+            candle(1_791_921_000, 341.71, 341.88, 341.17, 341.37, 570_884.0), // 15:50
+            candle(1_791_921_300, 341.35, 341.54, 340.89, 341.37, 1_720_840.0), // 15:55
+            candle(1_791_921_600, 341.27, 341.27, 341.27, 341.27, 0.0),       // 16:00:00
+        ];
+        fold_live_point(&mut c, Interval::M5);
+        assert_eq!(c.len(), 2, "no debe quedar una vela a las 16:00");
+        assert_eq!(c[1].t, 1_791_921_300);
+        assert_eq!(c[1].c, 341.27, "el cierre es el precio oficial");
+        assert_eq!(c[1].l, 340.89);
+        assert_eq!(c[1].v, Some(1_720_840.0));
+        // Punto en vivo exactamente sobre la vela en curso (separación 0).
+        let mut d = vec![
+            candle(0, 1.0, 2.0, 0.5, 1.5, 10.0),
+            candle(300, 1.5, 3.0, 1.0, 2.5, 8.0),
+            candle(300, 2.0, 2.0, 2.0, 2.0, 0.0),
+        ];
+        fold_live_point(&mut d, Interval::M5);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[1].c, 2.0);
     }
 
     #[test]

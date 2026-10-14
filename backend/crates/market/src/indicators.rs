@@ -327,6 +327,18 @@ fn at_or_before(candles: &[Candle], ts: i64) -> Option<f64> {
     idx.checked_sub(1).map(|i| candles[i].c)
 }
 
+/// Holgura al buscar la sesión de una fecha a la misma hora: el cambio de horario mueve la hora UTC
+/// de apertura como mucho 1 h (ASX: 00:00 UTC en AEST, 23:00 del día anterior en AEDT). Una sesión
+/// está a 24 h de la siguiente, así que 2 h nunca arrastran la sesión equivocada.
+const SESSION_SLACK: i64 = 2 * 3600;
+
+/// Cierre de la sesión que cae a la hora `ts` (± el cambio de horario): la última vela con
+/// `t <= ts + SESSION_SLACK`. Para fechas calculadas con `sub_months(last.t, ..)` o `last.t - 7 d`.
+fn session_at_or_before(candles: &[Candle], ts: i64) -> Option<f64> {
+    let idx = candles.partition_point(|c| c.t <= ts + SESSION_SLACK);
+    idx.checked_sub(1).map(|i| candles[i].c)
+}
+
 fn sub_months(ts: i64, months: u32) -> Option<i64> {
     let dt = DateTime::<Utc>::from_timestamp(ts, 0)?;
     dt.checked_sub_months(Months::new(months))
@@ -412,19 +424,17 @@ pub fn compute_at(candles: &[Candle], now: i64) -> Indicators {
         out.dist_from_high52w = Some(last.c / high - 1.0);
     }
 
-    let ret = |target: Option<i64>| {
-        target
-            .and_then(|t| at_or_before(&candles, t))
-            .map(|past| last.c / past - 1.0)
-    };
-    out.return1w = ret(Some(last.t - 7 * DAY));
-    out.return1m = ret(sub_months(last.t, 1));
-    out.return3m = ret(sub_months(last.t, 3));
-    out.return1y = ret(sub_months(last.t, 12));
+    let ret = |base: Option<f64>| base.map(|past| last.c / past - 1.0);
+    let by_session = |target: Option<i64>| target.and_then(|t| session_at_or_before(&candles, t));
+    out.return1w = ret(by_session(Some(last.t - 7 * DAY)));
+    out.return1m = ret(by_session(sub_months(last.t, 1)));
+    out.return3m = ret(by_session(sub_months(last.t, 3)));
+    out.return1y = ret(by_session(sub_months(last.t, 12)));
     let jan1 = DateTime::<Utc>::from_timestamp(last.t, 0)
         .and_then(|d| Utc.with_ymd_and_hms(d.year(), 1, 1, 0, 0, 0).single())
         .map(|d| d.timestamp() - 1);
-    out.return_ytd = ret(jan1);
+    // YTD: último cierre del año anterior, por día UTC (sin holgura: una vela cripto del 1-ene 00:00 es de este año).
+    out.return_ytd = ret(jan1.and_then(|t| at_or_before(&candles, t)));
 
     // Volumen: las series sin volumen (índices, divisas) devuelven 0 o None. La vela del día en
     // curso lleva volumen parcial: si lo es, la referencia es la última vela cerrada. La media son
@@ -715,6 +725,32 @@ mod tests {
         // Cripto 24/7: 7 velas por semana.
         let btc: Vec<Candle> = (0..120).map(|i| candle(1_700_000_000 + i * DAY, 1.0, 2.0, 0.5, 1.0)).collect();
         assert_eq!(periods_per_year(&btc), 365.0);
+    }
+
+    /// R-34: ASX fecha la sesión a las 00:00 UTC en horario de invierno (AEST) y a las 23:00 UTC del día
+    /// anterior en el de verano (AEDT). Comparar por día UTC dejaba fuera la sesión de la fecha objetivo
+    /// cuando el cambio de hora cruza la medianoche UTC.
+    #[test]
+    fn calendar_returns_across_the_asx_dst_change_that_crosses_utc_midnight() {
+        let mut cs = Vec::new();
+        let mut d = Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 10, 14, 0, 0, 0).unwrap(); // sesión del miércoles 14
+        let dst = Utc.with_ymd_and_hms(2026, 10, 5, 0, 0, 0).unwrap(); // primer lunes en AEDT
+        let close_of = |day: chrono::DateTime<Utc>| 100.0 + (day.timestamp() / DAY - 20_000) as f64;
+        while d <= end {
+            if d.weekday().number_from_monday() <= 5 {
+                let t = if d < dst { d.timestamp() } else { d.timestamp() - 3600 };
+                cs.push(candle(t, 1.0, 2.0, 0.5, close_of(d)));
+            }
+            d += chrono::Duration::days(1);
+        }
+        let ind = compute_at(&cs, end.timestamp() + 6 * 3600);
+        let last = close_of(end);
+        let day = |m, dd| Utc.with_ymd_and_hms(2026, m, dd, 0, 0, 0).unwrap();
+        // 14-oct menos 1 mes = lunes 14-sep (AEST, 00:00 UTC): su cierre, no el del viernes 11.
+        approx(ind.return1m.unwrap(), last / close_of(day(9, 14)) - 1.0, 1e-12);
+        // Dentro del mismo huso sigue igual.
+        approx(ind.return1w.unwrap(), last / close_of(day(10, 7)) - 1.0, 1e-12);
     }
 
     /// R-03: la base de 1s/1m/3m es la sesión de esa fecha aunque cambie el huso EST/EDT.

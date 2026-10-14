@@ -9,12 +9,13 @@ import { WatchTable } from '@/components/WatchTable'
 import { ErrorNotice, Section, SkeletonRows } from '@/components/states'
 import { MARKET_LABEL, VERDICT_LABEL, assetHref, symbolOf } from '@/lib/assets'
 import { formatPercent, formatRelative } from '@/lib/format'
+import { useClock } from '@/hooks/useClock'
 import { quoteFreshness } from '@/lib/freshness'
 import { useTitle } from '@/hooks/useTitle'
 
 const Tile = memo(function Tile({ q }: { q: Quote }) {
   const sym = symbolOf(q.id)
-  const f = quoteFreshness(q)
+  const f = quoteFreshness(q, useClock())
   return (
     <Link to={assetHref(q.id)} className="market-tile" title={`${q.source} · ${q.timestamp}${f.stale ? ' · retrasado' : ''}`}>
       <span className="lbl">{MARKET_LABEL[sym] ?? sym}{f.stale ? <span className="stale-badge" style={{ marginLeft: 6 }}>retrasado</span> : null}</span>
@@ -32,7 +33,8 @@ export default function Dashboard() {
   const viewRows = useMemo(() => (d?.mostViewed ?? []).map((v) => ({ summary: v.stat.summary, quote: v.quote })), [d])
   const marketSources = useMemo(() => [...new Set((d?.market ?? []).map((m) => m.source))], [d])
   const oldest = useMemo(() => (d?.market ?? []).reduce<string | null>((o, m) => (o === null || m.timestamp < o ? m.timestamp : o), null), [d])
-  const anyStale = (d?.market ?? []).some((m) => quoteFreshness(m).stale)
+  const now = useClock()
+  const anyStale = (d?.market ?? []).some((m) => quoteFreshness(m, now).stale)
 
   return (
     <div className="page">

@@ -103,7 +103,7 @@ impl SlotState {
     }
 }
 
-/// Si una operación se cancela (p. ej. `collect_with_grace` descarta al proveedor lento) tras
+/// Si una operación descartable (`run_discardable`: `collect_with_grace` descarta al proveedor lento) se cancela tras
 /// llevar mucho tiempo en vuelo, cuenta como timeout: si no, el lento nunca acumularía fallos.
 struct CancelGuard<'a> {
     slot: &'a Slot,
@@ -146,7 +146,27 @@ impl Slot {
     }
 
     /// Ejecuta una operación respetando bloqueo, límite de ritmo y timeout, y anota el resultado.
+    /// Si el futuro se suelta a medias (el cliente abortó la petición) NO cuenta como timeout.
     async fn run<T, F, Fut>(&self, f: &F) -> PResult<T>
+    where
+        F: Fn(Arc<dyn Provider>) -> Fut,
+        Fut: Future<Output = PResult<T>>,
+    {
+        self.run_inner(f, false).await
+    }
+
+    /// Como `run`, para operaciones que `collect_with_grace` puede descartar por lentas: si se
+    /// sueltan tras mucho tiempo en vuelo cuentan como timeout (si no, el lento nunca acumularía
+    /// fallos). Solo ahí es seguro suponer que la cancelación es culpa del proveedor.
+    async fn run_discardable<T, F, Fut>(&self, f: &F) -> PResult<T>
+    where
+        F: Fn(Arc<dyn Provider>) -> Fut,
+        Fut: Future<Output = PResult<T>>,
+    {
+        self.run_inner(f, true).await
+    }
+
+    async fn run_inner<T, F, Fut>(&self, f: &F, strike_on_cancel: bool) -> PResult<T>
     where
         F: Fn(Arc<dyn Provider>) -> Fut,
         Fut: Future<Output = PResult<T>>,
@@ -166,7 +186,7 @@ impl Slot {
             return Err(ProviderError::RateLimited { retry_after: None });
         }
         let t0 = Instant::now();
-        let mut guard = CancelGuard { slot: self, t0, armed: true };
+        let mut guard = CancelGuard { slot: self, t0, armed: strike_on_cancel };
         let res = match tokio::time::timeout(OP_TIMEOUT, f(self.provider.clone())).await {
             Ok(r) => r,
             Err(_) => Err(ProviderError::upstream("timeout")),
@@ -806,7 +826,7 @@ impl Inner {
                 let q = q.clone();
                 async move {
                     let r = slot
-                        .run(&|p: Arc<dyn Provider>| {
+                        .run_discardable(&|p: Arc<dyn Provider>| {
                             let q = q.clone();
                             async move { p.news(&q).await }
                         })
@@ -1430,7 +1450,7 @@ mod latency_tests {
     async fn cancelled_slow_operations_count_as_timeouts() {
         let s = slot();
         for _ in 0..TIMEOUT_STRIKES {
-            let slow = s.run(&|_p: Arc<dyn Provider>| async {
+            let slow = s.run_discardable(&|_p: Arc<dyn Provider>| async {
                 tokio::time::sleep(Duration::from_secs(60)).await;
                 Ok::<_, ProviderError>(())
             });
@@ -1438,6 +1458,22 @@ mod latency_tests {
             let _ = tokio::time::timeout(Duration::from_millis(1100), slow).await;
         }
         assert!(s.state().blocked_until.is_some());
+    }
+
+    /// Una petición del cliente que se aborta (cambio de vista, cierre de pestaña) suelta el futuro
+    /// de la operación en vuelo. No es un timeout del proveedor: dos así seguidas apartaban a Yahoo
+    /// 60 s para TODOS los usuarios.
+    #[tokio::test]
+    async fn a_client_abort_does_not_bench_the_provider() {
+        let s = slot();
+        for _ in 0..(TIMEOUT_STRIKES + 1) {
+            let slow = s.run(&|_p: Arc<dyn Provider>| async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Ok::<_, ProviderError>(())
+            });
+            let _ = tokio::time::timeout(Duration::from_millis(1100), slow).await;
+        }
+        assert!(s.state().blocked_until.is_none(), "un abort del cliente no es un timeout del proveedor");
     }
 
     /// Proveedor "binance" falso que cuenta las llamadas al lote de cotizaciones.

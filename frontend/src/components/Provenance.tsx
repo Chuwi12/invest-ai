@@ -1,5 +1,6 @@
 import { Info } from 'lucide-react'
 import { memo } from 'react'
+import { useClock } from '@/hooks/useClock'
 import { formatDateTime, formatRelative } from '@/lib/format'
 import { safeHttpUrl, sourceName, sourceUrl } from '@/lib/sources'
 import { ExternalLink } from './ExternalLink'
@@ -36,6 +37,7 @@ interface Props {
  * Toda cifra relevante de la UI cuelga de uno de estos.
  */
 export const Provenance = memo(function Provenance({ provider, asOf, assetId, href, verifyUrl, origin, stale, staleReason, label = 'Fuente', extra, declaredDelayNote }: Props) {
+  const now = useClock(30_000) // la antigüedad avanza aunque no lleguen datos nuevos
   const list = Array.isArray(provider) ? provider : provider ? [provider] : []
   return (
     <span className="prov">
@@ -49,7 +51,7 @@ export const Provenance = memo(function Provenance({ provider, asOf, assetId, hr
       ))}
       {asOf ? (
         <time dateTime={asOf} title={formatDateTime(asOf)}>
-          · {formatRelative(asOf)}
+          · {formatRelative(asOf, now)}
         </time>
       ) : (
         <span>· sin fecha</span>

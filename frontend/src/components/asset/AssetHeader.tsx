@@ -6,11 +6,13 @@ import { LivePrice } from '@/components/LivePrice'
 import { Provenance } from '@/components/Provenance'
 import { CLASS_SINGULAR, MARKET_STATE_LABEL } from '@/lib/assets'
 import { formatCompactCurrency, formatFull, formatInt, formatPrice } from '@/lib/format'
+import { useClock } from '@/hooks/useClock'
 import { declaredDelayNote, quoteFreshness } from '@/lib/freshness'
 
 /** Cabecera: identidad, precio en vivo (animado por tick) y cifras del día con su procedencia. */
 export function AssetHeader({ summary, quote, isFavorite }: { summary: AssetSummary; quote: Quote | null | undefined; isFavorite: boolean }) {
-  const fresh = quoteFreshness(quote)
+  const now = useClock()
+  const fresh = quoteFreshness(quote, now)
   const cur = quote?.currency ?? undefined
   const opt = { class: summary.class, currency: cur }
   const cell = (label: string, value: string, title?: string) => (

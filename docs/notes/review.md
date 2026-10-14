@@ -423,3 +423,95 @@ Cifras inventadas que pasaban sin comprobarse, medidas con el código anterior:
   porcentuales (1.2 = +1,2 %)»: el contrato solo estaba implícito y el crate `ai` lo leyó mal (R-10). No he tocado `domain`.
 - `ai::fixture` ahora da `change_pct` en puntos porcentuales; nada fuera de `ai` lo usaba.
 - No hay cambios en `market`, `server`, `./invest-ai` ni `packaging/`.
+
+
+---
+
+# Tercera revisión (código nuevo del 13 y 14-oct: Binance paginado, procedencia, punto «en vivo» de Yahoo, noticias en segundo plano, realtime, frescura)
+
+Revisor: agente de corrección, 2026-10-14. Método: lectura + reproducción contra Yahoo/Binance reales con curl cuando hizo falta + test en ROJO
+→ arreglo mínimo → VERDE. Numeración continúa tras R-30. (Las filas se van completando conforme se confirman.)
+
+## Resumen
+
+| Impacto | Id | Fichero | Qué | Estado |
+|---|---|---|---|---|
+| Medio | R-31 | market/providers/yahoo.rs `fold_live_point` | En 5m/15m/30m (y 1m) quedaba una vela fantasma a las 16:00 con el cierre oficial, distinto del de la última vela real | ARREGLADO |
+| Bajo | R-32 | market/provenance.rs `infer_interval` | Serie de 3 velas con un fin de semana (vie-lun-mar) se declaraba «1wk» (mediana superior de 2 separaciones) | ARREGLADO |
+| Medio | R-33 | market/service.rs `CancelGuard` | Un abort del cliente (cambio de vista) tras >1 s contaba como timeout del proveedor: dos seguidos apartaban a Yahoo 60 s | ARREGLADO |
+| Bajo | R-34 | market/indicators.rs `at_or_before` | Rentabilidades 1s/1m/3m/1a de ASX con una base desplazada una sesión al cruzar el cambio de hora (la sesión pasa de 00:00 UTC a 23:00 UTC del día anterior) | ARREGLADO |
+| Medio | R-35 | frontend `Provenance`, `AssetHeader`, `PriceChart`, `WatchTable`, `Dashboard` | «retrasado» y «hace N min» solo se recalculaban al renderizar: con el feed parado (misma cotización) nada renderizaba y el aviso nunca aparecía | ARREGLADO |
+| — | R-36 | binance.rs `plan_history`/paginación | Bordes revisados (par recién listado, solape en la frontera, orden, `MAX_KLINES`, 1wk/1mo) | DESCARTADO (correcto) |
+| — | R-37 | yahoo.rs `effective_delay_secs`, realtime.rs (SUBSCRIBE, referencia, sondeo 60 s), indicators `periods_per_year`/volumen relativo, service `late_news`/single-flight/`Box::pin`, `truncated` | Revisados sin hallar fallo; ver «Lo revisado que está bien» | DESCARTADO |
+
+## Hallazgos (detalle)
+
+### R-31 — MEDIO — Vela fantasma al cierre de sesión en series intradía de Yahoo (VERIFICADO con datos reales)
+
+- `yahoo.rs::fold_live_point`. Reconocía el punto «en vivo» solo por una separación no múltiplo del intervalo. Al CIERRE Yahoo añade el
+  precio oficial como punto plano de volumen 0 exactamente en la frontera siguiente (medido el 13-oct-2026, AAPL):
+  `5m`: velas …15:50, 15:55 (cierre 341,37) y `16:00:00` o=h=l=c=341,27 vol 0; igual en `30m` y, a 15 m, en SPY. Con 5m/15m/30m
+  (y 1m) la separación es EXACTAMENTE un intervalo: no se plegaba. Resultado: una vela plana fuera de sesión y un cierre del
+  gráfico (341,37) distinto del de la cotización (341,27). Con 1h sí se plegaba (separación 30 min).
+- Test: `yahoo::tests::closing_print_on_the_next_boundary_is_not_a_phantom_candle` (rojo: 3 velas en vez de 2).
+- **Estado: ARREGLADO** — una última vela plana de volumen 0 a UN intervalo (o a 0, punto en vivo sobre la vela en curso) de la
+  anterior se pliega en ella (cierre/máx./mín.). Límite: una vela real plana de volumen 0 y alineada, justo la última, también se
+  pliega (efecto: su precio pasa a la vela anterior; sin consecuencias porque no hubo operaciones).
+- Revisado y correcto: sesiones a :30 en 1h (NYSE, HK 9:30, TSE 9:00 con vela final 15:30 que se pliega bien), mediodía festivo
+  (rejilla continua, medido en 0700.HK y 7203.T: Yahoo no deja hueco de comida en 1h), punto exactamente en frontera con
+  mercado abierto (tras el arreglo se pliega en la vela anterior; el siguiente sondeo lo corrige).
+
+### R-32 — BAJO — `infer_interval` con 3 velas y un fin de semana (VERIFICADO)
+
+- `provenance.rs`: con 3 velas hay 2 separaciones y la «mediana» `gaps[len/2]` era la mayor: vie→lun→mar = [1 d, 3 d] daba 3 d →
+  `1wk`; la UI avisaría de un intervalo servido distinto del pedido que no existe. Con ≥ 4 velas de bolsa la mediana ya era 1 d.
+- Test: `provenance::tests::a_short_series_with_a_weekend_gap_is_still_daily` (rojo: `Some(W1)`).
+- **Estado: ARREGLADO** — mediana inferior `gaps[(len-1)/2]`. Revisado y correcto: 1 sola vela y <3 velas → `None`; semanal con
+  festivo (8 d) y mensual (28-31 d) → 1wk/1mo; intradía con hueco nocturno → mediana del intervalo.
+
+### R-33 — MEDIO — Un abort del cliente contaba como timeout del proveedor (VERIFICADO)
+
+- `service.rs::CancelGuard` armaba el contador de timeouts en CUALQUIER cancelación de `Slot::run` tras ≥ 1 s. Pensado para
+  `collect_with_grace` (descarta al lento), pero también salta cuando el cliente aborta la petición (React Query pasa `signal`;
+  axum suelta el futuro): dos operaciones lentas (> 1 s: fundamentales con crumb, histórico en frío) abortadas sin un éxito
+  intermedio apartaban al proveedor 60 s para todos (`RateLimited` en cotizaciones, histórico, etc.).
+- Test: `latency_tests::a_client_abort_does_not_bench_the_provider` (rojo: `blocked_until` fijado).
+- **Estado: ARREGLADO** — `Slot::run` ya no cuenta la cancelación; solo `run_discardable` (usado por las noticias en primer
+  plano, las únicas que pasan por `collect_with_grace`) la cuenta. `cancelled_slow_operations_count_as_timeouts` usa ahora `run_discardable`.
+
+### R-34 — BAJO — Rentabilidades por sesión de ASX al cruzar el cambio de hora (VERIFICADO)
+
+- `indicators.rs::at_or_before` (arreglo de R-03) compara por día UTC. Para ASX (sesión a 00:00 UTC en AEST, a 23:00 UTC del día
+  anterior en AEDT) la fecha objetivo calculada con la hora de la última vela (23:00) cae el día UTC anterior al de la sesión
+  de invierno (00:00 del día siguiente) y esta quedaba excluida: 14-oct − 1 mes daba la base del viernes 11-sep en vez del lunes 14-sep (4,09 % frente a 3,70 %).
+- Test: `indicators::tests::calendar_returns_across_the_asx_dst_change_that_crosses_utc_midnight`.
+- **Estado: ARREGLADO** — 1s/1m/3m/1a usan `session_at_or_before` (última vela con `t <= objetivo + 2 h`: el cambio de horario mueve
+  la apertura ≤ 1 h y la siguiente sesión está a 24 h). YTD conserva la comparación por día UTC (con holgura, una vela cripto del 1-ene 00:00 sería la base).
+
+### R-35 — MEDIO — La antigüedad y «retrasado» no avanzaban con el reloj (VERIFICADO)
+
+- `lib/freshness.ts::quoteFreshness`, `Provenance.tsx` (`formatRelative`), `PriceChart.tsx` (`freshness`), `WatchTable`, `Dashboard`: todo se
+  calculaba con `Date.now()` al renderizar. `AssetPage` sondea la cotización cada 15 s, pero si el feed se para la respuesta es
+  idéntica, React Query conserva la misma referencia de `data` y la página (que solo lee `quote.data`) no vuelve a renderizar:
+  ni «hace 3 min» avanza ni aparece «retrasado», justo en el caso para el que existe el aviso. `Provenance` es además `memo`.
+- Test: `AssetHeader.test.tsx` → «un dato que deja de actualizarse acaba marcándose «retrasado»…» (rojo: sin badge tras 5 min).
+- **Estado: ARREGLADO** — `hooks/useClock.ts` (render periódico: 15 s; 30 s en `Provenance`) usado en `AssetHeader`, `Provenance`, `PriceChart`,
+  `WatchTable` (fila) y `Dashboard` (ficha y total). Coste: un `setInterval` por instancia visible (≈ 20 como máximo).
+  Límite: la cifra de `LivePrice` sigue su propio flujo de ticks; solo la procedencia/aviso usa el reloj.
+
+### R-36 / R-37 — Descartados (revisados, correctos)
+
+- **Binance `plan_history`**: `endTime = open_time_primera_vela_ms − 1` evita solape (Binance filtra por hora de apertura, inclusive) ni deja
+  hueco; las páginas llegan de más nueva a más vieja y se invierten; par recién listado → página corta → corta el bucle (una petición de más
+  si justo coincide con `limit`); `MAX_KLINES` nunca se alcanza con D1 (10 años = 3655 velas); 1wk/1mo no están en la lista de subida pero
+  nunca superan 5000 (Max pide una sola página). Pendiente conocido: `Max` en cripto devuelve las últimas 1000 velas, no toda la historia.
+- **`effective_delay_secs`**: minutos×60 redondeado y saturado a `u32`, etiquetas «real time/realtime» → 0, negativo/texto → `None`. Correcto.
+- **`fold_live_point`**: mediodía festivo y sesión a :30 en 1h verificados con datos reales (0700.HK, 7203.T); punto en frontera: ver R-31.
+- **Realtime**: alta y baja del mismo activo dentro de los 40 ms se anulan (`before` vs `desired`); las altas durante la conexión o el backoff
+  se aplican a `desired` antes de reenviar `all`; la referencia se renueva a los 10 min con el WS conectado; con el mercado cerrado el sondeo
+  pasa a 60 s solo si precio y hora no cambian (tests existentes). Retraso máximo en detectar la apertura con el sondeo a 60 s: 60 s (aceptable).
+- **`periods_per_year`** por densidad: con < 31 velas devolvería 365 para una serie lun–mié, pero `volatility30d` exige > 30 velas. **Volumen relativo**: tras el cierre de una bolsa y antes de la apertura siguiente se usa el día anterior (límite ya documentado en R-04).
+- **Noticias en segundo plano**: `late_news` está acotado (TTL 3 min, 500 claves, la lista fusionada ≤ 50), se fusiona con `news::merge` (dedupe) en cada lectura y cada recarga de `news` lanza como mucho un proveedor lento por clave. Único hueco: si TODOS los proveedores en primer plano fallan, `news` devuelve el error aunque `late_news` ya tuviera noticias del lento (con GDELT desactivado por defecto, irrelevante).
+- **Single-flight de lotes** (clave = ids ordenados y sin duplicados, vida 200 ms) y **`Box::pin` del snapshot**: correctos (tests existentes).
+- **`truncated` en el chat**: se guarda a `true` solo con `terminal = Error` y salida parcial; la UI lo muestra al recargar. Correcto.
+- **Aviso de intervalo en `PriceChart`**: `coerced` solo con datos no provisionales y `X-Data-Interval ≠` efectivo; falsos avisos posibles solo si `infer_interval` se equivocaba (R-32).

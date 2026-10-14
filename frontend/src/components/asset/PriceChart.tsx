@@ -18,6 +18,7 @@ import { useResolvedScheme } from '@/app/theme'
 import { ErrorNotice, Skeleton } from '@/components/states'
 import { Provenance } from '@/components/Provenance'
 import { LOCALE, formatCompact, formatDateTime, formatPrice } from '@/lib/format'
+import { useClock } from '@/hooks/useClock'
 import { intervalsFor } from '@/lib/chart'
 import { freshness } from '@/lib/freshness'
 import { applyTickToCandle, bollingerSeries, smaSeries } from '@/lib/indicators'
@@ -52,6 +53,7 @@ interface Props {
 }
 
 export function PriceChart({ id, summary, quote }: Props) {
+  const now = useClock()
   const [range, setRange] = useState<Range>('1y')
   const [interval, setIntervalSel] = useState<Interval | 'auto'>('auto')
   const [overlays, setOverlays] = useState<Set<Overlay>>(new Set(['sma50']))
@@ -201,7 +203,7 @@ export function PriceChart({ id, summary, quote }: Props) {
 
   const lastIso = candles?.length ? new Date((candles[candles.length - 1] as Candle).t * 1000).toISOString() : null
   const open = quote?.marketState === 'regular' || quote?.marketState === 'continuous'
-  const fresh = lastIso ? freshness(lastIso, open && intervalSeconds(served) < 86_400 ? intervalSeconds(served) * 3000 : 5 * 86_400_000) : null
+  const fresh = lastIso ? freshness(lastIso, open && intervalSeconds(served) < 86_400 ? intervalSeconds(served) * 3000 : 5 * 86_400_000, now) : null
 
   const toggle = (k: Overlay) =>
     setOverlays((prev) => {
