@@ -34,6 +34,19 @@ pub struct AiConfig {
     pub parallel: usize,
     /// Directorio de modelos de Ollama (solo para medir el disco libre). `None` = autodetectar.
     pub models_dir: Option<std::path::PathBuf>,
+    /// Tamaño relativo de la caché KV frente a f16, según el `OLLAMA_KV_CACHE_TYPE` con el que corre
+    /// Ollama (`LLM_KV_CACHE_TYPE`): f16 = 1, q8_0 = 34/64 ≈ 0,53, q4_0 = 18/64 ≈ 0,28 (bloques de
+    /// 32 valores de llama.cpp). Solo afecta a los requisitos de VRAM que muestra el catálogo.
+    pub kv_cache_factor: f64,
+}
+
+/// Factor de tamaño de la caché KV para un `OLLAMA_KV_CACHE_TYPE`; desconocido = f16.
+pub fn kv_cache_factor(kind: &str) -> f64 {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "q8_0" => 34.0 / 64.0,
+        "q4_0" => 18.0 / 64.0,
+        _ => 1.0,
+    }
 }
 
 impl Default for AiConfig {
@@ -52,6 +65,7 @@ impl Default for AiConfig {
             think: false,
             parallel: 1,
             models_dir: None,
+            kv_cache_factor: 1.0,
         }
     }
 }
@@ -73,6 +87,9 @@ impl AiConfig {
         }
         if let Some(v) = text("LLM_MODEL") {
             c.model = v;
+        }
+        if let Some(v) = text("LLM_KV_CACHE_TYPE") {
+            c.kv_cache_factor = kv_cache_factor(&v);
         }
         if let Some(v) = text("LLM_NUM_CTX").and_then(|v| v.parse::<u32>().ok()) {
             c.num_ctx = v.clamp(1024, 262_144);
@@ -161,5 +178,14 @@ mod tests {
         let c = AiConfig::from_lookup(env(&[("LLM_NUM_CTX", "abc"), ("LLM_MODEL", "  ")]));
         assert_eq!(c.num_ctx, AiConfig::default().num_ctx);
         assert_eq!(c.model, DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn kv_cache_type_sets_the_factor() {
+        assert_eq!(AiConfig::default().kv_cache_factor, 1.0);
+        let q8 = AiConfig::from_lookup(env(&[("LLM_KV_CACHE_TYPE", "Q8_0")]));
+        assert!((q8.kv_cache_factor - 0.53125).abs() < 1e-9);
+        let unknown = AiConfig::from_lookup(env(&[("LLM_KV_CACHE_TYPE", "nope")]));
+        assert_eq!(unknown.kv_cache_factor, 1.0);
     }
 }

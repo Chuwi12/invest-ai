@@ -153,7 +153,7 @@ impl ModelManager {
             supports_tools: entry.supports_tools,
             reasoning: entry.reasoning,
             description: entry.description.clone(),
-            requirements: Some(catalog::entry_requirements(entry, self.cfg.num_ctx)),
+            requirements: Some(catalog::entry_requirements(entry, self.cfg.num_ctx, self.cfg.kv_cache_factor)),
             curated: true,
             installed,
             active: entry.id == active,
@@ -167,7 +167,7 @@ impl ModelManager {
         let requirements: Option<ModelRequirements> = show
             .as_ref()
             .and_then(catalog::profile_from_show)
-            .map(|kv| catalog::requirements(tag.size, &kv, 1.0, self.cfg.num_ctx));
+            .map(|kv| catalog::requirements(tag.size, &kv, 1.0, self.cfg.num_ctx, self.cfg.kv_cache_factor));
         LlmModel {
             id: tag.name.clone(),
             name: tag.name.clone(),

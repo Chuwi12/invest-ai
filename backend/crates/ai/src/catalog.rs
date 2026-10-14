@@ -103,11 +103,12 @@ fn round1(x: f64) -> f32 {
 }
 
 /// Aplica la fórmula del módulo. `active_fraction` ∈ (0, 1] (1 = denso).
-pub fn requirements(disk_bytes: u64, kv: &KvProfile, active_fraction: f64, num_ctx: u32) -> ModelRequirements {
+/// `kv_factor`: tamaño de la caché KV frente a f16 (`AiConfig::kv_cache_factor`).
+pub fn requirements(disk_bytes: u64, kv: &KvProfile, active_fraction: f64, num_ctx: u32, kv_factor: f64) -> ModelRequirements {
     let weights = disk_bytes as f64 / GIB;
     let ctx = f64::from(num_ctx);
     let swa_ctx = kv.sliding_window.map_or(ctx, |w| ctx.min(f64::from(w)));
-    let kv_gib = (kv.kv_bytes_per_token_full as f64 * ctx + kv.kv_bytes_per_token_swa as f64 * swa_ctx) / GIB;
+    let kv_gib = kv_factor * (kv.kv_bytes_per_token_full as f64 * ctx + kv.kv_bytes_per_token_swa as f64 * swa_ctx) / GIB;
     ModelRequirements {
         min_vram_gb: round1(0.4 * weights + kv_gib + OVERHEAD_GIB),
         recommended_vram_gb: round1(weights + kv_gib + OVERHEAD_GIB),
@@ -124,8 +125,8 @@ pub fn active_fraction(total: &str, active: Option<&str>) -> f64 {
     }
 }
 
-pub fn entry_requirements(e: &CatalogEntry, num_ctx: u32) -> ModelRequirements {
-    requirements(e.disk_bytes, &e.arch, active_fraction(&e.parameters, e.active_parameters.as_deref()), num_ctx)
+pub fn entry_requirements(e: &CatalogEntry, num_ctx: u32, kv_factor: f64) -> ModelRequirements {
+    requirements(e.disk_bytes, &e.arch, active_fraction(&e.parameters, e.active_parameters.as_deref()), num_ctx, kv_factor)
 }
 
 /// Perfil de KV de un modelo no curado a partir de `/api/show` (atención global en todas las
@@ -181,7 +182,7 @@ mod tests {
         // qwen2.5:7b: 28 capas, 4 cabezas KV, dim 128 => 28·4·256·2 = 57344 B/token.
         // ctx 8192 => 0.4375 GiB. Pesos 4.68e9 B = 4.36 GiB.
         let kv = KvProfile { sliding_window: None, kv_bytes_per_token_full: 57_344, kv_bytes_per_token_swa: 0 };
-        let r = requirements(4_683_087_332, &kv, 1.0, 8192);
+        let r = requirements(4_683_087_332, &kv, 1.0, 8192, 1.0);
         assert_eq!(r.recommended_vram_gb, 5.4); // 4.36 + 0.44 + 0.6
         assert_eq!(r.min_vram_gb, 2.8); // 1.74 + 0.44 + 0.6
         assert_eq!(r.min_ram_gb, 6.3); // 4.36 + 0.44 + 1.5
@@ -190,16 +191,29 @@ mod tests {
     }
 
     #[test]
+    fn a_quantised_kv_cache_lowers_the_vram_requirement() {
+        // qwen3:8b (36 capas, 8 cabezas KV, dim 128 => 147456 B/token) con 16k de contexto: f16 da los
+        // 7,7 GB medidos el 14-oct-2026 (7,8 GB en `ollama ps`, 12 % en CPU con 8 GB); con
+        // OLLAMA_KV_CACHE_TYPE=q8_0 la caché pasa de 2,25 a ~1,2 GiB.
+        let kv = KvProfile { sliding_window: None, kv_bytes_per_token_full: 147_456, kv_bytes_per_token_swa: 0 };
+        let f16 = requirements(5_225_388_164, &kv, 1.0, 16_384, 1.0);
+        let q8 = requirements(5_225_388_164, &kv, 1.0, 16_384, crate::config::kv_cache_factor("q8_0"));
+        assert_eq!(f16.recommended_vram_gb, 7.7);
+        assert_eq!(q8.recommended_vram_gb, 6.7);
+        assert_eq!(f16.disk_gb, q8.disk_gb);
+    }
+
+    #[test]
     fn sliding_window_caps_swa_layers_and_moe_counts_only_active_experts() {
         let kv = KvProfile { sliding_window: Some(128), kv_bytes_per_token_full: 1000, kv_bytes_per_token_swa: 1000 };
-        let a = requirements(1 << 30, &kv, 1.0, 8192);
+        let a = requirements(1 << 30, &kv, 1.0, 8192, 1.0);
         let full = KvProfile { sliding_window: None, ..kv.clone() };
-        let b = requirements(1 << 30, &full, 1.0, 8192);
+        let b = requirements(1 << 30, &full, 1.0, 8192, 1.0);
         assert!(a.recommended_vram_gb <= b.recommended_vram_gb);
         // 13 GiB de pesos con 3.6/21 activos => 2.2 GiB leídos por token => CPU viable.
-        let moe = requirements(13 << 30, &kv, 3.6 / 21.0, 8192);
+        let moe = requirements(13 << 30, &kv, 3.6 / 21.0, 8192, 1.0);
         assert!(moe.cpu_only_ok);
-        let dense = requirements(13 << 30, &kv, 1.0, 8192);
+        let dense = requirements(13 << 30, &kv, 1.0, 8192, 1.0);
         assert!(!dense.cpu_only_ok);
     }
 
