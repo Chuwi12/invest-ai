@@ -10,7 +10,8 @@ import {
   formatFull,
   formatCurrency,
   formatDate,
-  formatDelay,
+  formatDeclaredDelay,
+  formatSpan,
   formatInt,
   formatPercent,
   formatPoints,
@@ -156,11 +157,20 @@ describe('fechas', () => {
   })
 })
 
-describe('formatDelay', () => {
-  it('describe el retraso', () => {
-    expect(formatDelay(0)).toBe('Tiempo real')
-    expect(formatDelay(900)).toBe('Retraso de 15 min')
-    expect(formatDelay(null)).toBe('Retraso desconocido')
+describe('formatSpan / formatDeclaredDelay', () => {
+  it('abrevia duraciones', () => {
+    expect(formatSpan(2)).toBe('2 s')
+    expect(formatSpan(15)).toBe('15 s')
+    expect(formatSpan(900)).toBe('15 min')
+    expect(formatSpan(7200)).toBe('2 h')
+    expect(formatSpan(3 * 86_400)).toBe('3 d')
+    expect(formatSpan(null)).toBe('—')
+  })
+  it('el retraso declarado solo existe si es > 0 y nunca dice «Retraso de» (no es una medida)', () => {
+    expect(formatDeclaredDelay(15)).toBe('hasta 15 s')
+    expect(formatDeclaredDelay(900)).toBe('hasta 15 min')
+    expect(formatDeclaredDelay(0)).toBeNull()
+    expect(formatDeclaredDelay(null)).toBeNull()
   })
 })
 

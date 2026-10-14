@@ -1,3 +1,4 @@
+import { Info } from 'lucide-react'
 import { memo } from 'react'
 import { formatDateTime, formatRelative } from '@/lib/format'
 import { safeHttpUrl, sourceName, sourceUrl } from '@/lib/sources'
@@ -21,15 +22,20 @@ interface Props {
   origin?: 'provider' | 'local' | null | undefined
   /** Texto previo, p. ej. «Fuente». */
   label?: string
-  /** Información adicional (retraso, método...). */
+  /** Información adicional (método, nº de velas...). */
   extra?: string | null | undefined
+  /**
+   * Nota SECUNDARIA con el retraso que declara el proveedor (tooltip de un icono «i»). La cifra principal es la
+   * antigüedad medida (`asOf`); esto es solo lo que el proveedor dice de su feed y nunca se muestra como medida.
+   */
+  declaredDelayNote?: string | null | undefined
 }
 
 /**
  * Pie de procedencia: proveedor (con enlace cuando existe), antigüedad y marca «retrasado».
  * Toda cifra relevante de la UI cuelga de uno de estos.
  */
-export const Provenance = memo(function Provenance({ provider, asOf, assetId, href, verifyUrl, origin, stale, staleReason, label = 'Fuente', extra }: Props) {
+export const Provenance = memo(function Provenance({ provider, asOf, assetId, href, verifyUrl, origin, stale, staleReason, label = 'Fuente', extra, declaredDelayNote }: Props) {
   const list = Array.isArray(provider) ? provider : provider ? [provider] : []
   return (
     <span className="prov">
@@ -50,6 +56,11 @@ export const Provenance = memo(function Provenance({ provider, asOf, assetId, hr
       )}
       {origin === 'local' ? (
         <span title="El proveedor no da hora del dato: es la hora a la que lo consultó la app">· hora de consulta</span>
+      ) : null}
+      {declaredDelayNote ? (
+        <span className="prov-note" role="img" aria-label={declaredDelayNote} title={declaredDelayNote} tabIndex={0}>
+          <Info aria-hidden="true" />
+        </span>
       ) : null}
       {extra ? <span>· {extra}</span> : null}
       {safeHttpUrl(verifyUrl) ? (

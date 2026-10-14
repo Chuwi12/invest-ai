@@ -5,8 +5,8 @@ import { FavoriteButton } from '@/components/FavoriteButton'
 import { LivePrice } from '@/components/LivePrice'
 import { Provenance } from '@/components/Provenance'
 import { CLASS_SINGULAR, MARKET_STATE_LABEL } from '@/lib/assets'
-import { formatCompactCurrency, formatDelay, formatFull, formatInt, formatPrice } from '@/lib/format'
-import { quoteFreshness } from '@/lib/freshness'
+import { formatCompactCurrency, formatFull, formatInt, formatPrice } from '@/lib/format'
+import { declaredDelayNote, quoteFreshness } from '@/lib/freshness'
 
 /** Cabecera: identidad, precio en vivo (animado por tick) y cifras del día con su procedencia. */
 export function AssetHeader({ summary, quote, isFavorite }: { summary: AssetSummary; quote: Quote | null | undefined; isFavorite: boolean }) {
@@ -53,7 +53,7 @@ export function AssetHeader({ summary, quote, isFavorite }: { summary: AssetSumm
             stale={fresh.stale}
             staleReason={fresh.reason}
             label="Cotización"
-            extra={formatDelay(quote.delaySecs)}
+            declaredDelayNote={declaredDelayNote(fresh)}
           />
           <dl className="kv">
             {cell('Apertura', formatPrice(quote.open, opt))}

@@ -271,6 +271,9 @@ textarea { resize: vertical; width: 100%; }
 .prov { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; color: var(--muted); flex-wrap: wrap; }
 .prov a { text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 2px; }
 .prov a:hover { color: var(--ink); }
+.prov-note { display: inline-flex; align-items: center; cursor: help; opacity: 0.8; }
+.prov-note:hover, .prov-note:focus-visible { opacity: 1; }
+.prov-note svg { width: 0.9rem; height: 0.9rem; }
 .stale-badge { color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 0 0.35rem; font-weight: 600; }
 
 .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--muted); display: inline-block; flex: none; }

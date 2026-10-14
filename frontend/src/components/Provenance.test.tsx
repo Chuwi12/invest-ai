@@ -17,4 +17,15 @@ describe('Provenance', () => {
     render(<Provenance provider="yahoo" asOf="2026-10-09T20:00:00Z" origin="local" />)
     expect(screen.getByText(/hora de consulta/)).toBeInTheDocument()
   })
+  it('el retraso declarado es una nota secundaria (icono con tooltip), no un texto que compita con la antigüedad', () => {
+    const note = 'El proveedor declara un retraso de hasta 15 s para esta bolsa'
+    const { container } = render(<Provenance provider="yahoo" asOf="2026-10-13T16:30:00Z" origin="provider" declaredDelayNote={note} />)
+    const icon = screen.getByRole('img', { name: note })
+    expect(icon).toHaveAttribute('title', note)
+    expect(container.textContent).not.toMatch(/retraso/i)
+  })
+  it('sin nota no hay icono', () => {
+    render(<Provenance provider="yahoo" asOf="2026-10-13T16:30:00Z" declaredDelayNote={null} />)
+    expect(screen.queryByRole('img')).toBeNull()
+  })
 })

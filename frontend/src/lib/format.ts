@@ -255,13 +255,22 @@ export function formatTime(value: string | number | Date | null | undefined): st
   return Number.isNaN(d.getTime()) ? DASH : timeFmt.format(d)
 }
 
-/** Retraso del dato: 0 = «Tiempo real», 900 = «Retraso de 15 min». */
-export function formatDelay(secs: number | null | undefined): string {
-  if (!isNum(secs)) return 'Retraso desconocido'
-  if (secs <= 1) return 'Tiempo real'
-  if (secs < 60) return `Retraso de ${Math.round(secs)} s`
-  if (secs < 3600) return `Retraso de ${Math.round(secs / 60)} min`
-  return `Retraso de ${Math.round(secs / 3600)} h`
+/** Duración corta para una antigüedad o un retraso: «2 s», «15 min», «3 h», «2 d». */
+export function formatSpan(secs: number | null | undefined): string {
+  if (!isNum(secs)) return DASH
+  const s = Math.max(0, secs)
+  if (s < 60) return `${Math.round(s)} s`
+  if (s < 3600) return `${Math.round(s / 60)} min`
+  if (s < 86_400) return `${Math.round(s / 3600)} h`
+  return `${Math.round(s / 86_400)} d`
+}
+
+/**
+ * Retraso que DECLARA el proveedor («hasta 15 s»). Es una declaración, no una medida: la antigüedad real del dato
+ * es `ahora − timestamp` (ver `quoteFreshness`). Devuelve `null` si no declara ninguno (null o 0).
+ */
+export function formatDeclaredDelay(secs: number | null | undefined): string | null {
+  return isNum(secs) && secs > 0 ? `hasta ${formatSpan(secs)}` : null
 }
 
 export interface FundamentalsCurrency {

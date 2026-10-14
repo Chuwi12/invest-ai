@@ -103,3 +103,30 @@ Medido con curl, openssl, Python y nuestro cliente, desde esta máquina (IPv4; G
 - `realtime.rs`: altas/bajas del feed WS agrupadas (40 ms) y espaciadas con `WsFeed::min_msg_gap()` (Binance 250 ms: su límite es 5 mensajes/s por conexión).
 - `service.rs`: `slots: Vec<Arc<Slot>>`, proveedores de noticias en segundo plano (arriba) y `Box::pin` de las partes de `snapshot` y de los bloques de `cached(...)` grandes: en debug el futuro de `snapshot` pesaba **206 448 B** (`news` 54 144, `summary` 17 352, `indicators` 14 200, `fundamentals` 8 984, `quote` 4 664, `macro` 3 432) y viajaba por valor dentro de `join!`, `timeout` y `async_trait`, copiándose en la pila; con los 2 MiB de un worker de Tokio `GET /assets/{id}/snapshot` abortaba el servidor debug con `has overflowed its stack` (en release no, por optimizar los marcos). Ahora `snapshot` ocupa 2 368 B y `news` 1 584 B, y el mismo recorrido con proveedores simulados necesita < 768 KiB de pila en vez de 2-3 MiB. Test `snapshot_runs_in_a_2_mib_stack` (hilo de 2 MiB + runtime de un hilo; abortaba antes del arreglo y comprueba que los futuros sean < 16 KiB).
 
+
+## `exchangeDataDelayedBy` de Yahoo son MINUTOS, y no es el retraso del feed (13-oct-2026)
+Problema: la UI mostraba «Retraso de 15 s» junto a «ahora mismo» en AAPL/MSFT con la bolsa abierta. `yahoo.rs` leía `exchangeDataDelayedBy` como segundos (`delay_secs = 15`).
+
+**Medida** (13-oct-2026, 17:15 UTC = 13:15 ET, sesión regular abierta; `curl` a `https://finance.yahoo.com/quote/AAPL/` y `/quote/GC%3DF/`, sin claves, con cabecera `Date` de la respuesta; la página lleva incrustadas ~60 cotizaciones con los mismos campos que `/v7/finance/quote`. La API `query1/query2` devolvía 429 para esta IP desde las 16:35 UTC —solo se pudo contrastar la página HTML—). Desfase = `Date` de la respuesta − `regularMarketTime`:
+
+| Símbolo | `exchangeDataDelayedBy` | `quoteSourceName` | Desfase medido |
+|---|---|---|---|
+| `GC=F` (COMEX) | 10 | Delayed Quote | 608 s (**10 min**) |
+| `CL=F` (NYMEX) | 10 | Delayed Quote | 622 s (**10 min**) |
+| `^RUT` | 15 | Delayed Quote | 908 s (**15 min**) |
+| `^VIX`, `^TNX` (Cboe) | 15 | *(ausente)* | 907 s, 913 s (**15 min**) |
+| `AAPL` (Nasdaq) | 15 | Nasdaq Real Time Price | **3 s** |
+| `JPM` (NYSE) | 20 | Nasdaq Real Time Price | **20 s** |
+| `CNQ.TO` (TSX) | 15 | Free Realtime Quote | **20 s** |
+| `^GSPC` | 0 | Free Realtime Quote | 4 s |
+| `BTC-USD` | 0 | CoinMarketCap | 21 s |
+
+Sobre el resto de cotizaciones de la página (dos descargas, 42 y 61 con el campo): las NMS/NCM (15), NYQ (20) y TOR (15) etiquetadas «Nasdaq Real Time Price»/«Free Realtime Quote» tenían 3-87 s de antigüedad (una ilíquida, 209 s); los futuros COMEX/NYMEX de vencimiento cercano (`GC=F`, `GCZ26`, `CL=F`; campo 10) iban a 604-643 s y los índices Cboe (campo 15) a 906-913 s. Los contratos COMEX lejanos tienen desfases enormes porque apenas operan (no miden nada).
+
+Conclusión:
+1. **La unidad es el minuto** (10 y 15 minutos de desfase real en los feeds diferidos; en segundos no cuadra con nada). El backend lo leía como segundos: error nuestro.
+2. **El campo es el retraso estándar de la bolsa para quien no paga su licencia** (Nasdaq 15, NYSE 20, TSX 15, CME 10, Cboe 15), **no el del feed que sirve Yahoo**: donde Yahoo tiene tiempo real el campo sigue valiendo 15/20 (AAPL, JPM, CNQ.TO). Su propia etiqueta `quoteSourceName` («… Real Time Price», «Free Realtime Quote») lo desmiente y la medida le da la razón.
+3. **Arreglo en backend** (`yahoo::effective_delay_secs`): etiqueta de tiempo real -> `delay_secs = 0`; si no, `exchangeDataDelayedBy × 60`; sin campo ni etiqueta, `None`. Así `Quote.delay_secs` es de verdad «segundos de retraso del feed» (lo consumen `ai` —`gaps.rs` avisa con ≥ 60 s y `context.rs` lo pasa al modelo— y la UI). Con solo `× 60`, AAPL habría pasado a «900 s de retraso» y el análisis de IA lo habría repetido como un hueco de datos: falso.
+4. Tests: fixture real `tests/fixtures/yahoo_quote_delay_units.json` (10 cotizaciones capturadas con su hora) y `delay_is_in_minutes_and_real_time_labels_win`, que comprueba con la antigüedad de la propia captura que los diferidos van `×60` ± 2 min y los de tiempo real con < 2 min aunque el campo diga 15/20; `delay_edge_cases` (decimal, negativo, texto, desbordamiento, etiqueta sin campo). `parses_batch_quotes` pasa a esperar AAPL = 0 y SAN.MC = 900 (antes `Some(15)`). Los dos tests fallan con el código anterior.
+5. **No verificado**: bolsas europeas/asiáticas (cerradas durante la medida: con el mercado cerrado `regularMarketTime` es la última operación y no mide el retraso; SAN.MC figura como «Delayed Quote» con 15 en el fixture del 11-oct y se interpreta como 900 s sin contrastar), ni la respuesta de `/v7/finance/quote` en sí (bloqueada por 429 en esta IP durante la medida; se usó la página HTML con los mismos campos). El `^TNX`/`^VIX` de la macro de respaldo (`macro_indicators_from_quotes`) viene de feeds diferidos 15 min y `MacroIndicator` no tiene campo de retraso: queda anotado, sin tocar.
+6. Presentación en la UI (frontend): ver `frontend.md → Antigüedad medida frente a retraso declarado`.

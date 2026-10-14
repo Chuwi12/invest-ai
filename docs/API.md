@@ -75,6 +75,11 @@ si no se conocen; nunca se inventa una URL):
 - `timestampOrigin = "provider"`: `timestamp`/`asOf` es la hora que dio el proveedor. `"local"`: el
   proveedor no la da y es la hora de la consulta (Yahoo/Finnhub en `Fundamentals.asOf`; Binance/CoinGecko
   si faltara el campo).
+- `Quote.delaySecs`: **segundos de retraso que declara el proveedor para el feed que sirve** (0 = tiempo real, `null` =
+  desconocido). Es una declaración, no una medida: la antigüedad real del dato es `ahora − timestamp` (con
+  `timestampOrigin = "provider"`) y es lo que la UI muestra como cifra principal. En Yahoo `exchangeDataDelayedBy` viene
+  en **minutos** y es el retraso estándar de la bolsa, no el del feed (AAPL declara 15 min y llega con ~3 s); el backend
+  lo convierte a segundos y devuelve 0 cuando `quoteSourceName` dice «Real Time». Ver `docs/notes/market.md`.
 - `NewsItem.url` ya es el enlace al artículo/filing original (no necesita `sourceUrl`).
 - `GET /assets/{id}/history` sigue devolviendo `Candle[]`; la procedencia va en cabeceras de respuesta:
   `X-Data-Source` (proveedor que sirvió las velas), `X-Data-Source-Url`, `X-Data-As-Of` (inicio de la

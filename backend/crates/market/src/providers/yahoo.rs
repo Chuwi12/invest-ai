@@ -872,6 +872,24 @@ fn market_state_from_str(s: &str) -> MarketState {
     }
 }
 
+/// Retraso EFECTIVO del feed (segundos) de una cotización de `/v7/finance/quote`.
+///
+/// `exchangeDataDelayedBy` viene en **minutos**, no en segundos (medido el 13-oct-2026 con la bolsa abierta: GC=F y
+/// CL=F declaran 10 y su `regularMarketTime` va ~605-640 s por detrás; ^RUT, ^VIX y ^TNX declaran 15 y van ~905-915 s
+/// por detrás; ver `docs/notes/market.md` y el test `delay_is_in_minutes_and_real_time_labels_win`). Es el retraso
+/// ESTÁNDAR de la bolsa para quien no paga su licencia (Nasdaq 15, NYSE 20, TSX 15, CME 10, Cboe 15), no el de Yahoo:
+/// donde Yahoo sirve el dato en tiempo real el campo sigue valiendo 15/20 (AAPL: 15 con 3-11 s de antigüedad real).
+/// Esos casos los delata `quoteSourceName` («Nasdaq Real Time Price», «Free Realtime Quote»), y entonces el retraso
+/// es 0. Sin etiqueta de tiempo real se usa el campo (×60); sin campo, `None` (desconocido).
+fn effective_delay_secs(r: &Value) -> Option<u32> {
+    let label = r["quoteSourceName"].as_str().unwrap_or("").to_ascii_lowercase();
+    if label.contains("real time") || label.contains("realtime") {
+        return Some(0);
+    }
+    let minutes = r["exchangeDataDelayedBy"].as_f64().filter(|m| m.is_finite() && *m >= 0.0)?;
+    Some((minutes * 60.0).round().min(f64::from(u32::MAX)) as u32)
+}
+
 /// Convierte la respuesta en cotizaciones usando el mapa símbolo de Yahoo → ids pedidos.
 pub fn parse_quotes(text: &str, requested: &HashMap<String, Vec<&AssetId>>) -> PResult<Vec<Quote>> {
     let v: Value = parse_json(text)?;
@@ -924,7 +942,7 @@ pub fn parse_quotes(text: &str, requested: &HashMap<String, Vec<&AssetId>>) -> P
                 },
                 timestamp: ts,
                 source: "yahoo".into(),
-                delay_secs: r["exchangeDataDelayedBy"].as_u64().map(|d| d as u32),
+                delay_secs: effective_delay_secs(r),
                 source_url: None,
                 timestamp_origin: Some(origin),
             });
@@ -1193,6 +1211,11 @@ mod tests {
     const CHART_1D: &str = include_str!("../../tests/fixtures/yahoo_chart_aapl_1d.json");
     const CHART_404: &str = include_str!("../../tests/fixtures/yahoo_chart_notfound.json");
     const QUOTES: &str = include_str!("../../tests/fixtures/yahoo_quote_batch.json");
+    /// 10 cotizaciones reales de `finance.yahoo.com/quote/AAPL` (mismos campos que `/v7/finance/quote`, con los
+    /// `{raw, fmt}` aplanados a `raw`), capturadas el 13-oct-2026 a las 17:15:38 UTC con la bolsa de EE. UU. abierta.
+    const QUOTES_DELAY: &str = include_str!("../../tests/fixtures/yahoo_quote_delay_units.json");
+    /// Cabecera `Date` de esa captura (13-oct-2026 17:15:38 UTC).
+    const QUOTES_DELAY_CAPTURED_AT: i64 = 1_791_911_738;
     const QUOTES_EMPTY: &str = include_str!("../../tests/fixtures/yahoo_quote_notfound.json");
     const SUMMARY_AAPL: &str = include_str!("../../tests/fixtures/yahoo_quotesummary_aapl.json");
     const SUMMARY_SPY: &str = include_str!("../../tests/fixtures/yahoo_quotesummary_spy.json");
@@ -1407,13 +1430,94 @@ mod tests {
         let aapl = get("AAPL");
         assert_eq!(aapl.price, 336.64);
         assert_eq!(aapl.market_state, MarketState::Closed);
-        assert_eq!(aapl.delay_secs, Some(15));
+        // `exchangeDataDelayedBy: 15` (minutos, estándar de Nasdaq) pero «Nasdaq Real Time Price»: tiempo real.
+        assert_eq!(aapl.delay_secs, Some(0));
+        // «Delayed Quote» con `exchangeDataDelayedBy: 15`: 15 min = 900 s (antes se leía como 15 s).
+        assert_eq!(get("SAN.MC").delay_secs, Some(900));
+        assert_eq!(get("^GSPC").delay_secs, Some(0));
         assert!(aapl.market_cap.unwrap() > 4e12);
         // La cripto se devuelve con el id pedido (crypto:BTC) aunque Yahoo la llame BTC-USD.
         let btc = get("BTC");
         assert_eq!(btc.id.class, AssetClass::Crypto);
         assert_eq!(btc.market_state, MarketState::Continuous);
         assert_eq!(get("SAN.MC").currency.as_deref(), Some("EUR"));
+    }
+
+    /// Evidencia de la unidad de `exchangeDataDelayedBy`: con la sesión abierta, el desfase REAL entre la captura y
+    /// `regularMarketTime` de los feeds «Delayed Quote» coincide con el campo tomado en MINUTOS (10 -> ~10 min,
+    /// 15 -> ~15 min), y los feeds etiquetados de tiempo real van con segundos de antigüedad aunque el campo valga
+    /// 15 o 20 (retraso estándar de la bolsa, no el del feed).
+    #[test]
+    fn delay_is_in_minutes_and_real_time_labels_win() {
+        let ids: Vec<(String, AssetId)> = [
+            ("AAPL", AssetClass::Stock),
+            ("JPM", AssetClass::Stock),
+            ("CNQ.TO", AssetClass::Stock),
+            ("^GSPC", AssetClass::Index),
+            ("BTC-USD", AssetClass::Crypto),
+            ("GC=F", AssetClass::Future),
+            ("CL=F", AssetClass::Future),
+            ("^RUT", AssetClass::Index),
+            ("^VIX", AssetClass::Index),
+            ("^TNX", AssetClass::Index),
+        ]
+        .into_iter()
+        .map(|(sym, class)| (sym.to_string(), AssetId::new(class, sym)))
+        .collect();
+        let mut req: HashMap<String, Vec<&AssetId>> = HashMap::new();
+        for (sym, id) in &ids {
+            req.entry(sym.clone()).or_default().push(id);
+        }
+        let qs = parse_quotes(QUOTES_DELAY, &req).unwrap();
+        assert_eq!(qs.len(), 10);
+        let raw: Value = serde_json::from_str(QUOTES_DELAY).unwrap();
+        let field = |sym: &str, key: &str| {
+            raw["quoteResponse"]["result"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["symbol"] == sym)
+                .map(|r| r[key].clone())
+                .unwrap_or_else(|| panic!("{sym} no está en el fixture"))
+        };
+        let lag = |q: &Quote| QUOTES_DELAY_CAPTURED_AT - q.timestamp.timestamp();
+        for q in &qs {
+            let sym = q.id.symbol.as_str();
+            let declared_min = field(sym, "exchangeDataDelayedBy").as_f64().unwrap();
+            let label = field(sym, "quoteSourceName");
+            let real_time = label.as_str().is_some_and(|l| l.to_lowercase().contains("real"));
+            if real_time || declared_min == 0.0 {
+                // Tiempo real: segundos de antigüedad, también cuando el campo dice 15 o 20.
+                assert_eq!(q.delay_secs, Some(0), "{sym}");
+                assert!(lag(q) < 120, "{sym}: antigüedad {} s", lag(q));
+            } else {
+                // Feed diferido: el campo son MINUTOS y la antigüedad medida los confirma (±2 min).
+                assert_eq!(q.delay_secs, Some(declared_min as u32 * 60), "{sym}");
+                let expect = i64::from(q.delay_secs.unwrap());
+                assert!((lag(q) - expect).abs() < 120, "{sym}: declarado {expect} s, antigüedad {} s", lag(q));
+            }
+        }
+        let by = |s: &str| qs.iter().find(|q| q.id.symbol == s).unwrap();
+        assert_eq!(by("GC=F").delay_secs, Some(600)); // COMEX: 10 min
+        assert_eq!(by("CL=F").delay_secs, Some(600));
+        assert_eq!(by("^VIX").delay_secs, Some(900)); // Cboe, sin `quoteSourceName`: 15 min
+        assert_eq!(by("^RUT").delay_secs, Some(900)); // «Delayed Quote»: 15 min
+        assert_eq!(by("JPM").delay_secs, Some(0)); // NYSE declara 20, pero Yahoo lo sirve en tiempo real
+        assert_eq!(by("CNQ.TO").delay_secs, Some(0)); // TSX declara 15, «Free Realtime Quote»
+        assert_eq!(by("AAPL").delay_secs, Some(0));
+    }
+
+    #[test]
+    fn delay_edge_cases() {
+        let d = |s: &str| effective_delay_secs(&serde_json::from_str::<Value>(s).unwrap());
+        assert_eq!(d(r#"{}"#), None, "sin campo ni etiqueta: desconocido");
+        assert_eq!(d(r#"{"exchangeDataDelayedBy":0}"#), Some(0));
+        assert_eq!(d(r#"{"exchangeDataDelayedBy":20,"quoteSourceName":"Delayed Quote"}"#), Some(1200));
+        assert_eq!(d(r#"{"exchangeDataDelayedBy":15.0}"#), Some(900), "también si llega como decimal");
+        assert_eq!(d(r#"{"exchangeDataDelayedBy":-5}"#), None, "negativo = dato inválido");
+        assert_eq!(d(r#"{"exchangeDataDelayedBy":"15"}"#), None, "texto = dato inválido");
+        assert_eq!(d(r#"{"quoteSourceName":"Free Realtime Quote"}"#), Some(0), "etiqueta de tiempo real sin campo");
+        assert_eq!(d(r#"{"exchangeDataDelayedBy":1e12}"#), Some(u32::MAX), "sin desbordar");
     }
 
     #[test]
