@@ -64,9 +64,13 @@ pub fn verify_url(provider: &str, id: &AssetId) -> Option<String> {
             "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={}&type=&dateb=&owner=include&count=40",
             enc(&crate::providers::plain_ticker(sym))
         )),
-        "finnhub" => Some(format!("https://finnhub.io/quote/{}", enc(sym))),
+        // Finnhub no tiene página pública por activo (`finnhub.io/quote/X` redirige a la portada,
+        // medido el 14-oct-2026) y su API exige clave: no hay enlace que el usuario pueda abrir.
+        "finnhub" => None,
         "fred" => Some(format!("https://fred.stlouisfed.org/series/{}", enc(sym))),
-        "twelvedata" => Some(format!("https://twelvedata.com/markets/{}", enc(sym))),
+        // `twelvedata.com/markets/<símbolo>` da 404 (medido el 14-oct-2026) y no hay otra página
+        // pública por activo; la API exige clave. Sin enlace antes que un enlace roto.
+        "twelvedata" => None,
         "fmp" => Some(format!(
             "https://site.financialmodelingprep.com/financial-summary/{}",
             enc(sym)

@@ -127,7 +127,9 @@ en pares cripto poco líquidos puede tener varios segundos (Binance `miniTicker`
 cambios), y no es retraso del servidor. Medido (13-oct-2026, 20 clientes x 10 pares): ticks en vivo
 p50 138 ms / p99 234 ms; el primer tick de cada activo, p50 ~1 s. Las acciones sin feed WS se sondean
 cada 5 s con el mercado abierto y solo emiten si cambió el precio o la hora (a 60 s si el mercado está
-cerrado/pre/post y no hay cambios).
+cerrado/pre/post y no hay cambios). Con `FINNHUB_API_KEY` las acciones/ETF de EE. UU. tienen feed WS
+(`tick.source = "finnhub"`, trades reales); sin clave, o mientras ese WS no esté conectado, se sondean.
+`Quote.sourceUrl` es `null` para Finnhub y Twelve Data (no tienen página pública por activo).
 
 ## Análisis de IA
 

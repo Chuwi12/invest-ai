@@ -2,8 +2,10 @@
 //! recomendaciones de analistas, noticias por empresa y WebSocket de trades en tiempo real.
 //! La clave viaja en la cabecera `X-Finnhub-Token`, nunca en la URL de REST.
 
+use std::{collections::HashSet, sync::Mutex};
+
 use async_trait::async_trait;
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use domain::{AssetClass, AssetId, Fundamentals, MarketState, NewsItem, Quote};
 use reqwest::Client;
 use serde_json::{Value, json};
@@ -27,12 +29,25 @@ pub struct Finnhub {
     http: Client,
     info: ProviderInfo,
     key: Option<Secret>,
+    base: String,
+    /// Recursos (`ruta|símbolo`) que el plan gratuito deniega con 403: no se vuelven a pedir.
+    denied: Mutex<HashSet<String>>,
 }
+
+/// Tope de recursos denegados recordados (acota la memoria con símbolos del usuario).
+const MAX_DENIED: usize = 512;
 
 impl Finnhub {
     pub fn new(http: Client, key: Option<Secret>) -> Self {
+        Self::with_base(http, key, BASE)
+    }
+
+    /// Igual que `new` con otra URL base (pruebas con un servidor local).
+    pub fn with_base(http: Client, key: Option<Secret>, base: &str) -> Self {
         Self {
             http,
+            base: base.to_string(),
+            denied: Mutex::new(HashSet::new()),
             info: ProviderInfo {
                 name: "finnhub",
                 requires_key: true,
@@ -54,7 +69,14 @@ impl Finnhub {
 
     async fn get(&self, path: &str, query: &[(&str, String)]) -> PResult<Value> {
         let key = self.key.as_ref().ok_or(ProviderError::Unsupported)?;
-        let mut url = Url::parse(BASE).map_err(|e| ProviderError::upstream(e.to_string()))?;
+        let tag = format!(
+            "{path}|{}",
+            query.iter().find(|(k, _)| *k == "symbol").map_or("", |(_, v)| v.as_str())
+        );
+        if self.denied.lock().unwrap_or_else(|p| p.into_inner()).contains(&tag) {
+            return Err(ProviderError::Unsupported);
+        }
+        let mut url = Url::parse(&self.base).map_err(|e| ProviderError::upstream(e.to_string()))?;
         url.path_segments_mut()
             .map_err(|()| ProviderError::upstream("URL base no válida"))?
             .extend(path.split('/'));
@@ -65,6 +87,17 @@ impl Finnhub {
                 .header("X-Finnhub-Token", key.expose()),
         )
         .await?;
+        // 403 = el recurso no entra en el plan (candles, forex, símbolos no estadounidenses...):
+        // se desactiva esa capacidad para ese recurso sin tratarlo como fallo del proveedor.
+        // Una clave inválida da 401, que sí es un error.
+        if body.status == reqwest::StatusCode::FORBIDDEN {
+            let mut d = self.denied.lock().unwrap_or_else(|p| p.into_inner());
+            if d.len() >= MAX_DENIED {
+                d.clear();
+            }
+            d.insert(tag);
+            return Err(ProviderError::Unsupported);
+        }
         check_status(&body)?;
         let v: Value = parse_json(&body.text)?;
         if let Some(e) = v["error"].as_str() {
@@ -90,21 +123,26 @@ impl Provider for Finnhub {
         let sym = us_symbol(id).ok_or(ProviderError::Unsupported)?;
         let by_symbol = [("symbol", sym.clone())];
         let with_metric = [("symbol", sym.clone()), ("metric", "all".to_string())];
-        let (profile, metric, rec) = futures::join!(
+        let today = Utc::now().date_naive();
+        let window = [
+            ("symbol", sym.clone()),
+            ("from", today.to_string()),
+            ("to", (today + Duration::days(120)).to_string()),
+        ];
+        let (profile, metric, rec, cal) = futures::join!(
             self.get("stock/profile2", &by_symbol),
             self.get("stock/metric", &with_metric),
             self.get("stock/recommendation", &by_symbol),
+            self.get("calendar/earnings", &window),
         );
         // El perfil decide si el activo existe; métricas y recomendaciones son complementos.
         let profile = profile?;
         if profile.as_object().is_none_or(|o| o.is_empty()) {
             return Ok(None);
         }
-        Ok(Some(fundamentals_from_json(
-            &profile,
-            metric.ok().as_ref(),
-            rec.ok().as_ref(),
-        )))
+        let mut f = fundamentals_from_json(&profile, metric.ok().as_ref(), rec.ok().as_ref());
+        f.next_earnings_date = cal.ok().and_then(|c| next_earnings(&c, today));
+        Ok(Some(f))
     }
 
     async fn news(&self, qy: &NewsQuery) -> PResult<Vec<NewsItem>> {
@@ -227,6 +265,16 @@ pub fn fundamentals_from_json(
     f
 }
 
+/// Fecha del próximo resultado (la más cercana desde hoy) del calendario de Finnhub.
+pub fn next_earnings(v: &Value, today: NaiveDate) -> Option<NaiveDate> {
+    v["earningsCalendar"]
+        .as_array()?
+        .iter()
+        .filter_map(|e| e["date"].as_str()?.parse::<NaiveDate>().ok())
+        .filter(|d| *d >= today)
+        .min()
+}
+
 pub fn parse_news(v: &Value, symbol: Option<&str>) -> Vec<NewsItem> {
     let now = Utc::now();
     let mut out: Vec<NewsItem> = v
@@ -292,7 +340,7 @@ impl WsFeed for FinnhubFeed {
     fn url(&self) -> String {
         // Finnhub solo admite la clave como parámetro de la URL del WebSocket. Esta URL no se
         // registra en ningún sitio (ver `realtime::ws_worker`).
-        format!("{WS_URL}?token={}", self.key.expose())
+        format!("{WS_URL}/?token={}", self.key.expose())
     }
 
     fn subscribe_msgs(&self, symbols: &[String], on: bool) -> Vec<String> {
@@ -334,67 +382,131 @@ impl WsFeed for FinnhubFeed {
 mod tests {
     use super::*;
 
-    // Las muestras siguen la forma documentada en finnhub.io/docs/api (no hay fixture real:
-    // la API exige clave).
-    #[test]
-    fn quote_zero_means_not_found() {
-        let id = AssetId::new(AssetClass::Stock, "AAPL");
-        let v = json!({"c":0,"d":null,"dp":null,"h":0,"l":0,"o":0,"pc":0,"t":0});
-        assert!(matches!(
-            quote_from_json(&v, &id),
-            Err(ProviderError::NotFound(_))
-        ));
-        let v = json!({"c":261.74,"d":-1.1,"dp":-0.42,"h":263.31,"l":260.68,"o":261.07,"pc":262.84,"t":1760040000});
-        let q = quote_from_json(&v, &id).unwrap();
-        assert_eq!(q.price, 261.74);
-        assert_eq!(q.timestamp.timestamp(), 1_760_040_000);
-        assert_eq!(q.prev_close, Some(262.84));
+    // Respuestas REALES de la API de Finnhub (plan gratuito) capturadas el 14-oct-2026 con la
+    // bolsa de EE. UU. cerrada; ver `tests/fixtures/finnhub_*.json`.
+    fn fx(name: &str) -> Value {
+        let p = format!("{}/tests/fixtures/finnhub_{name}.json", env!("CARGO_MANIFEST_DIR"));
+        serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+    }
+
+    fn stock(s: &str) -> AssetId {
+        AssetId::new(AssetClass::Stock, s)
     }
 
     #[test]
-    fn fundamentals_units() {
-        let profile = json!({"country":"US","currency":"USD","finnhubIndustry":"Technology","marketCapitalization":3000000.0,"name":"Apple Inc","shareOutstanding":15000.0,"weburl":"https://www.apple.com/"});
-        let metric = json!({"metric":{"peTTM":30.5,"netProfitMarginTTM":24.0,"roeTTM":150.0,"dividendYieldIndicatedAnnual":0.5,"52WeekHigh":280.0}});
-        let rec = json!([{"buy":20,"hold":10,"period":"2026-10-01","sell":1,"strongBuy":10,"strongSell":0}]);
-        let f = fundamentals_from_json(&profile, Some(&metric), Some(&rec));
-        assert_eq!(f.market_cap, Some(3.0e12));
+    fn real_quote_units_and_timestamp() {
+        let q = quote_from_json(&fx("quote_aapl"), &stock("AAPL")).unwrap();
+        assert_eq!(q.price, 341.27);
+        // `t` = cierre de la sesión del 13-oct (16:00 ET = 20:00 UTC), en segundos.
+        assert_eq!(q.timestamp.to_rfc3339(), "2026-10-13T20:00:00+00:00");
+        assert_eq!(q.prev_close, Some(340.97));
+        assert_eq!(q.currency.as_deref(), Some("USD"));
+        assert_eq!(q.timestamp_origin, Some(domain::TimestampOrigin::Provider));
+        // `dp` ya viene en puntos porcentuales (0,3 / 340,97 = 0,088 %), igual que `Quote.change_pct`.
+        let dp = q.change_pct.unwrap();
+        assert!((dp - 0.088).abs() < 1e-9);
+        let calc = (q.price / q.prev_close.unwrap() - 1.0) * 100.0;
+        assert!((dp - calc).abs() < 0.001, "dp={dp} calc={calc}");
+        assert!((q.change.unwrap() - 0.3).abs() < 1e-9);
+        let m = quote_from_json(&fx("quote_msft"), &stock("MSFT")).unwrap();
+        assert_eq!(m.price, 543.45);
+        assert!((m.change_pct.unwrap() - (543.45 / 541.15 - 1.0) * 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn real_unknown_symbol_is_not_found() {
+        assert!(matches!(
+            quote_from_json(&fx("quote_unknown"), &stock("ZZZZNOPE")),
+            Err(ProviderError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn real_fundamentals_units() {
+        let f = fundamentals_from_json(
+            &fx("profile2_aapl"),
+            Some(&fx("metric_aapl")),
+            Some(&fx("recommendation_aapl")),
+        );
+        // Capitalización y acciones vienen en millones.
+        assert!((f.market_cap.unwrap() / 1.0e12 - 4.98).abs() < 0.01);
+        assert!((f.shares_outstanding.unwrap() / 1.0e9 - 14.687).abs() < 0.001);
         assert_eq!(f.currency.as_deref(), Some("USD"));
-        assert_eq!(f.shares_outstanding, Some(1.5e10));
-        assert!((f.profit_margin.unwrap() - 0.24).abs() < 1e-12);
-        assert!((f.roe.unwrap() - 1.5).abs() < 1e-12);
-        assert!((f.dividend_yield.unwrap() - 0.005).abs() < 1e-12);
-        assert_eq!(f.analyst_count, Some(41));
-        let mean = (10.0 + 40.0 + 30.0 + 4.0) / 41.0;
+        assert_eq!(f.sector.as_deref(), Some("Technology"));
+        // Márgenes, rentabilidades y rendimiento por dividendo vienen en % -> fracción.
+        assert!((f.gross_margin.unwrap() - 0.4865).abs() < 1e-9);
+        assert!((f.profit_margin.unwrap() - 0.2762).abs() < 1e-9);
+        assert!((f.dividend_yield.unwrap() - 0.0050534).abs() < 1e-9);
+        assert!((f.payout_ratio.unwrap() - 0.1213).abs() < 1e-9);
+        assert!((f.pe_trailing.unwrap() - 38.8303).abs() < 1e-9);
+        assert!((f.eps_trailing.unwrap() - 8.7233).abs() < 1e-3);
+        assert!((f.beta.unwrap() - 1.106).abs() < 1e-3);
+        // Recomendaciones: el primer elemento es el periodo más reciente (sep-2026).
+        assert_eq!(f.analyst_count, Some(12 + 22 + 15 + 3 + 1));
+        let mean = (12.0 + 44.0 + 45.0 + 12.0 + 5.0) / 53.0;
         assert!((f.analyst_rating_mean.unwrap() - mean).abs() < 1e-12);
+        assert_eq!(f.extra["analystPeriod"], "2026-09-01");
+        assert_eq!(f.extra["high52w"], 345.34);
         // Sin métricas ni recomendaciones solo quedan los datos del perfil.
-        let f = fundamentals_from_json(&profile, None, None);
+        let f = fundamentals_from_json(&fx("profile2_aapl"), None, None);
         assert!(f.pe_trailing.is_none() && f.analyst_count.is_none());
     }
 
     #[test]
-    fn news_parse_and_filter() {
+    fn real_earnings_calendar() {
+        let d = |y, m, dd| NaiveDate::from_ymd_opt(y, m, dd).unwrap();
+        assert_eq!(next_earnings(&fx("earnings_aapl"), d(2026, 10, 14)), Some(d(2026, 11, 2)));
+        // Un resultado ya pasado no cuenta; sin calendario, tampoco.
+        assert_eq!(next_earnings(&fx("earnings_aapl"), d(2026, 11, 3)), None);
+        assert_eq!(next_earnings(&json!({"earningsCalendar": []}), d(2026, 10, 14)), None);
+    }
+
+    #[test]
+    fn real_company_news() {
+        let v = fx("company_news_aapl");
+        let n = parse_news(&v, Some("AAPL"));
+        assert_eq!(n.len(), v.as_array().unwrap().len());
+        assert!(n.windows(2).all(|w| w[0].published_at >= w[1].published_at));
+        assert!(n.iter().all(|i| i.provider == "finnhub" && i.tickers == ["AAPL"]));
+        // `datetime` en segundos: 1791954600 = 2026-10-14T04:30:00Z.
+        assert!(n.iter().any(|i| i.published_at.timestamp() == 1_791_954_600));
+        // El enlace es la redirección de Finnhub al artículo original; el editor va en `publisher`.
+        assert!(n.iter().all(|i| i.url.starts_with("https://finnhub.io/api/news?id=")));
+        assert!(n.iter().any(|i| i.publisher.as_deref() == Some("Yahoo")));
+        assert!(parse_news(&fx("news_general"), None).len() >= 5);
+    }
+
+    #[test]
+    fn news_filters_unsafe_urls() {
         let v = json!([
-            {"category":"company","datetime":1760040000,"headline":"Apple hace algo","id":1,"image":"https://i.com/a.png","related":"AAPL","source":"Reuters","summary":"Resumen","url":"https://r.com/a"},
             {"datetime":1760040000,"headline":"javascript","url":"javascript:alert(1)"},
             {"datetime":1760050000,"headline":"Más nueva","url":"https://r.com/b"}
         ]);
         let n = parse_news(&v, Some("AAPL"));
-        assert_eq!(n.len(), 2);
-        assert_eq!(n[0].title, "Más nueva");
+        assert_eq!(n.len(), 1);
         assert_eq!(n[0].tickers, ["AAPL"]);
-        assert_eq!(n[1].tickers, ["AAPL"]);
     }
 
     #[test]
-    fn ws_trades_and_subscriptions() {
+    fn real_ws_trades_and_subscriptions() {
         let f = FinnhubFeed::new(Secret::new("k3y-secret").unwrap());
-        let t = f.parse(r#"{"data":[{"p":261.9,"s":"AAPL","t":1760040000123,"v":100},{"p":0,"s":"X","t":1,"v":1}],"type":"trade"}"#);
-        assert_eq!(t.len(), 1);
-        assert_eq!(t[0].symbol, "AAPL");
-        assert_eq!(t[0].ts.timestamp_millis(), 1_760_040_000_123);
+        let v = fx("ws_trades");
+        let mut ticks = Vec::new();
+        for m in v["messages"].as_array().unwrap() {
+            ticks.extend(f.parse(&m.to_string()));
+        }
+        // El último mensaje del fixture es un `ping` real: no produce ticks.
         assert!(f.parse(r#"{"type":"ping"}"#).is_empty());
+        assert!(!ticks.is_empty());
+        assert!(ticks.iter().all(|t| t.symbol == "BINANCE:BTCUSDT" && t.price > 1000.0));
+        // `t` en milisegundos: 1791963757789 = 2026-10-14T07:42:37.789Z.
+        assert_eq!(ticks[0].ts.timestamp_millis(), 1_791_963_757_789);
+        assert_eq!(ticks[0].price, 83431.55);
+        assert_eq!(ticks[0].volume, Some(0.01633));
         let m = f.subscribe_msgs(&["AAPL".into()], true);
         assert_eq!(m[0], r#"{"symbol":"AAPL","type":"subscribe"}"#);
+        // La URL lleva la clave, el Debug del feed no.
+        assert!(f.url().ends_with("/?token=k3y-secret"));
     }
 
     #[test]
@@ -404,5 +516,67 @@ mod tests {
         assert_eq!(s(AssetClass::Etf, "spy").as_deref(), Some("SPY"));
         assert!(s(AssetClass::Stock, "SAN.MC").is_none());
         assert!(s(AssetClass::Crypto, "BTC").is_none());
+    }
+
+    /// Servidor HTTP local mínimo: contesta con `respond(ruta)` y cuenta peticiones.
+    async fn serve(
+        respond: fn(&str) -> (u16, &'static str),
+    ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let n = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let n2 = n.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut c, _)) = l.accept().await else { return };
+                let n = n2.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 4096];
+                    let k = c.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..k]).to_string();
+                    let path = req.split_whitespace().nth(1).unwrap_or("").to_string();
+                    n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let (code, body) = respond(&path);
+                    let _ = c
+                        .write_all(format!("HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).as_bytes())
+                        .await;
+                });
+            }
+        });
+        (format!("http://{addr}"), n)
+    }
+
+    #[tokio::test]
+    async fn forbidden_resource_disables_only_that_capability() {
+        let (base, hits) = serve(|path| {
+            if path.starts_with("/quote") {
+                (200, include_str!("../../tests/fixtures/finnhub_quote_aapl.json"))
+            } else if path.starts_with("/stock/recommendation") {
+                (403, r#"{"error":"You don't have access to this resource."}"#)
+            } else {
+                (200, "{}")
+            }
+        })
+        .await;
+        let f = Finnhub::with_base(Client::new(), Some(Secret::new("k3y").unwrap()), &base);
+        let id = stock("AAPL");
+        assert_eq!(f.quote(&id).await.unwrap().price, 341.27);
+        // 403 -> `Unsupported` (no cuenta como fallo del proveedor) y no se repite la petición.
+        let rec = f.get("stock/recommendation", &[("symbol", "AAPL".into())]).await;
+        assert!(matches!(rec, Err(ProviderError::Unsupported)));
+        let before = hits.load(std::sync::atomic::Ordering::SeqCst);
+        let rec = f.get("stock/recommendation", &[("symbol", "AAPL".into())]).await;
+        assert!(matches!(rec, Err(ProviderError::Unsupported)));
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), before);
+        // El resto de capacidades siguen funcionando.
+        assert_eq!(f.quote(&id).await.unwrap().price, 341.27);
+    }
+
+    #[tokio::test]
+    async fn invalid_key_is_an_error_not_unsupported() {
+        let (base, _) = serve(|_| (401, r#"{"error":"Invalid API key."}"#)).await;
+        let f = Finnhub::with_base(Client::new(), Some(Secret::new("k3y").unwrap()), &base);
+        assert!(matches!(f.quote(&stock("AAPL")).await, Err(ProviderError::Upstream(_))));
     }
 }

@@ -1,0 +1,28 @@
+{
+ "symbol": "BTC/USD",
+ "name": "Bitcoin US Dollar",
+ "exchange": "Binance",
+ "datetime": "2026-10-14",
+ "timestamp": 1791936000,
+ "last_quote_at": 1791964440,
+ "open": "83169.01",
+ "high": "83958",
+ "low": "83169",
+ "close": "83499.99",
+ "previous_close": "83169",
+ "change": "330.99000",
+ "percent_change": "0.39797280",
+ "rolling_1d_change": "-0.58560444",
+ "rolling_7d_change": "-0.77911575",
+ "rolling_change": "-0.58560444",
+ "is_market_open": true,
+ "fifty_two_week": {
+  "low": "57800.19",
+  "high": "116400",
+  "low_change": "25699.80000",
+  "high_change": "-32900.0100000",
+  "low_change_percent": "44.46318",
+  "high_change_percent": "-28.26461",
+  "range": "57800.190000 - 116400.000000"
+ }
+}

@@ -279,3 +279,147 @@ async fn gdelt_background_news() {
     let g = h.iter().find(|p| p.name == "gdelt").unwrap();
     println!("GDELT: ok={:?} error={:?} latencia={:?} ms bloqueado={:?}", g.last_ok, g.last_error, g.last_latency_ms, g.blocked_secs);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Proveedores con clave. Se saltan (sin fallar) si la clave no está en el entorno ni en `.env`.
+// ---------------------------------------------------------------------------------------------
+
+/// Clave del entorno o del `.env` de la raíz del repositorio. Nunca se imprime.
+fn env_key(name: &str) -> Option<market::secret::Secret> {
+    let from_env = std::env::var(name).ok();
+    let from_file = || {
+        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.env");
+        std::fs::read_to_string(p).ok()?.lines().find_map(|l| {
+            let (k, v) = l.split_once('=')?;
+            (k.trim() == name).then(|| v.trim().to_string())
+        })
+    };
+    from_env.or_else(from_file).and_then(market::secret::Secret::new)
+}
+
+#[tokio::test]
+#[ignore = "red real y FINNHUB_API_KEY"]
+async fn finnhub_rest_and_ws() {
+    use market::providers::{
+        NewsQuery, Provider,
+        finnhub::{Finnhub, FinnhubFeed},
+    };
+    use market::realtime::WsFeed;
+    let Some(key) = env_key("FINNHUB_API_KEY") else {
+        println!("FINNHUB: sin FINNHUB_API_KEY, se omite");
+        return;
+    };
+    let http = market::http::build_client(Duration::from_secs(10)).unwrap();
+    let fh = Finnhub::new(http, Some(key.clone()));
+    for sym in ["AAPL", "MSFT"] {
+        let id = AssetId::new(AssetClass::Stock, sym);
+        let q = fh.quote(&id).await.expect("quote");
+        println!(
+            "FINNHUB {sym}: {} {:?} cambio={:?}% prev={:?} ts={} origen={:?}",
+            q.price, q.currency, q.change_pct, q.prev_close, age(q.timestamp), q.timestamp_origin
+        );
+        assert!(q.price > 1.0 && q.source == "finnhub");
+        let calc = q.prev_close.map(|p| (q.price / p - 1.0) * 100.0).unwrap();
+        assert!((q.change_pct.unwrap() - calc).abs() < 0.02, "dp debe estar en puntos porcentuales");
+        assert!((chrono::Utc::now() - q.timestamp).num_days() < 5);
+    }
+    let aapl = AssetId::new(AssetClass::Stock, "AAPL");
+    assert!(matches!(
+        fh.quote(&AssetId::new(AssetClass::Stock, "ZZZZNOPE")).await,
+        Err(market::providers::ProviderError::NotFound(_))
+    ));
+    let f = fh.fundamentals(&aapl).await.expect("fundamentals").expect("perfil");
+    println!(
+        "  fundamentales: cap={:?} PER={:?} margen={:?} analistas={:?} media={:?} próx.resultados={:?}",
+        f.market_cap, f.pe_trailing, f.profit_margin, f.analyst_count, f.analyst_rating_mean, f.next_earnings_date
+    );
+    assert!(f.market_cap.unwrap() > 1.0e12 && f.profit_margin.unwrap() < 1.0);
+    assert!(f.analyst_count.unwrap_or(0) > 5);
+    assert!(f.next_earnings_date.is_some());
+    let news = fh
+        .news(&NewsQuery { id: Some(aapl.clone()), name: None, limit: 5 })
+        .await
+        .expect("news");
+    println!("  noticias: {} (primera: {:?})", news.len(), news.first().map(|n| n.title.clone()));
+    assert!(!news.is_empty() && news.iter().all(|n| n.url.starts_with("http")));
+
+    // WebSocket con un símbolo 24/7 (la bolsa de EE. UU. puede estar cerrada).
+    let feed = FinnhubFeed::new(key.clone());
+    let (mut ws, _) = tokio_tungstenite::connect_async(feed.url())
+        .await
+        .unwrap_or_else(|e| {
+            // El error puede incluir la URL con la clave: solo se muestra la variante.
+            let dbg = format!("{e:?}");
+            let kind: String = dbg.chars().take_while(|c| c.is_alphanumeric()).collect();
+            let http = match &e {
+                tokio_tungstenite::tungstenite::Error::Http(r) => Some(r.status().as_u16()),
+                _ => None,
+            };
+            panic!("no se pudo conectar al WS de Finnhub: {kind} {http:?}")
+        });
+    use futures::SinkExt;
+    for m in feed.subscribe_msgs(&["BINANCE:BTCUSDT".to_string()], true) {
+        ws.send(tokio_tungstenite::tungstenite::Message::text(m)).await.unwrap();
+    }
+    let mut ticks = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(15), async {
+        while let Some(Ok(m)) = ws.next().await {
+            if let tokio_tungstenite::tungstenite::Message::Text(t) = m {
+                ticks.extend(feed.parse(t.as_str()));
+                if !ticks.is_empty() {
+                    break;
+                }
+            }
+        }
+    })
+    .await;
+    println!("  WS BINANCE:BTCUSDT: {} ticks, primero {:?}", ticks.len(), ticks.first().map(|t| (t.price, age(t.ts))));
+    assert!(!ticks.is_empty(), "sin trades en 15 s");
+    assert!((chrono::Utc::now() - ticks[0].ts).num_seconds().abs() < 30);
+}
+
+#[tokio::test]
+#[ignore = "red real y TWELVEDATA_API_KEY"]
+async fn twelvedata_quote_and_history() {
+    use market::providers::{Provider, twelvedata::TwelveData};
+    let Some(key) = env_key("TWELVEDATA_API_KEY") else {
+        println!("TWELVEDATA: sin TWELVEDATA_API_KEY, se omite");
+        return;
+    };
+    // Plan gratuito: 8 créditos/min y 800/día. Este test gasta 5.
+    let td = TwelveData::new(market::http::build_client(Duration::from_secs(10)).unwrap(), Some(key));
+    for (class, sym, quote_ccy) in [
+        (AssetClass::Stock, "AAPL", "USD"),
+        (AssetClass::Forex, "EURUSD=X", "USD"),
+        (AssetClass::Crypto, "BTC", "USD"),
+    ] {
+        let id = AssetId::new(class, sym);
+        let q = td.quote(&id).await.expect("quote");
+        println!(
+            "TWELVEDATA {sym}: {} {:?} cambio={:?}% estado={:?} ts={} origen={:?}",
+            q.price, q.currency, q.change_pct, q.market_state, age(q.timestamp), q.timestamp_origin
+        );
+        assert!(q.price > 0.0 && q.source == "twelvedata");
+        assert_eq!(q.currency.as_deref(), Some(quote_ccy));
+        // La hora es la de la última cotización, no el inicio de la barra diaria.
+        let hours = (chrono::Utc::now() - q.timestamp).num_hours();
+        assert!((0..=96).contains(&hours), "antigüedad rara: {hours} h");
+        if q.market_state == domain::MarketState::Regular {
+            assert!((chrono::Utc::now() - q.timestamp).num_minutes() < 30, "mercado abierto y cotización vieja");
+        }
+        let calc = q.prev_close.map(|p| (q.price / p - 1.0) * 100.0).unwrap();
+        assert!((q.change_pct.unwrap() - calc).abs() < 0.02, "percent_change debe estar en puntos porcentuales");
+    }
+    let h = td
+        .history(&AssetId::new(AssetClass::Stock, "AAPL"), Range::M1, Interval::D1)
+        .await
+        .expect("history");
+    println!("  histórico AAPL 1M diario: {} velas, última t={}", h.len(), h.last().unwrap().t);
+    assert!(h.len() >= 15);
+    let h = td
+        .history(&AssetId::new(AssetClass::Forex, "EURUSD=X"), Range::D5, Interval::H1)
+        .await
+        .expect("history fx");
+    println!("  histórico EUR/USD 5d 1h: {} velas, última {}", h.len(), age(chrono::DateTime::from_timestamp(h.last().unwrap().t, 0).unwrap()));
+    assert!(h.len() > 20);
+}

@@ -317,6 +317,7 @@ fn ws_error_kind(e: &tokio_tungstenite::tungstenite::Error) -> &'static str {
         E::Utf8(_) => "UTF-8",
         E::Url(_) => "URL",
         E::Http(r) if r.status().as_u16() == 429 => "HTTP 429",
+        E::Http(r) if matches!(r.status().as_u16(), 401 | 403) => "HTTP 401/403 (clave rechazada)",
         E::Http(_) | E::HttpFormat(_) => "HTTP",
         _ => "otro",
     }
