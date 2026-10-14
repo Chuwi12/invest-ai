@@ -1086,7 +1086,6 @@ impl MarketService {
             )),
             Arc::new(CoinGecko::new(http.clone(), config.coingecko_key.clone())),
             Arc::new(GoogleNews::new(http.clone(), config.news_languages.clone())),
-            Arc::new(Gdelt::new(slow_http)),
             sec.clone(),
             Arc::new(Fred::new(http.clone(), config.fred_key.clone())),
             Arc::new(Finnhub::new(http.clone(), config.finnhub_key.clone())),
@@ -1100,6 +1099,12 @@ impl MarketService {
             Arc::new(Marketaux::new(http.clone(), config.marketaux_key.clone())),
             Arc::new(CryptoPanic::new(http, config.cryptopanic_key.clone())),
         ];
+        let mut providers = providers;
+        if config.gdelt {
+            providers.push(Arc::new(Gdelt::new(slow_http)));
+        } else {
+            tracing::info!(provider = "gdelt", "proveedor desactivado (MARKET_GDELT=1 para activarlo)");
+        }
         let slots: Vec<Arc<Slot>> = providers
             .into_iter()
             .map(|p| Arc::new(Slot::new(p, secrets.clone())))

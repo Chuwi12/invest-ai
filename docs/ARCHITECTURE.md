@@ -20,7 +20,7 @@ frontend (Vite + React + TS)  ──HTTP/SSE/WS──▶  server (Axum)
 ## Proveedores de datos
 
 Todos son opcionales salvo los que no necesitan clave. Sin ninguna clave la app funciona con
-Yahoo, Binance, CoinGecko, GDELT, Google News RSS y SEC EDGAR.
+Yahoo, Binance, CoinGecko, Google News RSS y SEC EDGAR (GDELT es opcional: `MARKET_GDELT=1`).
 
 | Proveedor | Clave | Clases | Uso |
 |-----------|-------|--------|-----|
@@ -33,7 +33,7 @@ Yahoo, Binance, CoinGecko, GDELT, Google News RSS y SEC EDGAR.
 | Twelve Data | `TWELVEDATA_API_KEY` | stock, etf, forex, crypto | respaldo de quote e histórico |
 | FRED (St. Louis Fed) | `FRED_API_KEY` | bond, macro | curva de tipos, fed funds, IPC, paro |
 | SEC EDGAR | no (User-Agent) | stock (EE. UU.) | últimos filings (10-K, 10-Q, 8-K) |
-| GDELT DOC 2.0 | no | todas | noticias globales en tiempo casi real |
+| GDELT DOC 2.0 | no (desactivado por defecto, `MARKET_GDELT=1`) | todas | noticias globales; en segundo plano porque su TLS tarda 7-10 s y responde 429 a menudo |
 | Google News RSS | no | todas | titulares por consulta |
 | NewsAPI | `NEWSAPI_API_KEY` | todas | noticias |
 | Marketaux | `MARKETAUX_API_KEY` | stock, crypto | noticias con entidades y sentimiento |

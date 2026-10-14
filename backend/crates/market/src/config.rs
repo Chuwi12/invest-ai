@@ -28,6 +28,10 @@ pub struct MarketConfig {
     pub request_timeout: Duration,
     /// Activa los WebSockets (Binance, Finnhub). Con `false` todo se sondea.
     pub realtime: bool,
+    /// GDELT (noticias globales). Desactivado por defecto: desde esta red su API responde 429 incluso a la
+    /// primera petición del día, el TLS tarda 7-10 s y su índice iba ~3 días atrasado (13/14-oct-2026,
+    /// `docs/notes/market.md`). `MARKET_GDELT=1` lo activa.
+    pub gdelt: bool,
     /// Bases de Binance (sobrescribibles para pruebas).
     pub binance_rest_base: String,
     pub binance_ws_base: String,
@@ -49,6 +53,7 @@ impl Default for MarketConfig {
             news_languages: vec!["en".into(), "es".into()],
             request_timeout: Duration::from_secs(10),
             realtime: true,
+            gdelt: false,
             binance_rest_base: crate::providers::binance::REST_BASE.into(),
             binance_ws_base: crate::providers::binance::WS_BASE.into(),
         }
@@ -105,6 +110,9 @@ impl MarketConfig {
                 "0" | "false" | "no" | "off"
             );
         }
+        if let Some(v) = get("MARKET_GDELT") {
+            c.gdelt = matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on");
+        }
         c
     }
 
@@ -143,6 +151,14 @@ mod tests {
             .map(|(k, v)| ((*k).into(), (*v).into()))
             .collect();
         MarketConfig::from_lookup(|k| m.get(k).cloned())
+    }
+
+    #[test]
+    fn gdelt_is_opt_in() {
+        assert!(!env(&[]).gdelt);
+        assert!(!env(&[("MARKET_GDELT", "0")]).gdelt);
+        assert!(env(&[("MARKET_GDELT", "1")]).gdelt);
+        assert!(env(&[("MARKET_GDELT", " True ")]).gdelt);
     }
 
     #[test]
