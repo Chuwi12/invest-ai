@@ -13,7 +13,7 @@ use domain::{
 };
 
 use crate::{
-    fmt,
+    derived, fmt,
     lang::{Lang, tr},
     scoring::{Scorecard, verdict_name},
     sentiment,
@@ -156,6 +156,8 @@ pub struct Sections {
     pub scores: u8,
     /// Veredicto cuantitativo provisional y sus razones.
     pub verdict: bool,
+    /// Grupos de «Cifras derivadas» (`derived::*`); 0 = sin sección.
+    pub derived: u8,
 }
 
 impl Sections {
@@ -177,6 +179,7 @@ impl Sections {
         gaps: true,
         scores: Self::S_ALL,
         verdict: true,
+        derived: derived::ALL,
     };
 
     const NONE: Self = Self {
@@ -188,23 +191,50 @@ impl Sections {
         gaps: true,
         scores: 0,
         verdict: false,
+        derived: 0,
     };
 
     /// Lo mínimo que necesita el juez y los abogados: cotización, puntuaciones y huecos.
     pub fn judge() -> Self {
-        Self { quote: true, scores: Self::S_ALL, verdict: true, ..Self::NONE }
+        Self {
+            quote: true,
+            scores: Self::S_ALL,
+            verdict: true,
+            derived: derived::ANALYST | derived::LEVELS | derived::RANGE | derived::VALUATION,
+            ..Self::NONE
+        }
     }
     pub fn technical() -> Self {
-        Self { quote: true, indicators: true, scores: Self::S_TECHNICAL | Self::S_MOMENTUM, ..Self::NONE }
+        Self {
+            quote: true,
+            indicators: true,
+            scores: Self::S_TECHNICAL | Self::S_MOMENTUM,
+            derived: derived::DETAIL | derived::RANGE | derived::TECH,
+            ..Self::NONE
+        }
     }
     pub fn fundamental() -> Self {
-        Self { quote: true, fundamentals: true, scores: Self::S_FUNDAMENTAL | Self::S_VALUATION, ..Self::NONE }
+        Self {
+            quote: true,
+            fundamentals: true,
+            scores: Self::S_FUNDAMENTAL | Self::S_VALUATION,
+            derived: derived::ANALYST | derived::RANGE | derived::VALUATION,
+            ..Self::NONE
+        }
     }
     pub fn sentiment() -> Self {
         Self { news: true, scores: Self::S_SENTIMENT, ..Self::NONE }
     }
     pub fn macro_risk() -> Self {
-        Self { quote: true, indicators: true, fundamentals: true, macro_ctx: true, scores: Self::S_MACRO | Self::S_RISK, ..Self::NONE }
+        Self {
+            quote: true,
+            indicators: true,
+            fundamentals: true,
+            macro_ctx: true,
+            scores: Self::S_MACRO | Self::S_RISK,
+            derived: derived::RANGE | derived::TECH,
+            ..Self::NONE
+        }
     }
 }
 
@@ -384,6 +414,14 @@ fn render(
         && let Some(f) = &snap.fundamentals
     {
         render_fundamentals(&mut out, f, snap, l, lv);
+    }
+    if sec.derived != 0 {
+        // Con la tabla de indicadores delante no se repiten ATR %, volatilidad ni volumen relativo.
+        let d = derived::render(snap, l, sec.derived, !lv.extras, sec.indicators && snap.indicators.is_some());
+        if !d.is_empty() {
+            out.push('\n');
+            out.push_str(&d);
+        }
     }
     if sec.scores != 0 || sec.verdict {
         render_scores(&mut out, card, l, lv, sec);

@@ -14,7 +14,7 @@ pub struct Claim {
     pub text: String,
     #[serde(default)]
     pub figures: Vec<String>,
-    /// Solo en la etapa combinada (modo rápido): técnico, fundamental, sentimiento, macro.
+    /// Área del hallazgo (opcional; el digest la antepone si viene).
     #[serde(default)]
     pub area: String,
 }
@@ -113,25 +113,21 @@ fn s() -> Value {
     json!({"type": "string"})
 }
 
-fn claim_schema(with_area: bool) -> Value {
-    let mut props = json!({ "text": s() });
-    if with_area {
-        props["area"] = json!({"type": "string", "enum": ["technical", "fundamental", "sentiment", "macro_risk"]});
-    }
-    json!({"type": "object", "properties": props, "required": ["text"]})
+fn claim_schema() -> Value {
+    json!({"type": "object", "properties": { "text": s() }, "required": ["text"]})
 }
 
 fn list_of(item: Value, max: usize) -> Value {
     json!({"type": "array", "items": item, "maxItems": max})
 }
 
-pub fn stage_schema(with_area: bool, max_findings: usize) -> Value {
+pub fn stage_schema(max_findings: usize) -> Value {
     json!({
         "type": "object",
         "properties": {
             "stance": {"type": "string", "enum": ["bullish", "bearish", "neutral", "mixed"]},
             "confidence": {"type": "number"},
-            "findings": list_of(claim_schema(with_area), max_findings)
+            "findings": list_of(claim_schema(), max_findings)
         },
         "required": ["stance", "confidence", "findings"]
     })
@@ -141,7 +137,7 @@ pub fn debate_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "arguments": list_of(claim_schema(false), 4),
+            "arguments": list_of(claim_schema(), 4),
             "opponent_weakness": s(),
             "would_prove_me_wrong": s()
         },
@@ -159,9 +155,9 @@ pub fn judge_schema(deep: bool) -> Value {
         "thesis_valuation": s(),
         "thesis_technical": s(),
         "thesis_balance": s(),
-        "bull_case": list_of(claim_schema(false), 4),
-        "bear_case": list_of(claim_schema(false), 4),
-        "risks": list_of(claim_schema(false), 5),
+        "bull_case": list_of(claim_schema(), 4),
+        "bear_case": list_of(claim_schema(), 4),
+        "risks": list_of(claim_schema(), 5),
         "catalysts": list_of(json!({
             "type": "object",
             "properties": {"date": s(), "description": s(), "impact": {"type": "number"}},
@@ -194,6 +190,32 @@ pub fn judge_schema(deep: bool) -> Value {
         required.push("scenarios");
     }
     json!({"type": "object", "properties": props, "required": required})
+}
+
+/// Esquema del juez de `quick`: sin horizonte comentado, catalizadores, estrategia ni escenarios, con
+/// listas cortas. Lo que no pide queda vacío/`None` en `Analysis` (no se inventa).
+pub fn quick_judge_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["buy", "accumulate", "hold", "wait", "reduce", "avoid"]},
+            "confidence": {"type": "number"},
+            "horizon": {"type": "string", "enum": ["short", "medium", "long"]},
+            "summary": s(),
+            "thesis_valuation": s(),
+            "thesis_technical": s(),
+            "thesis_balance": s(),
+            "bull_case": list_of(claim_schema(), 1),
+            "bear_case": list_of(claim_schema(), 1),
+            "risks": list_of(claim_schema(), 3),
+            "would_change_if": list_of(s(), 2),
+            "uncertainty": s()
+        },
+        "required": [
+            "verdict", "confidence", "horizon", "summary", "thesis_valuation", "thesis_technical", "thesis_balance",
+            "bull_case", "bear_case", "risks", "would_change_if", "uncertainty"
+        ]
+    })
 }
 
 /// Esquema de la pasada de corrección de redacción: la misma lista de textos corregidos.

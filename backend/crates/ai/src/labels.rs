@@ -115,6 +115,10 @@ const WORDS: &[Word] = &[
     weak("close", LEVEL),
     weak("mid", LEVEL),
     weak("up", LEVEL),
+    // «Potencial»: cifra derivada hasta un objetivo de analistas (o crecimiento implícito en el PER);
+    // no respalda rentabilidades pasadas. En el contexto lo etiqueta la palabra de su fila, no esta.
+    amb("potencial", LEVEL.or(ANALYST).or(PE).or(EPS).or(INCOME), Fam::NONE),
+    amb("upside", LEVEL.or(ANALYST).or(PE).or(EPS).or(INCOME), Fam::NONE),
     // Indicadores técnicos.
     w("rsi", RSI),
     w("indice de fuerza relativa", RSI),
@@ -160,6 +164,8 @@ const WORDS: &[Word] = &[
     w("dividendo*", DIVIDEND),
     w("dividend*", DIVIDEND),
     w("payout", DIVIDEND),
+    w("fcf yield", BALANCE.or(RETURN)),
+    w("free cash flow yield", BALANCE.or(RETURN)),
     // Valoración.
     w("^PER", PE),
     w("p/e", PE),

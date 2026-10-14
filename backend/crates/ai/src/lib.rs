@@ -8,6 +8,7 @@ pub mod chat;
 mod config;
 pub mod context;
 mod dates;
+pub mod derived;
 pub mod fidelity;
 #[doc(hidden)]
 pub mod fixture;

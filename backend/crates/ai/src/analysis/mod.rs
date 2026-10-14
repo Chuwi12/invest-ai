@@ -3,7 +3,7 @@
 //!
 //! ```text
 //!  snapshot ─▶ saneado ─▶ puntuación + niveles (Rust) ─▶ contexto por etapa (solo lo que necesita)
-//!      ├─ quick:    [analista combinado] ────────────────────────────────▶ juez ─▶ verificación
+//!      ├─ quick:    [técnico][fundamental+noticias+riesgo] (cortas) ─────▶ juez breve ─▶ verificación
 //!      ├─ standard: [técnico][fundamental][sentimiento][macro/riesgo] ───▶ juez ─▶ verificación
 //!      └─ deep:     [técnico][fundamental][sentimiento][macro/riesgo] ─▶ [abogado alcista][abogado bajista] ─▶ juez ─▶ verificación
 //! ```
@@ -16,7 +16,7 @@
 //! hay algo sospechoso).
 
 mod gaps;
-mod levels;
+pub(crate) mod levels;
 pub mod lint;
 mod prompts;
 mod types;
@@ -39,7 +39,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use self::{
     levels::LevelPlan,
-    types::{Claim, DebateReport, JudgeOut, Rewrite, StageReport, debate_schema, judge_schema, rewrite_schema, stage_schema},
+    types::{Claim, DebateReport, JudgeOut, Rewrite, StageReport, debate_schema, judge_schema, quick_judge_schema, rewrite_schema, stage_schema},
     verify::{Checked, Verifier, calibrate},
 };
 use crate::{
@@ -57,7 +57,7 @@ use crate::{
 
 pub use prompts::{data_block, language_name, system_prompt};
 
-/// Profundidad por defecto según el modelo activo: ligeros → etapas fusionadas; pesados → todas.
+/// Profundidad por defecto según el modelo activo: ligeros → `quick` (2 etapas cortas); pesados → todas.
 pub fn default_depth(caps: &ModelCaps) -> AnalysisDepth {
     match caps.tier {
         Some(ModelTier::Light) => AnalysisDepth::Quick,
@@ -90,7 +90,7 @@ struct Usage {
 /// Ids estables de las etapas del progreso (contrato de `AnalysisEvent::Stage`).
 fn steps(depth: AnalysisDepth) -> Vec<&'static str> {
     match depth {
-        AnalysisDepth::Quick => vec!["snapshot", "technical", "judge", "verify"],
+        AnalysisDepth::Quick => vec!["snapshot", "technical", "fundamental", "judge", "verify"],
         AnalysisDepth::Standard => vec!["snapshot", "technical", "fundamental", "sentiment", "macro_risk", "judge", "verify"],
         AnalysisDepth::Deep => {
             vec!["snapshot", "technical", "fundamental", "sentiment", "macro_risk", "debate", "judge", "verify"]
@@ -101,8 +101,8 @@ fn steps(depth: AnalysisDepth) -> Vec<&'static str> {
 fn step_label(id: &str, depth: AnalysisDepth, lang: Lang) -> &'static str {
     match id {
         "snapshot" => lang.t("Preparando datos, puntuación y niveles", "Preparing data, scores and levels"),
-        "technical" if depth == AnalysisDepth::Quick => {
-            lang.t("Análisis combinado: técnico, fundamental, noticias y macro", "Combined analysis: technical, fundamental, news and macro")
+        "fundamental" if depth == AnalysisDepth::Quick => {
+            lang.t("Fundamentales, noticias y riesgo", "Fundamentals, news and risk")
         }
         "technical" => lang.t("Análisis técnico", "Technical analysis"),
         "fundamental" => lang.t("Análisis fundamental y valoración", "Fundamental and valuation analysis"),
@@ -141,6 +141,17 @@ pub struct AnalysisEngine {
     models: Arc<ModelManager>,
     cfg: AiConfig,
 }
+
+/// `quick` no reintenta la tesis genérica: en el 7B el reintento (otra generación completa del juez)
+/// era lo que se comía el ahorro de tiempo. Se mantiene la nota de calidad y el −0,05 de confianza.
+/// Poner a `true` para la ablación «quick con reintento».
+const QUICK_RETRY_GENERIC: bool = false;
+
+/// Tope de salida del juez de `quick` (esperado ~600 tokens; holgado para no truncar el JSON, que
+/// costaría una reparación).
+const QUICK_JUDGE_MAX_TOKENS: u32 = 900;
+/// Tope de salida de cada etapa de `quick` (2 hallazgos de ≤20 palabras ≈ 130–200 tokens).
+const QUICK_STAGE_MAX_TOKENS: u32 = 300;
 
 /// Cifras distintas mínimas que debe citar la tesis según la profundidad.
 fn min_figures(depth: AnalysisDepth) -> usize {
@@ -280,9 +291,9 @@ impl AnalysisEngine {
         let stage_texts: Vec<String> = stages
             .iter()
             .map(|st| match st {
-                Stage::Combined => built.text.clone(),
-                Stage::Technical => ctx_for(&Sections::technical()),
+                Stage::Technical | Stage::QuickTechnical => ctx_for(&Sections::technical()),
                 Stage::Fundamental => ctx_for(&Sections::fundamental()),
+                Stage::QuickFundamental => ctx_for(&quick_fundamental_sections()),
                 Stage::Sentiment => ctx_for(&Sections::sentiment()),
                 Stage::MacroRisk => ctx_for(&Sections::macro_risk()),
             })
@@ -311,12 +322,12 @@ impl AnalysisEngine {
             .enumerate()
             .map(|(i, st)| {
                 let user = format!("{}{}", data_block(&stage_texts[i]), prompts::with_language(st.task(), &lang_code));
-                let schema = stage_schema(st.combined(), if st.combined() { 6 } else { 4 });
+                let schema = stage_schema(st.max_findings());
                 let (system, caps, usage, prog) = (&system, &caps, &usage, &prog);
                 let id = st.id();
                 async move {
                     prog.at(id);
-                    (i, self.structured::<StageReport>(caps, system, user, &schema, 600, usage).await)
+                    (i, self.structured::<StageReport>(caps, system, user, &schema, st.max_tokens(), usage).await)
                 }
                 .boxed()
             })
@@ -398,14 +409,20 @@ impl AnalysisEngine {
         // --- Juez ---
         prog.at("judge");
         let deep = depth == AnalysisDepth::Deep;
-        let judge_ctx = format!("{judge_text}\n{levels_block}");
-        let judge_user = format!(
-            "{}{}",
-            data_block(&judge_ctx),
-            prompts::with_language(prompts::judge_task(lang, &digest, card.verdict, debated, deep, &lang_code), &lang_code)
-        );
-        let judge_max = self.cfg.max_output_tokens.unwrap_or(2048).max(if deep { 2600 } else { 1800 });
-        let schema = judge_schema(deep);
+        let quick = depth == AnalysisDepth::Quick;
+        // quick: el juez no escribe estrategia ni usa los niveles (los calcula Rust y salen en `levelsNote`).
+        let (judge_ctx, judge_task) = if quick {
+            (judge_text.clone(), prompts::quick_judge_task(lang, &digest, card.verdict, &lang_code))
+        } else {
+            (format!("{judge_text}\n{levels_block}"), prompts::judge_task(lang, &digest, card.verdict, debated, deep, &lang_code))
+        };
+        let judge_user = format!("{}{}", data_block(&judge_ctx), prompts::with_language(judge_task, &lang_code));
+        let judge_max = if quick {
+            self.cfg.max_output_tokens.map_or(QUICK_JUDGE_MAX_TOKENS, |m| m.min(QUICK_JUDGE_MAX_TOKENS))
+        } else {
+            self.cfg.max_output_tokens.unwrap_or(2048).max(if deep { 2600 } else { 1800 })
+        };
+        let schema = if quick { quick_judge_schema() } else { judge_schema(deep) };
         let msgs = vec![WireMessage::system(&system), WireMessage::user(judge_user)];
         let mut quality_notes: Vec<String> = Vec::new();
         let mut generic_penalty = 0usize;
@@ -413,7 +430,15 @@ impl AnalysisEngine {
         if let Ok((j, raw)) = &judged {
             let min = min_figures(depth);
             let spec = lint::specificity(&j.full_thesis());
-            if spec.is_generic(min) {
+            if spec.is_generic(min) && quick && !QUICK_RETRY_GENERIC {
+                tracing::info!(figures = spec.figures, "tesis genérica en quick: sin reintento");
+                generic_penalty = 1;
+                quality_notes.push(tr!(
+                    lang,
+                    "La tesis es poco específica (modo rápido, sin reintento): se redujo la confianza.",
+                    "The thesis is not specific enough (quick mode, no retry): confidence was reduced."
+                ));
+            } else if spec.is_generic(min) {
                 tracing::info!(figures = spec.figures, boilerplate = spec.boilerplate.len(), "tesis genérica: se pide reescribirla");
                 let mut retry = msgs;
                 retry.push(WireMessage::assistant(truncate_chars(raw, 7000)));
@@ -660,7 +685,10 @@ enum Stage {
     Fundamental,
     Sentiment,
     MacroRisk,
-    Combined,
+    /// quick: técnico corto (2 hallazgos).
+    QuickTechnical,
+    /// quick: fundamental + noticias + macro/riesgo en un informe corto (2 hallazgos).
+    QuickFundamental,
 }
 
 impl Stage {
@@ -670,38 +698,55 @@ impl Stage {
             Self::Fundamental => prompts::fundamental_task(),
             Self::Sentiment => prompts::sentiment_task(),
             Self::MacroRisk => prompts::macro_task(),
-            Self::Combined => prompts::combined_task(),
+            Self::QuickTechnical => prompts::quick_technical_task(),
+            Self::QuickFundamental => prompts::quick_fundamental_task(),
         }
     }
-    fn combined(self) -> bool {
-        self == Self::Combined
+    fn quick(self) -> bool {
+        matches!(self, Self::QuickTechnical | Self::QuickFundamental)
+    }
+    fn max_findings(self) -> usize {
+        if self.quick() { 2 } else { 4 }
+    }
+    fn max_tokens(self) -> u32 {
+        if self.quick() { QUICK_STAGE_MAX_TOKENS } else { 600 }
     }
     fn id(self) -> &'static str {
         match self {
-            Self::Technical | Self::Combined => "technical",
-            Self::Fundamental => "fundamental",
+            Self::Technical | Self::QuickTechnical => "technical",
+            Self::Fundamental | Self::QuickFundamental => "fundamental",
             Self::Sentiment => "sentiment",
             Self::MacroRisk => "macro_risk",
         }
     }
     fn label(self, l: Lang) -> &'static str {
         match self {
-            Self::Technical => l.t("Analista técnico", "Technical analyst"),
+            Self::Technical | Self::QuickTechnical => l.t("Analista técnico", "Technical analyst"),
             Self::Fundamental => l.t("Analista fundamental", "Fundamental analyst"),
+            Self::QuickFundamental => l.t("Fundamentales, noticias y riesgo", "Fundamentals, news and risk"),
             Self::Sentiment => l.t("Sentimiento y noticias", "Sentiment and news"),
             Self::MacroRisk => l.t("Macro y riesgo", "Macro and risk"),
-            Self::Combined => l.t("Analista combinado", "Combined analyst"),
         }
     }
 }
 
 fn stage_plan(depth: AnalysisDepth) -> Vec<Stage> {
     match depth {
-        AnalysisDepth::Quick => vec![Stage::Combined],
+        AnalysisDepth::Quick => vec![Stage::QuickTechnical, Stage::QuickFundamental],
         AnalysisDepth::Standard | AnalysisDepth::Deep => {
             vec![Stage::Technical, Stage::Fundamental, Stage::Sentiment, Stage::MacroRisk]
         }
     }
+}
+
+/// Contexto de la segunda etapa de `quick`: lo fundamental, las noticias y el entorno macro/riesgo,
+/// sin el bloque de indicadores técnicos (ya lo ve la etapa técnica) ni los suyos en la tabla.
+fn quick_fundamental_sections() -> Sections {
+    let mut s = Sections::fundamental();
+    s.news = true;
+    s.macro_ctx = true;
+    s.scores |= Sections::S_SENTIMENT | Sections::S_MACRO | Sections::S_RISK;
+    s
 }
 
 fn render_stage(label: &str, rep: &StageReport, checked: &[Checked], lang: Lang) -> String {
@@ -882,7 +927,7 @@ pub fn audit_figures(snapshot: &AssetSnapshot, lang_code: &str, num_ctx: u32, te
     let built = build_context(&snap, &card, &opts, &mut registry);
     let mut idx = NumberIndex::with_dates(dates_in_data(&snap));
     idx.add_context(&built.text);
-    for sec in [Sections::technical(), Sections::fundamental(), Sections::sentiment(), Sections::macro_risk(), Sections::judge()] {
+    for sec in [Sections::technical(), Sections::fundamental(), Sections::sentiment(), Sections::macro_risk(), quick_fundamental_sections(), Sections::judge()] {
         idx.add_context(&build_context_sections(&snap, &card, &opts, &mut registry, &sec).text);
     }
     let plan_now = levels::plan(&snap, Verdict::Accumulate, lang);

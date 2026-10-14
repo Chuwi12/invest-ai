@@ -73,6 +73,8 @@ pub enum Segment {
     Scores,
     /// Entrada, stop y objetivos calculados en Rust a partir de los datos.
     Levels,
+    /// Sección «Cifras derivadas»: porcentajes y ratios calculados en Rust.
+    Derived,
     Macro,
     /// Noticia con su etiqueta (`N3`).
     News(String),
@@ -885,6 +887,8 @@ fn classify_heading(h: &str) -> Segment {
         Segment::Fundamentals
     } else if starts(&["Puntuaciones", "Quantitative scores"]) {
         Segment::Scores
+    } else if starts(&["Cifras derivadas", "Derived figures"]) {
+        Segment::Derived
     } else if starts(&["Entorno macro", "Macro environment", "Macro"]) {
         Segment::Macro
     } else if starts(&["Noticias", "News"]) {
@@ -1308,6 +1312,50 @@ mod tests {
         // (-0.7 y +4.6 son derivadas del modelo y no están en los datos: caían ya antes.)
         assert_eq!(bad("El precio está cerca del soporte de 82850 (-0.7%) y la resistencia de 87307.83 (+4.6%), con una recompensa/riesgo de 6.7."), ["-0.7", "+4.6", "6.7"]);
         assert_eq!(bad("El resumen: la recompensa/riesgo de 6.7 y la rentabilidad a 1 mes de 6.7%."), ["6.7"]);
+    }
+
+    /// Contexto real del fixture con el objetivo medio de analistas un 3,2 % por debajo del precio y
+    /// la rentabilidad a 1 mes forzada a 6,7 % (la coincidencia casual del fallo de qwen3).
+    fn derived_ctx() -> (NumberIndex, String) {
+        use crate::{context, fixture, lang::Lang, scoring};
+        let mut snap = fixture::stock_snapshot();
+        let price = snap.quote.as_ref().unwrap().price;
+        snap.fundamentals.as_mut().unwrap().analyst_target_mean = Some(price * 0.968);
+        snap.indicators.as_mut().unwrap().return1m = Some(0.067);
+        let card = scoring::score(&snap, Lang::Es);
+        let built = context::build_context(&snap, &card, &context::ContextOptions { max_tokens: 6000, lang: Lang::Es }, &mut context::NewsRegistry::new());
+        (NumberIndex::from_context(&built.text), built.text)
+    }
+
+    #[test]
+    fn a_derived_upside_is_verified_by_label_and_by_value() {
+        let (idx, text) = derived_ctx();
+        assert!(text.contains("| Potencial hasta el objetivo de analistas | medio -3.2%"), "{text}");
+        let bad = |t: &str| idx.unverified(t).len();
+        assert_eq!(bad("El precio cotiza con un potencial del −3,2 % hasta el objetivo medio de los analistas."), 0);
+        assert_eq!(bad("Hay un potencial del -3.2% hasta el objetivo."), 0);
+        assert_eq!(bad("El upside hasta el objetivo de analistas es -3.2%."), 0);
+        // Un potencial que no está en los datos, o que es otra métrica (rentabilidad a 1 mes = 6,7 %), no pasa.
+        assert_eq!(bad("potencial del 12,5 % hasta el objetivo"), 1);
+        assert_eq!(bad("un potencial del 6.7 % hasta el objetivo"), 1, "6.7 es la rentabilidad a 1 mes");
+        assert_eq!(bad("la rentabilidad a 1 mes fue +6.7%"), 0);
+        assert_eq!(bad("el potencial del 6.7 % es limitado"), 1, "«potencial» sin objetivo tampoco se respalda con una rentabilidad pasada");
+    }
+
+    #[test]
+    fn reward_risk_6_7_still_falls_when_the_data_says_otherwise_with_derived_figures_present() {
+        let (idx, text) = derived_ctx();
+        let rr_line = text.lines().find(|l| l.contains("| Recompensa/riesgo hasta el primer objetivo |")).expect("fila de recompensa/riesgo");
+        let rr: f64 = rr_line.split('|').nth(2).unwrap().trim().parse().unwrap();
+        assert!((rr - 6.7).abs() > 0.5, "el fixture no debe tener ya 6.7: {rr}");
+        let bad = |t: &str| idx.unverified(t).len();
+        assert_eq!(bad("con una recompensa/riesgo de 6,7"), 1);
+        assert_eq!(bad(&format!("la recompensa/riesgo de {rr:.1} es desfavorable")), 0);
+        assert_eq!(bad(&format!("el R/R es {rr:.1}")), 0);
+        // Distancias derivadas: respaldan las frases que las citan con su etiqueta.
+        let dist = text.lines().find(|l| l.contains("| Distancia al máximo de 52 semanas |")).expect("fila de máximo 52 s");
+        let v = dist.split('|').nth(2).unwrap().trim().to_string();
+        assert_eq!(bad(&format!("el precio está a {v} del máximo de 52 semanas")), 0);
     }
 
     #[test]

@@ -6,7 +6,7 @@ Estado: **funcional, en afinado de calidad**. Se actualiza tras cada parte.
 
 ```text
 snapshot ─▶ saneado ─▶ puntuación (scoring.rs) + niveles (levels.rs, Rust)
-   ├─ quick:    [combinado] ──────────────────────────────▶ juez ─▶ verificación
+   ├─ quick:    [técnico][fundamental+noticias+riesgo] (2 hallazgos c/u) ─▶ juez breve ─▶ verificación
    ├─ standard: [técnico][fundamental][sentimiento][macro/riesgo] ─▶ juez ─▶ verificación
    └─ deep:     lo anterior ─▶ [abogado alcista][abogado bajista] ─▶ juez (+ escenarios) ─▶ verificación
 ```
@@ -28,7 +28,7 @@ snapshot ─▶ saneado ─▶ puntuación (scoring.rs) + niveles (levels.rs, Ru
 - **Tesis específica**: el juez rellena tres campos (`thesis_valuation/technical/balance`) que se unen en tres
   párrafos; cada párrafo lleva al final sus fuentes (proveedor y hora). `lint::specificity` exige un mínimo de cifras
   distintas (quick 5, standard 7, deep 9), cifras en cada párrafo y que no haya frases plantilla; si falla, **un**
-  reintento con feedback; si sigue genérica: nota de calidad y −0,05 de confianza.
+  reintento con feedback (**quick no reintenta**: nota de calidad y −0,05 de confianza; `QUICK_RETRY_GENERIC` en `mod.rs`); si sigue genérica: nota de calidad y −0,05 de confianza.
 - **Castellano**: guía de estilo + términos del glosario y ejemplos BAD/GOOD solo en el prompt del juez (lo que ve el
   usuario). `lint::spanish_issues` (sin diccionario: otros alfabetos, inglés colado, calcos conocidos como «trancos»,
   palabras repetidas) revisa todos los textos del juez; **solo si detecta algo** se hace una llamada de corrección
@@ -39,8 +39,8 @@ snapshot ─▶ saneado ─▶ puntuación (scoring.rs) + niveles (levels.rs, Ru
 - **Avisos**: `dataWarnings` = solo carencias reales (`snapshot.missing`, campos vacíos, huecos de la puntuación;
   `gaps.rs`). La nota de método va en `method`; descartes, cifras sin verificar, reintentos… en `qualityNotes`.
 - **Progreso**: `AnalysisEngine::analyze_progress` emite `AnalysisEvent::Stage` (ids estables `snapshot`, `technical`,
-  `fundamental`, `sentiment`, `macro_risk`, `debate`, `judge`, `verify`; `index` desde 1). quick: snapshot, technical
-  (etiqueta «Análisis combinado…»), judge, verify (total 4); standard: 7; deep: 8 (con debate).
+  `fundamental`, `sentiment`, `macro_risk`, `debate`, `judge`, `verify`; `index` desde 1). quick: snapshot, technical,
+  fundamental (etiqueta «Fundamentales, noticias y riesgo»), judge, verify (total 5); standard: 7; deep: 8 (con debate).
 
 ## Hecho
 - Cliente Ollama, catálogo y `ModelManager`, hardware, chat con tools, scoring, contexto, fidelidad numérica (previo).
@@ -64,6 +64,23 @@ snapshot ─▶ saneado ─▶ puntuación (scoring.rs) + niveles (levels.rs, Ru
 - `analysis.thesis` conserva «Incertidumbre:» (prefijo exacto; el frontend lo extrae). «La conclusión cambiaría si» ya NO
   va en la tesis: solo en `wouldChangeIf`.
 
+## Rediseño de `quick` (sin fusionar etapas)
+Problema medido (`model-eval.md`): el `quick` de una llamada combinada + juez completo tardaba ~34 s frente a ~36 s de `standard`
+(2,5 llamadas, 6,4k in / 1,4k out), con tesis menos específica. El tiempo lo domina la salida (~1,4k tokens, casi todos del
+juez, que escribía lo mismo que en standard) y los reintentos por tesis genérica (otra generación completa del juez).
+Diseño (estimado, **pendiente de medir** en la ablación):
+- **Dos etapas cortas** con el contexto recortado a lo suyo: técnico (`Sections::technical`) y fundamental+noticias+riesgo
+  (fundamentales, noticias, macro y puntuaciones de sentimiento/macro/riesgo; sin el bloque técnico). 2 hallazgos de ≤20
+  palabras cada una, tope 300 tokens, esquema `maxItems 2`.
+- **Juez breve** (`quick_judge_task` / `quick_judge_schema`, tope 900): veredicto, confianza, horizonte, resumen (≤35
+  palabras), tres párrafos de tesis (≤35 palabras, ≥2 cifras cada uno), 1 punto alcista y 1 bajista, 3 riesgos, 2
+  «cambiaría si», incertidumbre. No pide `horizon_note`, catalizadores, entrada/salida ni escenarios (salen `None`/vacíos;
+  la estrategia solo lleva la línea de tamaño de posición de Rust, y los niveles salen en `levelsNote`). No recibe el
+  bloque de niveles. El prompt lleva un ejemplo BAD/GOOD con marcadores `<…>` (no cifras) para evitar la tesis genérica.
+- **Sin reintento por tesis genérica** en quick (`QUICK_RETRY_GENERIC = false`).
+- Coste estático (fixture, tokens estimados con `tokens.rs`): ver `static_cost_report_and_quick_is_cheaper_than_standard`
+  (`cargo test -p ai static_cost -- --nocapture`). Antes: quick 2 llamadas, topes de salida 600+2048; ahora 3 llamadas, 300+300+900.
+
 ## Decisiones
 - Unidades de memoria: GiB (2^30 bytes) en todos los `*_gb`.
 - El tiempo lo domina la **generación** (~38 tok/s), no la entrada: se recorta salida (sin `figures`, `missing`,
@@ -79,7 +96,7 @@ snapshot ─▶ saneado ─▶ puntuación (scoring.rs) + niveles (levels.rs, Ru
   están en `method` y `qualityNotes`.
 - `tests/api.rs` (`analysis_generate_store_and_list`): actualizada la lista de claves de `Analysis`.
 - Cableado: nada nuevo en `main.rs`. `routes/mod.rs`: una línea (`/assets/{id}/analysis/stream` en el grupo streaming).
-- `AnalysisEvent::Stage.index` empieza en 1 y `total` depende de la profundidad (4/7/8).
+- `AnalysisEvent::Stage.index` empieza en 1 y `total` depende de la profundidad (5/7/8).
 
 ## Prueba real (RTX 4070 8 GB, qwen2.5:7b, Ollama compartido con otros agentes: los tiempos tienen ruido)
 
@@ -201,3 +218,26 @@ por token que qwen2.5:7b) y cuesta 2,1–2,5× el tiempo; el veredicto coincide 
 - **Lint**: `FINANCE_TERMS` en `lint.rs` = términos que el español financiero usa sin traducir. Criterio: (1) sin equivalente corriente o el inglés es
   el habitual, (2) sustantivo o locución fija, (3) solo como término completo (la locución admite espacio/guion/barra y plural en «s»). Añadir aquí, no en `ENGLISH`.
 - Herramienta de medida: `compare_models reverify <snapshot.json> <salida.json>…` (re-verifica salidas guardadas con la verificación actual).
+
+## Cifras derivadas calculadas en Rust (`ai/src/derived.rs`)
+- Motivo (`model-eval.md`): el 7B y qwen3 calculaban a mano «recompensa/riesgo 6,7», leían la distancia al máximo como «corrección
+  esperada» y un objetivo de analistas por debajo del precio como ganancia. Ahora el contexto lleva la sección **«Cifras derivadas
+  (calculadas, no las recalcules)»** (`| Cifra | Valor | Base |`, % con signo y la fórmula en la tercera columna); el system prompt (regla 2)
+  remite a ella.
+- Filas (cada una solo si hay dato de base; si no, no existe): potencial hasta el objetivo de analistas (medio, máximo, mínimo; no si el
+  objetivo está en otra moneda o `analyst_count = 0`); distancia a soportes/resistencias, a la zona de entrada, al stop y a los objetivos, y
+  recompensa/riesgo (del plan de `levels.rs` con veredicto «acumular», el mismo que el bloque «Niveles calculados» y el informe); distancia al
+  máximo y mínimo de 52 semanas y al máximo histórico (descriptivas, la cabecera dice «NO previsión»); precio frente a SMA20/50/200; ATR14 %,
+  volatilidad 30d y volumen relativo (solo si el contexto no trae ya la tabla de indicadores); crecimiento de beneficios implícito
+  (P/E trailing / P/E forward − 1) y rentabilidad por FCF (FCF/capitalización) solo con la misma moneda de cuentas y cotización (R-05) y
+  fuera de bancos, fondos, cripto y bonos; cripto: oferta circulante / máxima (no si circulante > máxima).
+- Por etapa (`Sections::derived`, máscara `derived::*`): técnico = soportes/resistencias + rango + medias; fundamental = analistas + rango +
+  valoración; macro/riesgo = rango + técnico; juez = analistas + niveles + rango + valoración; contexto completo (quick, chat) = todo.
+  Con el presupuesto reducido (`!lv.extras`) solo las filas «core».
+- Coste medido (estimador de `tokens.rs`, ~4 caracteres/token), AAPL / BTC del fixture: completo +317 / +277; juez +200 / +160; técnico
+  +183 / +219; fundamental +140 / +102; macro/riesgo +93 / +128. Test `the_section_adds_few_tokens_per_stage` fija el tope.
+- Verificación (R-38): `Segment::Derived`; palabras nuevas en `labels.rs`: «potencial»/«upside» (admiten nivel, analistas, PER, BPA y
+  crecimiento, NO rentabilidades pasadas) y «FCF yield». «Potencial del −3,2 % hasta el objetivo» se verifica; «recompensa/riesgo 6,7» sigue
+  cayendo cuando el dato es otro.
+- Límites: sin medir con el modelo real (no se lanzó Ollama); la sección es nueva para el LLM y puede cambiar cómo cita cifras. Las filas
+  repiten algunos números del plan (más tokens, no más datos). `analysis::levels` pasa a `pub(crate)` para que `derived` use el plan.

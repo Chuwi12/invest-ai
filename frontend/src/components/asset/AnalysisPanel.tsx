@@ -10,7 +10,7 @@ import { formatDurationMs, medianDuration, type MedianDuration } from '@/lib/ana
 import { formatDateTime, formatInt, formatPercent, formatPrice, formatRelative } from '@/lib/format'
 
 const DEPTH_INFO: Record<AnalysisDepth, { label: string; hint: string }> = {
-  quick: { label: 'Rápido', hint: 'Solo los datos ya reunidos; sin consultas extra.' },
+  quick: { label: 'Rápido', hint: 'Dos análisis cortos (técnico; fundamentales, noticias y riesgo) y un veredicto breve. Sin escenarios ni estrategia.' },
   standard: { label: 'Estándar', hint: 'Datos en vivo, indicadores, fundamentales y noticias.' },
   deep: { label: 'Profundo', hint: 'Más herramientas, debate entre posturas y escenarios con probabilidades.' },
 }
