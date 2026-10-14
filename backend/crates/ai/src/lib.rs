@@ -7,11 +7,13 @@ pub mod catalog;
 pub mod chat;
 mod config;
 pub mod context;
+mod dates;
 pub mod fidelity;
 #[doc(hidden)]
 pub mod fixture;
 mod fmt;
 pub mod hardware;
+mod labels;
 mod lang;
 pub mod models;
 pub mod ollama;

@@ -45,7 +45,7 @@ use self::{
 use crate::{
     config::AiConfig,
     context::{ContextOptions, NewsRegistry, Sections, build_context, build_context_sections},
-    fidelity::{Segment, extract_numbers},
+    fidelity::{NumberIndex, Segment, extract_numbers},
     fmt,
     lang::{Lang, tr},
     models::{ModelCaps, ModelManager},
@@ -795,7 +795,10 @@ fn explain_scenarios(sc: &mut [Scenario], plan: &LevelPlan, snap: &AssetSnapshot
         let mut kept = Vec::new();
         let mut dropped = 0;
         for sent in s.description.split_inclusive(". ").map(str::trim).filter(|x| !x.is_empty()) {
-            if extract_numbers(sent).iter().filter(|n| !n.exempt).all(|n| n.values().any(|v| matches(v.abs()) || matches(v))) {
+            // Los números de una fecha escrita («30 de octubre») ya los revisó `prose` como fecha.
+            let dates = crate::dates::extract_dates(sent);
+            let in_date = |n: &crate::fidelity::Num| dates.iter().any(|d| n.span.start >= d.span.start && n.span.end <= d.span.end);
+            if extract_numbers(sent).iter().filter(|n| !n.exempt && !in_date(n)).all(|n| n.values().any(|v| matches(v.abs()) || matches(v))) {
                 kept.push(sent);
             } else {
                 dropped += 1;
@@ -851,6 +854,62 @@ fn dates_in_data(snap: &AssetSnapshot) -> std::collections::HashSet<NaiveDate> {
     d
 }
 
+/// Resultado de re-verificar un texto ya generado (ver `audit_figures`).
+#[doc(hidden)]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AuditRow {
+    pub field: String,
+    pub labeled_ok: usize,
+    pub unlabeled_ok: usize,
+    pub not_in_data: usize,
+    /// (cifra, palabra del texto, rótulo de los datos, fragmento)
+    pub wrong_label: Vec<(String, String, String, String)>,
+    pub unknown_dates: Vec<(String, String)>,
+}
+
+/// Re-verifica textos ya generados (campo, texto) contra el contexto que habría visto el modelo, con el
+/// mismo índice que el motor (contexto completo, el de cada etapa, el del juez y el bloque de niveles).
+/// Sirve para medir el efecto de cambios en la verificación sobre salidas guardadas (ejemplo
+/// `compare_models reverify`).
+#[doc(hidden)]
+pub fn audit_figures(snapshot: &AssetSnapshot, lang_code: &str, num_ctx: u32, texts: &[(String, String)]) -> Vec<AuditRow> {
+    let lang = Lang::from_code(lang_code);
+    let snap = sanitize_snapshot(snapshot);
+    let card = scoring::score(&snap, lang);
+    let mut registry = NewsRegistry::new();
+    let max_tokens = (num_ctx as usize * 40 / 100).clamp(1200, 16_000);
+    let opts = ContextOptions { max_tokens, lang };
+    let built = build_context(&snap, &card, &opts, &mut registry);
+    let mut idx = NumberIndex::with_dates(dates_in_data(&snap));
+    idx.add_context(&built.text);
+    for sec in [Sections::technical(), Sections::fundamental(), Sections::sentiment(), Sections::macro_risk(), Sections::judge()] {
+        idx.add_context(&build_context_sections(&snap, &card, &opts, &mut registry, &sec).text);
+    }
+    let plan_now = levels::plan(&snap, Verdict::Accumulate, lang);
+    let plan_wait = levels::plan(&snap, Verdict::Wait, lang);
+    idx.add_text(&levels_block(plan_now.as_ref(), plan_wait.as_ref(), lang), Segment::Levels);
+    let snippet = |t: &str, at: usize| {
+        let a = t.char_indices().map(|(i, _)| i).rev().find(|i| *i <= at.saturating_sub(70)).unwrap_or(0);
+        let b = t.char_indices().map(|(i, _)| i).find(|i| *i >= at + 50).unwrap_or(t.len());
+        t[a..b].replace('\n', " ")
+    };
+    texts
+        .iter()
+        .map(|(field, text)| {
+            let r = idx.review(text);
+            let mut row = AuditRow { field: field.clone(), labeled_ok: r.labeled_ok, unlabeled_ok: r.unlabeled_ok, not_in_data: 0, wrong_label: vec![], unknown_dates: vec![] };
+            for f in &r.findings {
+                match &f.kind {
+                    crate::fidelity::FindingKind::NotInData => row.not_in_data += 1,
+                    crate::fidelity::FindingKind::WrongLabel { said, actual } => row.wrong_label.push((f.raw.clone(), said.clone(), actual.clone(), snippet(text, f.start))),
+                    crate::fidelity::FindingKind::UnknownDate => row.unknown_dates.push((f.raw.clone(), snippet(text, f.start))),
+                }
+            }
+            row
+        })
+        .collect()
+}
+
 /// El modelo a veces inventa la fecha de un catalizador (qwen3 pone fechas sueltas como 25-oct que no
 /// figuran en ningún sitio): se conserva solo si está entre las fechas de los datos.
 fn catalyst_date(date: Option<NaiveDate>, allowed: &std::collections::HashSet<NaiveDate>) -> Option<NaiveDate> {
@@ -860,10 +919,17 @@ fn catalyst_date(date: Option<NaiveDate>, allowed: &std::collections::HashSet<Na
 /// Convierte la salida del juez (ya sin confiar en ella) en un `Analysis` parcial: el llamador
 /// completa id, fuentes, avisos, niveles, modelo y marcas de tiempo.
 fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifier<'_>, lang: Lang, deep: bool) -> Analysis {
-    let claims = |list: &[Claim], v: &mut Verifier<'_>| -> Vec<String> { list.iter().filter_map(|c| v.claim(c)).map(|c| c.text).collect() };
-    let bull_case = claims(&j.bull_case, v);
-    let bear_case = claims(&j.bear_case, v);
-    let risks = claims(&j.risks, v);
+    let claims = |list: &[Claim], v: &mut Verifier<'_>| -> Vec<Checked> { list.iter().filter_map(|c| v.claim(c)).collect() };
+    let mut bull_case = claims(&j.bull_case, v);
+    let mut bear_case = claims(&j.bear_case, v);
+    let mut risks = claims(&j.risks, v);
+    // El mismo punto repetido (dentro de una lista o entre ellas) no aporta: se compara sin la cita de fuente.
+    let removed = lint::dedupe_bullets(&mut [&mut bull_case, &mut bear_case, &mut risks], |c| c.plain.as_str());
+    if removed > 0 {
+        tracing::info!(removed, "viñetas repetidas quitadas de bullCase/bearCase/risks");
+    }
+    let texts = |l: Vec<Checked>| -> Vec<String> { l.into_iter().map(|c| c.text).collect() };
+    let (bull_case, bear_case, risks) = (texts(bull_case), texts(bear_case), texts(risks));
 
     let summary = v.prose(&j.summary, lang.t("resumen", "summary"));
     let mut thesis = v.prose_cited(&j.full_thesis(), lang.t("tesis", "thesis"));

@@ -36,12 +36,32 @@
 //! el texto cercano expresa una bajada (caída, pérdida, por debajo…): así no se descarta una cifra
 //! correcta por estar escrita en palabras, y «sube un 3.2%» no se da por buena si el dato es -3.2%.
 //!
+//! # Etiqueta de la cifra (`labels`)
+//! No basta que el valor exista: «recompensa/riesgo 6,7» pasaba porque 6,7 era la rentabilidad a 1
+//! mes. Cada cifra del contexto se indexa con la métrica de su fila/etiqueta («Rendimientos (1m)»,
+//! «RSI14», «P/E forward»…) y la de la salida se compara con la palabra que la acompaña (mención más
+//! cercana a la izquierda, o a la derecha si no hay; sin cruzar `, ; | .` ni otra cifra). Si coincide
+//! en valor SOLO con datos de otra métrica conocida, se trata como no verificada (`FindingKind::WrongLabel`).
+//! Sin etiqueta reconocible cerca, o con un dato sin etiqueta (noticias, texto libre), sigue valiendo
+//! solo el valor. Las métricas se agrupan en familias gruesas (todos los niveles de precio juntos…).
+//!
+//! # Fechas
+//! Con `NumberIndex::with_dates` también se comprueban las fechas escritas (`dates`): «12 oct 2026»,
+//! «2026-11-02», «2 de noviembre», «noviembre de 2026»…; se tratan como las cifras (⚠ en prosa,
+//! descarte en afirmaciones). Los números dentro de una fecha dejan de contar como cifras sueltas.
+//!
 //! Exentos (no son datos): enteros pequeños sin unidad (≤ 12), años, números pegados a letras
 //! (`SMA200`, `RSI14`, `52w`, `N3`), fechas/horas (`2026-10-12`, `12/10/2026`, `14:03`) y los
 //! nombres de índices (`S&P 500`, `Nasdaq 100`…). Un rango de cifras (`81000-82000`) o un par
 //! (`81059.79/84014.13`) NO es una fecha: cada extremo se comprueba.
 
 use std::ops::Range;
+
+use crate::{
+    dates::{self, DateIndex},
+    labels::{self, Fam},
+    lang::{Lang, tr},
+};
 
 /// De qué parte del contexto sale una cifra.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -90,12 +110,12 @@ impl Num {
         0.5 * 10f64.powi(-(decimals as i32)) * scale
     }
 
-    fn tolerance(&self) -> f64 {
+    pub(crate) fn tolerance(&self) -> f64 {
         Self::tol(self.decimals, self.scale)
     }
 
     /// Todas las lecturas posibles: `(valor, tolerancia)`.
-    fn readings(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+    pub(crate) fn readings(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
         std::iter::once((self.value, self.tolerance()))
             .chain(self.alt.map(|(v, d)| (v, Self::tol(d, self.scale))))
     }
@@ -611,10 +631,76 @@ pub fn extract_numbers(text: &str) -> Vec<Num> {
         .collect()
 }
 
+/// Dato del contexto: la cifra, su tramo y la métrica de su fila/etiqueta (`labels`).
+#[derive(Debug, Clone)]
+struct Entry {
+    num: Num,
+    seg: Segment,
+    fam: Fam,
+    /// Rótulo legible («Rendimientos (1m)») para explicar un rechazo.
+    label: String,
+}
+
+/// Por qué una cifra o fecha no se da por verificada.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FindingKind {
+    /// La cifra no está en los datos.
+    NotInData,
+    /// Está en los datos, pero con otra etiqueta: `said` es la palabra del texto («recompensa/riesgo»)
+    /// y `actual` el rótulo de los datos con ese valor («Rendimientos (1m)»).
+    WrongLabel { said: String, actual: String },
+    /// Fecha escrita que no figura entre las de los datos.
+    UnknownDate,
+}
+
+/// Cifra o fecha del texto que no se pudo respaldar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Finding {
+    pub raw: String,
+    /// Posición (bytes) donde empieza.
+    pub start: usize,
+    /// Posición (bytes) donde se pone la marca ⚠ (tras el `%` o el año).
+    pub mark_end: usize,
+    pub kind: FindingKind,
+}
+
+impl Finding {
+    pub fn is_date(&self) -> bool {
+        self.kind == FindingKind::UnknownDate
+    }
+
+    /// Texto para los avisos al usuario.
+    pub fn describe(&self, lang: Lang) -> String {
+        match &self.kind {
+            FindingKind::WrongLabel { said, actual } => {
+                let (raw, said, actual) = (&self.raw, said, actual);
+                tr!(lang, "{raw} (en los datos es «{actual}», no «{said}»)", "{raw} (in the data it is «{actual}», not «{said}»)")
+            }
+            _ => self.raw.clone(),
+        }
+    }
+}
+
+/// Resultado de revisar un texto contra el índice.
+#[derive(Debug, Clone, Default)]
+pub struct Review {
+    /// El texto con ⚠ tras cada cifra o fecha sin respaldo.
+    pub marked: String,
+    pub findings: Vec<Finding>,
+    /// Tramos de datos que respaldan las cifras verificadas (solo los de etiqueta compatible).
+    pub segments: Vec<Segment>,
+    /// Cifras verificadas con una etiqueta de métrica reconocida y compatible.
+    pub labeled_ok: usize,
+    /// Cifras verificadas solo por valor (sin etiqueta reconocible cerca).
+    pub unlabeled_ok: usize,
+}
+
 /// Índice de las cifras presentes en un contexto.
 #[derive(Debug, Clone, Default)]
 pub struct NumberIndex {
-    entries: Vec<(Num, Segment)>,
+    entries: Vec<Entry>,
+    /// Fechas conocidas; `None` = no se comprueban las fechas (chat).
+    dates: Option<DateIndex>,
 }
 
 impl NumberIndex {
@@ -624,6 +710,13 @@ impl NumberIndex {
         let mut idx = Self::default();
         idx.add_context(text);
         idx
+    }
+
+    /// Índice que además comprueba las fechas escritas contra `known` y las que traiga el contexto.
+    pub fn with_dates(known: impl IntoIterator<Item = chrono::NaiveDate>) -> Self {
+        let mut d = DateIndex::default();
+        known.into_iter().for_each(|x| d.add(x));
+        Self { entries: Vec::new(), dates: Some(d) }
     }
 
     /// Añade otro contexto (p. ej. el de una etapa que mostró más noticias que el completo).
@@ -639,9 +732,20 @@ impl NumberIndex {
     }
 
     pub fn add_text(&mut self, text: &str, seg: Segment) {
-        // Las exentas (fechas, códigos, enteros pequeños) no son datos: no sirven de aval.
-        for n in extract_numbers(text).into_iter().filter(|n| !n.exempt) {
-            self.entries.push((n, seg.clone()));
+        if let Some(d) = self.dates.as_mut() {
+            d.add_text(text);
+        }
+        for line in text.lines() {
+            // Las exentas (fechas, códigos, enteros pequeños) no son datos: no sirven de aval.
+            let nums: Vec<Num> = extract_numbers(line).into_iter().filter(|n| !n.exempt).collect();
+            if nums.is_empty() {
+                continue;
+            }
+            let refs: Vec<&Num> = nums.iter().collect();
+            let labels = labels::entry_labels(line, &refs, &seg);
+            for (num, (fam, label)) in nums.into_iter().zip(labels) {
+                self.entries.push(Entry { num, seg: seg.clone(), fam, label });
+            }
         }
     }
 
@@ -653,66 +757,120 @@ impl NumberIndex {
         self.entries.is_empty()
     }
 
-    /// Segmentos donde aparece una cifra equivalente. Vacío = no está en el contexto.
+    /// Datos con el mismo valor que `n` (sin mirar la etiqueta).
+    fn hits(&self, n: &Num) -> Vec<&Entry> {
+        self.entries
+            .iter()
+            .filter(|e| {
+                n.readings().any(|(v, tol)| {
+                    let tol = tol.max(e.num.tolerance()) * 1.0001;
+                    (v - e.num.value).abs() <= tol || (n.neg_ok && (-v - e.num.value).abs() <= tol)
+                })
+            })
+            .collect()
+    }
+
+    /// Segmentos donde aparece una cifra equivalente, SOLO por valor. Vacío = no está en el contexto.
     pub fn find(&self, n: &Num) -> Vec<Segment> {
         let mut segs: Vec<Segment> = Vec::new();
-        for (e, s) in &self.entries {
-            let hit = n.readings().any(|(v, tol)| {
-                let tol = tol.max(e.tolerance()) * 1.0001;
-                (v - e.value).abs() <= tol || (n.neg_ok && (-v - e.value).abs() <= tol)
-            });
-            if hit && !segs.contains(s) {
-                segs.push(s.clone());
+        for e in self.hits(n) {
+            if !segs.contains(&e.seg) {
+                segs.push(e.seg.clone());
             }
         }
         segs
     }
 
-    /// Cifras de `text` que no están en el contexto (ignora las exentas).
-    pub fn unverified(&self, text: &str) -> Vec<Num> {
-        extract_numbers(text).into_iter().filter(|n| !n.exempt && self.find(n).is_empty()).collect()
+    /// Revisa un texto: cada cifra se busca por valor y, si la palabra que la acompaña es una métrica
+    /// conocida, el dato debe ser de una métrica compatible (`labels`); cada fecha escrita debe estar
+    /// entre las conocidas (si el índice las comprueba).
+    pub fn review(&self, text: &str) -> Review {
+        let nums = extract_numbers(text);
+        let dates = if self.dates.is_some() { dates::extract_dates(text) } else { Vec::new() };
+        let in_date = |n: &Num| dates.iter().any(|d| n.span.start >= d.span.start && n.span.end <= d.span.end);
+        let real: Vec<&Num> = nums.iter().filter(|n| !n.exempt && !in_date(n)).collect();
+        let t = labels::Text::new(text);
+        let mut findings: Vec<Finding> = Vec::new();
+        let mut segments: Vec<Segment> = Vec::new();
+        let (mut labeled_ok, mut unlabeled_ok) = (0, 0);
+        for (k, n) in real.iter().enumerate() {
+            let hits = self.hits(n);
+            let finding = |kind| Finding { raw: n.raw.clone(), start: n.span.start, mark_end: n.mark_end, kind };
+            if hits.is_empty() {
+                findings.push(finding(FindingKind::NotInData));
+                continue;
+            }
+            let floor = if k > 0 { t.ci(real[k - 1].mark_end) } else { 0 };
+            let ceil = real.get(k + 1).map_or(t.len(), |m| t.ci(m.span.start));
+            let claim = t.label(t.ci(n.span.start), t.ci(n.mark_end), floor, ceil).filter(|m| !m.fam.is_empty());
+            let ok: Vec<&Entry> = match claim {
+                Some(m) => hits.iter().copied().filter(|e| e.fam.is_empty() || e.fam.intersects(m.fam)).collect(),
+                None => hits.clone(),
+            };
+            if let (true, Some(m)) = (ok.is_empty(), claim) {
+                let mut actual: Vec<&str> = Vec::new();
+                for e in &hits {
+                    if !e.label.is_empty() && !actual.contains(&e.label.as_str()) {
+                        actual.push(&e.label);
+                    }
+                }
+                let kind = FindingKind::WrongLabel { said: t.slice(m.start, m.end), actual: actual.into_iter().take(2).collect::<Vec<_>>().join(" / ") };
+                findings.push(finding(kind));
+                continue;
+            }
+            if claim.is_some() {
+                labeled_ok += 1;
+            } else {
+                unlabeled_ok += 1;
+            }
+            for e in ok {
+                if !segments.contains(&e.seg) {
+                    segments.push(e.seg.clone());
+                }
+            }
+        }
+        if let Some(known) = &self.dates {
+            for d in dates.iter().filter(|d| !known.contains(d)) {
+                findings.push(Finding { raw: d.raw.clone(), start: d.span.start, mark_end: d.span.end, kind: FindingKind::UnknownDate });
+            }
+        }
+        findings.sort_by_key(|f| f.start);
+        let mut marked = String::with_capacity(text.len() + findings.len() * 3);
+        let mut last = 0;
+        for f in &findings {
+            marked.push_str(&text[last..f.mark_end]);
+            marked.push('⚠');
+            last = f.mark_end;
+        }
+        marked.push_str(&text[last..]);
+        Review { marked, findings, segments, labeled_ok, unlabeled_ok }
     }
 
-    /// Cifras citadas (lista `figures` del modelo): `Ok(segmentos)` si todas existen.
-    pub fn check_figures(&self, figures: &[String]) -> Result<Vec<Segment>, Vec<String>> {
+    /// Cifras (y fechas) de `text` que no se pueden respaldar (ignora las exentas).
+    pub fn unverified(&self, text: &str) -> Vec<Finding> {
+        self.review(text).findings
+    }
+
+    /// Cifras citadas (lista `figures` del modelo): `Ok(segmentos)` si todas están respaldadas.
+    pub fn check_figures(&self, figures: &[String]) -> Result<Vec<Segment>, Vec<Finding>> {
         let mut segs: Vec<Segment> = Vec::new();
         let mut bad = Vec::new();
         for f in figures {
-            for n in extract_numbers(f) {
-                if n.exempt {
-                    continue;
-                }
-                let found = self.find(&n);
-                if found.is_empty() {
-                    bad.push(n.raw.clone());
-                }
-                for s in found {
-                    if !segs.contains(&s) {
-                        segs.push(s);
-                    }
+            let r = self.review(f);
+            bad.extend(r.findings);
+            for s in r.segments {
+                if !segs.contains(&s) {
+                    segs.push(s);
                 }
             }
         }
         if bad.is_empty() { Ok(segs) } else { Err(bad) }
     }
 
-    /// Reescribe `text` marcando con `⚠` cada cifra no verificable. Devuelve el texto y las cifras.
-    pub fn mark_unverified(&self, text: &str) -> (String, Vec<String>) {
-        let bad = self.unverified(text);
-        if bad.is_empty() {
-            return (text.to_string(), vec![]);
-        }
-        let mut out = String::with_capacity(text.len() + bad.len() * 3);
-        let mut last = 0;
-        for n in &bad {
-            // El `%` (pegado o tras un espacio) forma parte de la cifra: la marca va después.
-            let end = n.mark_end;
-            out.push_str(&text[last..end]);
-            out.push('⚠');
-            last = end;
-        }
-        out.push_str(&text[last..]);
-        (out, bad.into_iter().map(|n| n.raw).collect())
+    /// Reescribe `text` marcando con `⚠` cada cifra o fecha no verificable. Devuelve el texto y los hallazgos.
+    pub fn mark_unverified(&self, text: &str) -> (String, Vec<Finding>) {
+        let r = self.review(text);
+        if r.findings.is_empty() { (text.to_string(), vec![]) } else { (r.marked, r.findings) }
     }
 }
 
@@ -826,7 +984,7 @@ mod tests {
         let ok = idx.check_figures(&["RSI14 72.3".into(), "212.3 USD".into()]).unwrap();
         assert!(ok.contains(&Segment::Indicators) && ok.contains(&Segment::Quote));
         let bad = idx.check_figures(&["RSI14 72.3".into(), "PER 41.7".into()]).unwrap_err();
-        assert_eq!(bad, vec!["41.7".to_string()]);
+        assert_eq!(bad.iter().map(|f| f.raw.as_str()).collect::<Vec<_>>(), ["41.7"]);
     }
 
     #[test]
@@ -834,7 +992,7 @@ mod tests {
         let idx = NumberIndex::from_context(CTX);
         let (t, bad) = idx.mark_unverified("RSI 72.3 con objetivo en 250 y 3 razones; sube un 45%");
         assert_eq!(t, "RSI 72.3 con objetivo en 250⚠ y 3 razones; sube un 45%⚠");
-        assert_eq!(bad, ["250", "45"]);
+        assert_eq!(bad.iter().map(|f| f.raw.as_str()).collect::<Vec<_>>(), ["250", "45"]);
         let (same, none) = idx.mark_unverified("sin cifras raras 212.3");
         assert_eq!(same, "sin cifras raras 212.3");
         assert!(none.is_empty());
@@ -925,7 +1083,7 @@ mod tests {
         assert!(vals("tiene 5 razones").is_empty());
         let idx = NumberIndex::from_context("## Indicadores técnicos\n| Rendimientos | 1m +4.5% |\n");
         let (t, bad) = idx.mark_unverified("sube un 9 % este mes");
-        assert_eq!((t.as_str(), bad), ("sube un 9 %⚠ este mes", vec!["9".to_string()]));
+        assert_eq!((t.as_str(), bad.iter().map(|f| f.raw.as_str()).collect::<Vec<_>>()), ("sube un 9 %⚠ este mes", vec!["9"]));
     }
 
     #[test]
@@ -1054,6 +1212,102 @@ mod tests {
         // El positivo sigue verificándose igual.
         assert!(ok("El precio sube un 18.2% en un año."));
         assert!(ok("El precio sube +18.2% en un año."));
+    }
+
+    // --- TODO 4b: verificación por valor Y etiqueta -------------------------------------------
+
+    const LABELED: &str = "## Cotización [fuente: yahoo · 2026-10-12 14:03 UTC]\n| Precio | 341.27 USD |\n\
+## Indicadores técnicos (velas diarias)\n| RSI14 | 60.5 |\n| Volatilidad 30d (anualizada) | 21.1% |\n| Rendimientos | 1w +0.5%, 1m +6.7%, 3m +9.1% |\n\
+## Fundamentales\n| Valoración | EV 3.21T, P/E trailing 35.6, P/E forward 31.2, P/S 10.7 |\n| Márgenes y rentabilidad | gross 46.9%, net 27.6%, ROE 148.8% |\n\
+| Consenso de analistas | rating (1=buy..5=sell) 2.1, 40 analysts, target mean 329.38, low 164.1, high 220.2 |\n\
+## Puntuaciones cuantitativas (calculadas en código, 0-100)\n| Componente | Puntos | Razones |\n|---|---|---|\n| Técnico | 62 | RSI14 60.5 neutral |\n";
+    const LEVELS_TXT: &str = "## Niveles calculados por el sistema\nZona de entrada: 336.28 – 341.27\nStop: 329.54\nObjetivos: 342.44 / 344.96 / 405\nRecompensa/riesgo: 0.3\n";
+
+    fn labeled() -> NumberIndex {
+        let mut idx = NumberIndex::from_context(LABELED);
+        idx.add_text(LEVELS_TXT, Segment::Levels);
+        idx
+    }
+
+    #[test]
+    fn a_figure_that_matches_another_metric_by_chance_is_unverified() {
+        let idx = labeled();
+        let bad = |t: &str| idx.unverified(t).len();
+        // El caso real de qwen3: 6,7 es la rentabilidad a 1 mes, no la recompensa/riesgo (0,3).
+        assert_eq!(bad("con una recompensa/riesgo de 6.7"), 1);
+        assert_eq!(bad("la recompensa/riesgo de 6,7 es favorable"), 1);
+        assert_eq!(bad("el PER de 60.5 es exigente"), 1, "60.5 es el RSI14");
+        assert_eq!(bad("la volatilidad anualizada del 6.7%"), 1);
+        assert_eq!(bad("RSI14 en 35.6"), 1, "35.6 es el P/E trailing");
+        assert_eq!(bad("la puntuación técnica de 21.1"), 1);
+    }
+
+    #[test]
+    fn a_figure_with_a_compatible_label_is_verified_in_both_languages() {
+        let idx = labeled();
+        let bad = |t: &str| idx.unverified(t).len();
+        assert_eq!(bad("la rentabilidad a 1 mes fue +6.7%"), 0);
+        assert_eq!(bad("el rendimiento del último mes: 6,7 %"), 0);
+        assert_eq!(bad("one-month return of 6.7%"), 0);
+        assert_eq!(bad("la recompensa/riesgo de 0.3 es desfavorable"), 0);
+        assert_eq!(bad("el R/R es 0,3"), 0);
+        assert_eq!(bad("risk/reward of 0.3"), 0);
+        // Sinónimos del PER.
+        assert_eq!(bad("el PER de 35.6"), 0);
+        assert_eq!(bad("un P/E de 35.6 veces"), 0);
+        assert_eq!(bad("el múltiplo de beneficios es 35.6"), 0);
+        assert_eq!(bad("el P/E forward (31.2) y el P/S (10.7)"), 0);
+        assert_eq!(bad("RSI14 en 60.5, con ROE de 148.8%"), 0);
+        assert_eq!(bad("la puntuación técnica de 62"), 0);
+        assert_eq!(bad("el objetivo medio de los analistas, 329.38"), 0);
+        assert_eq!(bad("el margen neto del 27.6%"), 0);
+        assert_eq!(bad("35.6 de PER"), 0);
+        assert_eq!(bad("entrada entre 336.28 y 341.27 con stop en 329.54"), 0);
+    }
+
+    #[test]
+    fn without_a_recognisable_label_only_the_value_counts() {
+        let idx = labeled();
+        let bad = |t: &str| idx.unverified(t).len();
+        assert_eq!(bad("sube un 6.7% en el mes"), 0);
+        assert_eq!(bad("el dato 6.7 es llamativo"), 0);
+        // Un comentario previo con otra métrica separado por coma o por otra cifra no se hereda.
+        assert_eq!(bad("el RSI14 es 60.5, subió 6.7% este mes"), 0);
+        assert_eq!(bad("RSI14 60.5 y 6.7% de subida"), 0);
+        // Sigue sin pasar lo que no está en los datos.
+        assert_eq!(bad("la recompensa/riesgo de 8.8"), 1);
+    }
+
+    /// Frases REALES de qwen3:8b (evaluación del 14-oct, BTC y AAPL deep) contra un contexto con los
+    /// valores de aquella ejecución escrito en el formato de `context.rs`: lo correcto sigue pasando y
+    /// solo cae la cifra con la etiqueta equivocada (recompensa/riesgo 6,7 = rentabilidad a 1 mes).
+    #[test]
+    fn real_qwen3_sentences_keep_their_correct_figures_and_lose_only_the_mislabelled_one() {
+        let ctx = "## Cotización [fuente: binance · 2026-10-14 07:37 UTC]\n| Precio | 83432.45 USDT |\n| Capitalización | 1.68T |\n\
+## Indicadores técnicos (velas diarias)\n| SMA20 / SMA50 / SMA200 | SMA20 83935.78, SMA50 81228.12, SMA200 72251.92 |\n| RSI14 | 52.9 |\n\
+| MACD | macd -300.1, signal -1.2, hist -448.8 |\n| ATR14 | 2158.66 (2.6% of price) |\n| Volatilidad 30d (anualizada) | 38.8% |\n| Caída máxima 1 año | -48.8% |\n\
+| Rendimientos | 1w +0.5%, 1m +6.7%, 3m +9.0% |\n| Soportes (de mayor a menor) | 82850 / 82113.96 |\n| Resistencias (de menor a mayor) | 83935.78 / 87307.83 |\n\
+## Fundamentales\n| Oferta | circulating 20.1M, total 20.1M, max 21M, FDV 1.68T |\n| ATH | 126080, 2025-10-06, (price at 66.2% of the ATH) |\n\
+## Entorno macro\n| Indicador | Valor | Cambio | Fuente |\n|---|---|---|---|\n| VIX | 15.21 pts | -0.40 | FRED 2026-10-13 |\n| Bono EE. UU. 10 años | 4.02 % | +0.02 | FRED 2026-10-13 |\n";
+        let mut idx = NumberIndex::from_context(ctx);
+        idx.add_text("## Niveles calculados por el sistema\nStop: 80772.31\nRecompensa/riesgo: 0.3\n", Segment::Levels);
+        let bad = |t: &str| idx.unverified(t).into_iter().map(|f| f.raw).collect::<Vec<_>>();
+        let none: Vec<String> = vec![];
+        assert_eq!(bad("El RSI14 se encuentra en 52.9, lo que indica una zona neutra y no señala sobrecompra."), none);
+        assert_eq!(bad("La volatilidad anualizada del 38.8% y la media móvil de 20 sesiones (SMA20) en 83935.78 reflejan un entorno."), none);
+        assert_eq!(bad("La volatilidad 30d anualizada es del 38.8%, y la caída máxima del último año fue del 48.8%, indicando alto riesgo."), none);
+        assert_eq!(bad("El MACD muestra una divergencia bajista con un histograma de -448.8, lo que sugiere una posible corrección."), none);
+        assert_eq!(bad("El Bitcoin está al 66.2% de su máximo histórico (126080), lo que sugiere una posible corrección."), none);
+        assert_eq!(bad("El Fondo de Valoración (FDV) es de 1.68T, frente a la capitalización bursátil."), none);
+        assert_eq!(bad("El rendimiento del bono de EE.UU. a 10 años subió 0.02 pp, lo que podría presionar a los activos de riesgo."), none);
+        assert_eq!(bad("El índice de volatilidad VIX está en 15.21 puntos, lo que indica una calma en los mercados."), none);
+        assert_eq!(bad("Entrar entre 82850 y 83432.45, con stop en 80772.31. Salir si alcanza 83935.78 (SMA20)."), none);
+        assert_eq!(bad("La volatilidad diaria de 2.6% del precio podría generar pérdidas."), none);
+        assert_eq!(bad("La oferta circulante es de 20.1M y la máxima de 21M."), none);
+        // El fallo documentado: 6.7 es la rentabilidad a 1 mes, no la recompensa/riesgo (0.3).
+        // (-0.7 y +4.6 son derivadas del modelo y no están en los datos: caían ya antes.)
+        assert_eq!(bad("El precio está cerca del soporte de 82850 (-0.7%) y la resistencia de 87307.83 (+4.6%), con una recompensa/riesgo de 6.7."), ["-0.7", "+4.6", "6.7"]);
+        assert_eq!(bad("El resumen: la recompensa/riesgo de 6.7 y la rentabilidad a 1 mes de 6.7%."), ["6.7"]);
     }
 
     #[test]

@@ -186,5 +186,18 @@ por token que qwen2.5:7b) y cuesta 2,1–2,5× el tiempo; el veredicto coincide 
   descarta como antes. Antes se perdía la afirmación entera (qwen3 inventa `[N11]`…).
 - **Fechas de catalizadores** (`assemble`/`catalyst_date`): la fecha del modelo solo se conserva si está entre las fechas de los
   datos (`dates_in_data`: resultados, ATH, vencimiento, fechas ISO de `fundamentals.extra` como `exDividendDate`, noticias,
-  marcas de tiempo, macro); si no se quita y se avisa en `qualityNotes`. No cubre fechas dentro de la prosa.
+  marcas de tiempo, macro); si no se quita y se avisa en `qualityNotes`. Las fechas dentro de la prosa se verifican aparte (ver abajo).
 - `analysis::lint` es `pub` (lo usa el ejemplo).
+
+## Etiqueta de la cifra, fechas en la prosa, bullets y lint (TODO 4b, R-38…R-41)
+- **Valor Y etiqueta** (`labels.rs`, `fidelity::NumberIndex::review`): cada cifra del contexto lleva la familia de su fila/etiqueta
+  (`Rendimientos (1m)`, `RSI14`, `P/E forward`, `Recompensa/riesgo`…); cada cifra de la salida, la de la mención de métrica más cercana
+  (izquierda ≤ 6 palabras; si no hay, derecha ≤ 3; sin cruzar `, ; | .` ni otra cifra). Se rechaza solo si hay etiqueta reconocible y TODOS los
+  datos con ese valor son de otras métricas conocidas. Sinónimos en `WORDS` (PER = P/E = múltiplo de beneficios; recompensa/riesgo = R/R =
+  risk/reward…, es/en). Familias gruesas y palabras débiles/ambiguas: ver cabecera de `labels.rs`. Sin etiqueta reconocible → solo valor, como antes.
+  `Finding::describe` explica el rechazo («en los datos es «Rendimientos (1m)», no «recompensa/riesgo»»).
+- **Fechas**: `dates.rs`; criterio en R-40. Solo con `NumberIndex::with_dates` (análisis); el chat no las comprueba.
+- **Bullets**: `lint::dedupe_bullets` sobre `bullCase`, `bearCase` y `risks` a la vez (Jaccard ≥ 0,7, primera aparición).
+- **Lint**: `FINANCE_TERMS` en `lint.rs` = términos que el español financiero usa sin traducir. Criterio: (1) sin equivalente corriente o el inglés es
+  el habitual, (2) sustantivo o locución fija, (3) solo como término completo (la locución admite espacio/guion/barra y plural en «s»). Añadir aquí, no en `ENGLISH`.
+- Herramienta de medida: `compare_models reverify <snapshot.json> <salida.json>…` (re-verifica salidas guardadas con la verificación actual).

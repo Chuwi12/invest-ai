@@ -78,14 +78,17 @@ pub fn spanish_issues(text: &str) -> Vec<Issue> {
             push(format!("«{}» es incorrecto: usa {fix}", bad.trim()));
         }
     }
-    let words: Vec<&str> = lower
+    // Sin los términos financieros consolidados («market cap», «stop loss»…): ver `FINANCE_TERMS`.
+    let masked = mask_finance_terms(text);
+    let masked_lower = masked.to_lowercase();
+    let words: Vec<&str> = masked_lower
         .split(|c: char| !c.is_alphabetic() && c != '\'')
         .filter(|w| !w.is_empty())
         .collect();
     // Inglés colado, salvo nombres propios: «T. Rowe Price», «Vanguard Growth ETF», «The Home Depot»
     // llevan mayúscula a mitad de frase.
     let mut sentence_start = true;
-    for tok in text.split_whitespace() {
+    for tok in masked.split_whitespace() {
         let core = tok.trim_matches(|c: char| !c.is_alphabetic());
         let capitalized = core.chars().next().is_some_and(char::is_uppercase);
         let w = core.to_lowercase();
@@ -106,15 +109,77 @@ pub fn spanish_issues(text: &str) -> Vec<Issue> {
     // préstamo aceptado); solo las claramente no castellanas.
     for w in &words {
         let n = w.chars().count();
-        if n >= 7 && (w.ends_with("ing") || w.ends_with("tion") || w.ends_with("ness") || w.ends_with("ly") && !w.ends_with("mente")) && !ENGLISH_OK.contains(w) {
+        if n >= 7 && (w.ends_with("ing") || w.ends_with("tion") || w.ends_with("ness") || w.ends_with("ly") && !w.ends_with("mente")) {
             push(format!("«{w}» parece inglés"));
         }
     }
     out
 }
 
-/// Anglicismos de uso común en finanzas que no se consideran error.
-const ENGLISH_OK: &[&str] = &["trading", "marketing", "holding", "rating", "dumping", "leasing", "ranking", "stop", "momentum"];
+/// Términos financieros consolidados que en español se usan sin traducir (prensa económica, brókers,
+/// informes de mercado) y que NO son «inglés colado». Criterio: (1) no tienen un equivalente español
+/// de uso corriente o el inglés es el habitual, (2) son sustantivos o locuciones fijas, no palabras
+/// funcionales («the», «with»), y (3) se admiten SOLO como término completo: «market cap» pasa, pero
+/// «market» suelto o «the price is high» siguen marcándose. Las locuciones admiten espacio, guion o
+/// barra entre palabras y un plural en «s». Se enmascaran antes de buscar inglés colado.
+const FINANCE_TERMS: &[&str] = &[
+    "market cap", "ticker", "etf", "spread", "rally", "trading", "trader", "broker", "stop loss", "take profit", "stop",
+    "breakout", "pullback", "yield", "dividend yield", "price action", "risk on", "risk off", "risk reward", "reward risk",
+    "buy and hold", "sell off", "buy the dip", "short squeeze", "hedge", "swing", "scalping", "benchmark", "momentum",
+    "marketing", "holding", "rating", "dumping", "leasing", "ranking",
+];
+
+/// Reemplaza por espacios las apariciones de `FINANCE_TERMS` (misma longitud en bytes).
+fn mask_finance_terms(text: &str) -> String {
+    let b = text.as_bytes();
+    let mut out = b.to_vec();
+    let sep = |c: u8| matches!(c, b' ' | b'-' | b'_' | b'/');
+    let mut i = 0;
+    while i < b.len() {
+        if !text.is_char_boundary(i) {
+            i += 1;
+            continue;
+        }
+        let boundary = i == 0 || !text[..i].chars().next_back().is_some_and(char::is_alphanumeric);
+        let mut best = 0;
+        if boundary {
+            'term: for term in FINANCE_TERMS {
+                let t = term.as_bytes();
+                let mut j = i;
+                for &tc in t {
+                    if tc == b' ' {
+                        // Una o más separaciones (con espacios alrededor de una barra).
+                        let start = j;
+                        while j < b.len() && (sep(b[j])) {
+                            j += 1;
+                        }
+                        if j == start {
+                            continue 'term;
+                        }
+                    } else if j < b.len() && b[j].eq_ignore_ascii_case(&tc) {
+                        j += 1;
+                    } else {
+                        continue 'term;
+                    }
+                }
+                if j < b.len() && b[j] == b's' {
+                    j += 1;
+                }
+                if text[j..].chars().next().is_some_and(char::is_alphabetic) {
+                    continue;
+                }
+                best = best.max(j - i);
+            }
+        }
+        if best > 0 {
+            out[i..i + best].fill(b' ');
+            i += best;
+        } else {
+            i += 1;
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| text.to_string())
+}
 
 /// Frases plantilla típicas de una tesis vacía.
 const BOILERPLATE: &[&str] = &[
@@ -138,6 +203,26 @@ const BOILERPLATE: &[&str] = &[
     "solid fundamentals",
 ];
 
+/// Conjunto de palabras de una frase para comparar repeticiones. Las cifras cuentan aunque sean
+/// cortas («PER 31» y «PER 29» son datos distintos); el punto final de frase no forma parte de la palabra.
+fn word_set(sent: &str) -> std::collections::HashSet<String> {
+    sent.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '.')
+        .map(|w| w.trim_matches('.'))
+        .filter(|w| w.chars().count() >= 3 || w.chars().any(|c| c.is_ascii_digit()))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Repetición literal o parafraseada: ≥ 70 % de palabras en común con una frase anterior.
+fn is_dup(seen: &[std::collections::HashSet<String>], words: &std::collections::HashSet<String>) -> bool {
+    seen.iter().any(|o| {
+        let inter = o.intersection(words).count() as f64;
+        let union = o.union(words).count().max(1) as f64;
+        inter / union >= 0.7
+    })
+}
+
 /// Quita las frases repetidas (en cualquier párrafo): los modelos pequeños copian el mismo párrafo
 /// en los tres campos de la tesis. Los párrafos que quedan vacíos desaparecen.
 pub fn dedupe_sentences(text: &str) -> String {
@@ -146,20 +231,8 @@ pub fn dedupe_sentences(text: &str) -> String {
     for para in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
         let mut kept = Vec::new();
         for sent in para.split_inclusive(". ").map(str::trim).filter(|x| !x.is_empty()) {
-            let words: std::collections::HashSet<String> = sent
-                .to_lowercase()
-                .split(|c: char| !c.is_alphanumeric() && c != '.')
-                // Las cifras cuentan aunque sean cortas: «PER 31» y «PER 29» son datos distintos.
-                .filter(|w| w.chars().count() >= 3 || w.chars().any(|c| c.is_ascii_digit()))
-                .map(str::to_string)
-                .collect();
-            // Repetición literal o parafraseada: ≥ 70 % de palabras en común con una frase anterior.
-            let dup = seen.iter().any(|o| {
-                let inter = o.intersection(&words).count() as f64;
-                let union = o.union(&words).count().max(1) as f64;
-                inter / union >= 0.7
-            });
-            if !dup {
+            let words = word_set(sent);
+            if !is_dup(&seen, &words) {
                 seen.push(words);
                 kept.push(sent);
             }
@@ -171,6 +244,27 @@ pub fn dedupe_sentences(text: &str) -> String {
     paras.join("\n\n")
 }
 
+/// Quita las viñetas repetidas (mismo criterio que `dedupe_sentences`, a nivel de viñeta) dentro de
+/// cada lista y ENTRE listas (`bullCase`, `bearCase`, `risks`): se conserva la primera aparición, en
+/// el orden de las listas. Devuelve cuántas quitó.
+pub fn dedupe_bullets<T>(lists: &mut [&mut Vec<T>], text_of: impl Fn(&T) -> &str) -> usize {
+    let mut seen: Vec<std::collections::HashSet<String>> = Vec::new();
+    let mut removed = 0;
+    for list in lists.iter_mut() {
+        let mut keep = Vec::with_capacity(list.len());
+        for item in list.drain(..) {
+            let words = word_set(text_of(&item));
+            if words.is_empty() || !is_dup(&seen, &words) {
+                seen.push(words);
+                keep.push(item);
+            } else {
+                removed += 1;
+            }
+        }
+        **list = keep;
+    }
+    removed
+}
 #[derive(Debug, Clone, Default)]
 pub struct Specificity {
     /// Cifras de datos (no triviales) distintas citadas en todo el texto.
@@ -238,6 +332,41 @@ mod tests {
         assert!(spanish_issues("El mercado está en sobrecompra con el RSI14 en 78.2.").is_empty());
         assert!(spanish_issues("Se mantiene el trading con stop y momentum").is_empty());
         assert!(spanish_issues("sube de de forma fuerte").iter().any(|x| x.what.contains("repetida")));
+    }
+
+    /// TODO 4b: términos financieros consolidados que se usan en español sin traducir.
+    #[test]
+    fn consolidated_financial_terms_are_not_flagged_as_english() {
+        for ok in [
+            "El FDV / market cap es de 1,00x.",
+            "La market cap del activo es de 1.68T.",
+            "Conviene poner un stop loss y un take profit.",
+            "El ticker sube en un rally con breakout y pullback posterior; el spread es bajo.",
+            "El ETF paga un yield del 2 %.",
+            "El mercado está en modo risk-on tras el sell-off; estrategia buy and hold.",
+            "Lectura de price action favorable.",
+        ] {
+            assert!(spanish_issues(ok).is_empty(), "{ok}: {:?}", spanish_issues(ok));
+        }
+        // El inglés suelto sigue marcándose, también junto a un término consolidado.
+        assert!(!spanish_issues("The market is rising").is_empty());
+        assert!(!spanish_issues("El market cap y the price are high").is_empty());
+        assert!(!spanish_issues("Hay un market sin cap").is_empty());
+    }
+
+    #[test]
+    fn repeated_bullets_are_removed_within_and_across_lists() {
+        let mut bull = vec!["El RSI14 está en 52.9, en zona neutra.".to_string(), "El RSI14 está en 52.9, en zona neutra".to_string(), "El PER es 35.4.".to_string()];
+        let mut bear = vec!["El PER es 35.4".to_string(), "La caída máxima fue del 13.8 %.".to_string()];
+        let mut risks = vec!["La caída máxima fue del 13.8%.".to_string(), "Resultados el próximo mes.".to_string()];
+        let n = dedupe_bullets(&mut [&mut bull, &mut bear, &mut risks], |s| s.as_str());
+        assert_eq!(n, 3);
+        assert_eq!(bull, ["El RSI14 está en 52.9, en zona neutra.", "El PER es 35.4."]);
+        assert_eq!(bear, ["La caída máxima fue del 13.8 %."]);
+        assert_eq!(risks, ["Resultados el próximo mes."]);
+        // Cifras distintas no son repetición.
+        let mut a = vec!["El PER es 31 veces.".to_string(), "El PER es 29 veces.".to_string()];
+        assert_eq!(dedupe_bullets(&mut [&mut a], |s| s.as_str()), 0);
     }
 
     #[test]

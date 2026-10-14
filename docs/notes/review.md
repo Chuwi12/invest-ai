@@ -515,3 +515,60 @@ Revisor: agente de corrección, 2026-10-14. Método: lectura + reproducción con
 - **Single-flight de lotes** (clave = ids ordenados y sin duplicados, vida 200 ms) y **`Box::pin` del snapshot**: correctos (tests existentes).
 - **`truncated` en el chat**: se guarda a `true` solo con `terminal = Error` y salida parcial; la UI lo muestra al recargar. Correcto.
 - **Aviso de intervalo en `PriceChart`**: `coerced` solo con datos no provisionales y `X-Data-Interval ≠` efectivo; falsos avisos posibles solo si `infer_interval` se equivocaba (R-32).
+
+
+---
+
+# Cuarta revisión (fidelidad del LLM: etiquetas, bullets, fechas y lint; TODO 4b)
+
+Revisor: agente de fidelidad, 2026-10-14. Origen: `model-eval.md → Bugs encontrados` (3, 4, 5 y las fechas en prosa del 2). Método: test en
+ROJO → arreglo → VERDE. Numeración continúa tras R-37 (puede haber ids intermedios de otros agentes).
+
+| Impacto | Id | Fichero | Qué | Estado |
+|---|---|---|---|---|
+| Medio | R-38 | ai/fidelity.rs, labels.rs, analysis/verify.rs | Una cifra con el valor de OTRA métrica pasaba (recompensa/riesgo 6,7 = rentabilidad a 1 mes) | ARREGLADO (con límites) |
+| Bajo | R-39 | ai/analysis/lint.rs, mod.rs | Bullets repetidos en `bullCase`/`bearCase`/`risks` (dentro de cada lista y entre ellas) | ARREGLADO |
+| Medio | R-40 | ai/dates.rs, fidelity.rs, verify.rs | Las fechas escritas en la prosa no se verificaban (solo `catalysts[].date`): «resultados el 2026-11-05» con el dato 2026-11-02 | ARREGLADO |
+| Bajo | R-41 | ai/analysis/lint.rs | «market» de «FDV / market cap» se marcaba como inglés (y cualquier término financiero consolidado) | ARREGLADO |
+
+### R-38 — MEDIO — Coincidencias casuales de valor entre métricas (VERIFICADO)
+
+- `NumberIndex::find` solo comparaba valores: «recompensa/riesgo de 6,7» se daba por buena porque 6,7 era la rentabilidad a 1 mes
+  (el sistema calcula 0,3).
+- **Estado: ARREGLADO** — cada cifra del contexto se indexa con la familia de su fila/etiqueta y cada cifra de la salida se compara con
+  la palabra más cercana (`labels.rs`; criterio en `ai.md → Etiqueta de la cifra`). Rechazo solo si hay etiqueta reconocible Y todos los
+  datos de ese valor son de otras métricas conocidas; sin etiqueta o contra un dato sin etiqueta, comportamiento de antes. En afirmaciones
+  se descarta; en prosa se marca con ⚠, y la nota dice qué métrica es en los datos («6.7 (en los datos es «Rendimientos (1m)», no «recompensa/riesgo»)»).
+- Tests (rojo→verde): `fidelity::tests::a_figure_that_matches_another_metric_by_chance_is_unverified` (rojo: 0 hallazgos en vez de 1),
+  `a_figure_with_a_compatible_label_is_verified_in_both_languages` y `without_a_recognisable_label_only_the_value_counts` (guardas, verdes
+  antes y después), `real_qwen3_sentences_keep_their_correct_figures_and_lose_only_the_mislabelled_one` (frases reales de la evaluación),
+  `verify::tests::a_figure_that_belongs_to_another_metric_is_dropped_or_marked`.
+- Límites: familias gruesas (SMA20 vs SMA50, 1 mes vs 3 meses, margen bruto vs neto no se distinguen); palabras ambiguas («rentabilidad»,
+  «crecimiento», «precio») no reclaman nada; una lista de cifras con una sola etiqueta («rendimientos de 1,2 %, 3,4 % y 5,6 %») solo etiqueta la
+  primera; la tabla de un mensaje de chat (`|`) no se etiqueta. Un acierto ajeno puede seguir pasando si el dato también existe sin etiqueta
+  (noticias). La etiqueta se lee con un vocabulario cerrado (`WORDS`): una métrica que no esté ahí no se comprueba.
+- Corrección durante la medición: «volatilidad diaria de 2,5 % del precio» (ATR14 en % del precio) se descartaba; ATR y volatilidad son compatibles.
+
+### R-39 — BAJO — Bullets repetidos
+
+- `lint::dedupe_bullets` (mismo criterio Jaccard ≥ 0,7 que la tesis, a nivel de viñeta y sin la cita de fuente), orden bull → bear → risks, se
+  conserva la primera. `word_set` ya no incluye el punto final de frase en la palabra (una viñeta con y sin punto final eran distintas).
+- Tests: `lint::tests::repeated_bullets_are_removed_within_and_across_lists`, `analysis::tests::repeated_bullets_are_deduplicated_within_and_across_lists` (rojos antes).
+
+### R-40 — MEDIO — Fechas escritas en la prosa
+
+- `dates::extract_dates` reconoce «12 oct 2026», «12 de octubre de 2026», «2026-11-02», «12/10/2026», «2 de noviembre», «25-oct», «noviembre de 2026»,
+  «Nov 2, 2026». `dates_in_data` + las fechas escritas en el contexto (noticias) son el conjunto conocido. Criterio: fecha completa = exacta;
+  día y mes = coincide algún dato con ese día y mes; mes y año = algún dato en ese mes. Afirmaciones: se descartan; prosa: ⚠ tras la fecha;
+  nota en `qualityNotes` («Fechas que no figuran en los datos (marcadas con ⚠) en «tesis»: …»). Fechas relativas y años sueltos no se tocan.
+- Efecto lateral corregido: un día > 12 de una fecha escrita («30 de octubre») contaba como cifra suelta (⚠ aunque la fecha fuese real; en
+  escenarios descartaba la frase); ahora los números dentro de una fecha reconocida se excluyen.
+- Tests: `verify::tests::dates_written_in_prose_are_checked_against_the_data` (rojo sin el cableado), `dates::tests::*`,
+  `analysis::tests::a_known_written_date_does_not_drop_a_scenario_sentence` (rojo sin la exclusión). El chat NO comprueba fechas (no hay conjunto de datos acotado).
+- Límite: «5 mar» u otras abreviaturas de mes tras un número se leen como fecha; «31 de febrero de 2026» se lee como «febrero de 2026».
+
+### R-41 — BAJO — Términos financieros consolidados en el lint
+
+- `lint::FINANCE_TERMS` (market cap, ticker, ETF, spread, rally, trading, stop loss, take profit, breakout, pullback, yield, price action, risk-on/off,
+  buy and hold, sell-off…) se enmascara antes de buscar inglés colado; criterio documentado en el código y en `ai.md`. «market» suelto, «the price»… siguen marcándose.
+- Test: `lint::tests::consolidated_financial_terms_are_not_flagged_as_english` (rojo antes).

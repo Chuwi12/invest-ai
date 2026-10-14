@@ -88,6 +88,39 @@ fn texts(a: &Analysis) -> Vec<(&'static str, String)> {
     v
 }
 
+/// Textos redactados por el modelo (sin la cita de fuente ni las marcas ⚠ que añade Rust, ni las frases
+/// calculadas en Rust de estrategia y escenarios).
+fn model_texts(a: &Analysis) -> Vec<(String, String)> {
+    let clean = |t: &str| {
+        let mut t = t.replace('⚠', "");
+        while let Some(i) = t.find(" (fuente:") {
+            let end = t[i..].find(')').map_or(t.len(), |e| i + e + 1);
+            t.replace_range(i..end, "");
+        }
+        t.trim().to_string()
+    };
+    let mut v = vec![("summary".to_string(), clean(&a.summary))];
+    v.extend(a.thesis.split("\n\n").map(|p| ("thesis".to_string(), clean(p))));
+    for (k, xs) in [("bull", &a.bull_case), ("bear", &a.bear_case), ("risk", &a.risks)] {
+        v.extend(xs.iter().map(|x| (k.to_string(), clean(x))));
+    }
+    v.extend(a.catalysts.iter().map(|c| ("catalyst".to_string(), clean(&c.description))));
+    if let Some(s) = &a.strategy {
+        v.extend(s.lines().filter(|l| l.starts_with("Entrada:") || l.starts_with("Salida:")).map(|l| ("strategy".to_string(), clean(l))));
+    }
+    if let Some(w) = &a.would_change_if {
+        v.extend(w.iter().map(|x| ("wouldChangeIf".to_string(), clean(x))));
+    }
+    if let Some(h) = &a.horizon_note {
+        v.push(("horizonNote".to_string(), clean(h)));
+    }
+    if let Some(s) = &a.scenarios {
+        // La primera frase («Precio = … (Binance, 14 oct 2026).») la escribe Rust.
+        v.extend(s.iter().map(|x| ("scenario".to_string(), clean(x.description.split_once(". ").map_or("", |(_, rest)| rest)))));
+    }
+    v
+}
+
 fn issues_of(a: &Analysis) -> Vec<serde_json::Value> {
     texts(a)
         .into_iter()
@@ -106,6 +139,20 @@ async fn main() -> anyhow::Result<()> {
             v["metrics"]["spanishIssuesFinal"] = issues_of(&a).into();
             std::fs::write(path, serde_json::to_string_pretty(&v)?)?;
         }
+        return Ok(());
+    }
+    // `reverify <snapshot.json> <salida.json>...`: re-verifica las cifras y fechas de resultados ya
+    // guardados con la verificación actual (valor + etiqueta + fechas) y resume los cambios.
+    if args.first().map(String::as_str) == Some("reverify") {
+        let snap: AssetSnapshot = serde_json::from_str(&std::fs::read_to_string(&args[1])?)?;
+        let mut report = Vec::new();
+        for path in &args[2..] {
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
+            let a: Analysis = serde_json::from_value(v["analysis"].clone())?;
+            let rows = ai::analysis::audit_figures(&snap, "es", 16384, &model_texts(&a));
+            report.push(json!({ "file": path, "rows": rows }));
+        }
+        println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }
     let [snap_path, model, depth, out] = args.as_slice() else {

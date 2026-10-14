@@ -6,7 +6,7 @@ use domain::{AssetSnapshot, SourceRef, Verdict};
 use super::types::Claim;
 use crate::{
     context::{NewsRegistry, extract_citations, news_source, parse_tag},
-    fidelity::{NumberIndex, Segment, extract_numbers},
+    fidelity::{Finding, NumberIndex, Segment, extract_numbers},
     fmt,
     lang::{Lang, tr},
     scoring::{Scorecard, verdict_rank},
@@ -43,7 +43,12 @@ pub struct Verifier<'a> {
 impl<'a> Verifier<'a> {
     pub fn new(context_text: &str, snap: &'a AssetSnapshot, registry: &'a NewsRegistry, lang: Lang) -> Self {
         Self {
-            idx: NumberIndex::from_context(context_text),
+            idx: {
+                // Fechas conocidas: las de los datos y las escritas en el contexto (p. ej. en una noticia).
+                let mut idx = NumberIndex::with_dates(super::dates_in_data(snap));
+                idx.add_context(context_text);
+                idx
+            },
             snap,
             registry,
             lang,
@@ -133,17 +138,14 @@ impl<'a> Verifier<'a> {
             Ok(s) => s,
             Err(bad) => return self.reject(&text, &bad),
         };
-        // Las cifras del propio texto también deben existir aunque el modelo no las listara.
-        let in_text = self.idx.unverified(&text);
-        if !in_text.is_empty() {
-            let bad: Vec<String> = in_text.into_iter().map(|n| n.raw).collect();
-            return self.reject(&text, &bad);
+        // Las cifras y fechas del propio texto también deben respaldarse aunque el modelo no las listara.
+        let review = self.idx.review(&text);
+        if !review.findings.is_empty() {
+            return self.reject(&text, &review.findings);
         }
-        for n in extract_numbers(&text).iter().filter(|n| !n.exempt) {
-            for s in self.idx.find(n) {
-                if !segs.contains(&s) {
-                    segs.push(s);
-                }
+        for s in review.segments {
+            if !segs.contains(&s) {
+                segs.push(s);
             }
         }
         // Las cifras de la puntuación repiten las de cotización/indicadores/fundamentales: se cita
@@ -169,18 +171,60 @@ impl<'a> Verifier<'a> {
         })
     }
 
-    fn reject(&mut self, text: &str, bad: &[String]) -> Option<Checked> {
+    fn reject(&mut self, text: &str, bad: &[Finding]) -> Option<Checked> {
         self.dropped += 1;
         let l = self.lang;
-        let w = tr!(
-            l,
-            "Se descartó una afirmación porque citaba cifras que no aparecen en los datos ({}): «{}»",
-            "A claim was dropped because it cited figures that are not in the data ({}): «{}»",
-            bad.join(", "),
-            truncate_chars(text, 90)
-        );
-        self.warn(w);
+        let (dates, figs): (Vec<&Finding>, Vec<&Finding>) = bad.iter().partition(|f| f.is_date());
+        let list = |v: &[&Finding]| v.iter().map(|f| f.describe(l)).collect::<Vec<_>>().join(", ");
+        if !figs.is_empty() {
+            let w = tr!(
+                l,
+                "Se descartó una afirmación porque citaba cifras que no aparecen en los datos ({}): «{}»",
+                "A claim was dropped because it cited figures that are not in the data ({}): «{}»",
+                list(&figs),
+                truncate_chars(text, 90)
+            );
+            self.warn(w);
+        }
+        if !dates.is_empty() {
+            let w = tr!(
+                l,
+                "Se descartó una afirmación porque citaba fechas que no figuran en los datos ({}): «{}»",
+                "A claim was dropped because it cited dates that are not in the data ({}): «{}»",
+                list(&dates),
+                truncate_chars(text, 90)
+            );
+            self.warn(w);
+        }
         None
+    }
+
+    /// Avisos de una prosa con cifras o fechas sin respaldo (ya marcadas con ⚠).
+    fn warn_unverified(&mut self, bad: &[Finding], field: &str) {
+        let l = self.lang;
+        let (dates, figs): (Vec<&Finding>, Vec<&Finding>) = bad.iter().partition(|f| f.is_date());
+        self.marked += bad.len();
+        let list = |v: &[&Finding]| v.iter().map(|f| f.describe(l)).collect::<Vec<_>>().join(", ");
+        if !figs.is_empty() {
+            let w = tr!(
+                l,
+                "Cifras no verificables en los datos (marcadas con ⚠) en «{}»: {}",
+                "Figures not verifiable in the data (marked with ⚠) in «{}»: {}",
+                field,
+                list(&figs)
+            );
+            self.warn(w);
+        }
+        if !dates.is_empty() {
+            let w = tr!(
+                l,
+                "Fechas que no figuran en los datos (marcadas con ⚠) en «{}»: {}",
+                "Dates that are not in the data (marked with ⚠) in «{}»: {}",
+                field,
+                list(&dates)
+            );
+            self.warn(w);
+        }
     }
 
     /// Prosa libre (resumen, tesis, estrategia): se conserva, pero cada cifra sin verificar se
@@ -188,18 +232,7 @@ impl<'a> Verifier<'a> {
     pub fn prose(&mut self, text: &str, field: &str) -> String {
         let text = self.clean_citations(&truncate_chars(text.trim(), MAX_PROSE_CHARS));
         let (marked, bad) = self.idx.mark_unverified(&text);
-        if !bad.is_empty() {
-            self.marked += bad.len();
-            let l = self.lang;
-            let w = tr!(
-                l,
-                "Cifras no verificables en los datos (marcadas con ⚠) en «{}»: {}",
-                "Figures not verifiable in the data (marked with ⚠) in «{}»: {}",
-                field,
-                bad.join(", ")
-            );
-            self.warn(w);
-        }
+        self.warn_unverified(&bad, field);
         marked
     }
 
@@ -209,27 +242,10 @@ impl<'a> Verifier<'a> {
         let text = self.clean_citations(&truncate_chars(text.trim(), MAX_PROSE_CHARS));
         let mut out = Vec::new();
         for para in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
-            let (marked, bad) = self.idx.mark_unverified(para);
-            if !bad.is_empty() {
-                self.marked += bad.len();
-                let l = self.lang;
-                let w = tr!(
-                    l,
-                    "Cifras no verificables en los datos (marcadas con ⚠) en «{}»: {}",
-                    "Figures not verifiable in the data (marked with ⚠) in «{}»: {}",
-                    field,
-                    bad.join(", ")
-                );
-                self.warn(w);
-            }
-            let mut segs: Vec<Segment> = Vec::new();
-            for n in extract_numbers(para).iter().filter(|n| !n.exempt) {
-                for s in self.idx.find(n) {
-                    if !segs.contains(&s) {
-                        segs.push(s);
-                    }
-                }
-            }
+            let review = self.idx.review(para);
+            self.warn_unverified(&review.findings, field);
+            let marked = review.marked;
+            let mut segs: Vec<Segment> = review.segments;
             if segs.iter().any(|s| !matches!(s, Segment::Scores)) {
                 segs.retain(|s| !matches!(s, Segment::Scores));
             }
@@ -536,6 +552,53 @@ mod tests {
         assert!(out.contains('⚠'), "{out}");
         assert_eq!(v.marked, 1);
         assert!(v.warnings[0].contains("tesis"));
+    }
+
+    // --- TODO 4b: etiqueta de la cifra ------------------------------------------------------
+
+    /// El caso real de qwen3: «recompensa/riesgo 6,7» pasaba porque 6,7 era un dato con otra etiqueta.
+    #[test]
+    fn a_figure_that_belongs_to_another_metric_is_dropped_or_marked() {
+        let f = fx();
+        let mut v = Verifier::new(&f.text, &f.snap, &f.reg, Lang::Es);
+        let rsi = format!("{:.1}", f.snap.indicators.as_ref().unwrap().rsi14.unwrap());
+        // El RSI14 real escrito como si fuera el PER: mismo valor, otra métrica.
+        assert!(v.claim(&claim(&format!("El PER es {rsi}"), &[])).is_none());
+        assert_eq!(v.dropped, 1);
+        assert!(v.warnings[0].contains("en los datos es «") && v.warnings[0].contains(&rsi), "{:?}", v.warnings);
+        // Con su etiqueta correcta, y sin etiqueta, se conserva.
+        assert!(v.claim(&claim(&format!("El RSI14 está en {rsi}"), &[])).is_some());
+        assert!(v.claim(&claim(&format!("Hay un valor de {rsi} en los indicadores"), &[])).is_some());
+        // En prosa se marca con ⚠.
+        let out = v.prose(&format!("La recompensa/riesgo de {rsi} es excelente."), "tesis");
+        assert!(out.contains(&format!("{rsi}⚠")), "{out}");
+        let out = v.prose(&format!("El RSI14 de {rsi} es neutro."), "tesis");
+        assert!(!out.contains('⚠'), "{out}");
+    }
+
+    // --- TODO 4b: fechas en la prosa ---------------------------------------------------------
+
+    #[test]
+    fn dates_written_in_prose_are_checked_against_the_data() {
+        let f = fx();
+        let mut v = Verifier::new(&f.text, &f.snap, &f.reg, Lang::Es);
+        // Resultados del fixture: 2026-10-30 (día > 12: antes se marcaba como cifra suelta).
+        let ok = v.prose("Los resultados se publican el 30 de octubre de 2026 (2026-10-30), el 30 oct.", "tesis");
+        assert!(!ok.contains('⚠'), "{ok}");
+        let bad = v.prose("Los resultados se publican el 5 de noviembre de 2026 y luego el 2026-11-05.", "tesis");
+        assert_eq!(bad.matches('⚠').count(), 2, "{bad}");
+        assert!(bad.contains("2026⚠") && bad.contains("2026-11-05⚠"), "{bad}");
+        assert!(v.warnings.iter().any(|w| w.contains("Fechas que no figuran") && w.contains("5 de noviembre de 2026")), "{:?}", v.warnings);
+        assert_eq!(v.marked, 2);
+        // Relativas y años sueltos no se tocan.
+        let rel = v.prose("La próxima semana, en 2027 y el mes que viene.", "tesis");
+        assert!(!rel.contains('⚠'), "{rel}");
+        // En una afirmación, la fecha inventada la descarta; la real no.
+        assert!(v.claim(&claim("Resultados el 5 de noviembre", &[])).is_none());
+        assert!(v.warnings.iter().any(|w| w.contains("citaba fechas")), "{:?}", v.warnings);
+        assert!(v.claim(&claim("Resultados el 30 de octubre", &[])).is_some());
+        // La fecha de una noticia escrita en su titular también es un dato.
+        assert_eq!(v.dropped, 1);
     }
 
     #[test]

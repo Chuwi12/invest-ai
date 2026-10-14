@@ -179,7 +179,7 @@ never leave English words in tables or sentences.",
             // Verificación de cifras de la respuesta final.
             let bad = index.unverified(&answer);
             if !bad.is_empty() && !answer.trim().is_empty() {
-                let mut raws: Vec<String> = bad.into_iter().map(|n| n.raw).collect();
+                let mut raws: Vec<String> = bad.iter().map(|f| f.describe(lang)).collect();
                 raws.dedup();
                 raws.truncate(6);
                 yield ChatEvent::Token {

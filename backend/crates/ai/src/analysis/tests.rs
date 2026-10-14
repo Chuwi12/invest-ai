@@ -506,3 +506,47 @@ fn catalyst_dates_not_in_the_data_are_dropped() {
     snap.fundamentals.as_mut().unwrap().extra.clear();
     assert_eq!(catalyst_date(Some(day("2026-11-07")), &dates_in_data(&snap)), None);
 }
+
+/// TODO 4b: las viñetas repetidas dentro de una lista o entre `bullCase`/`bearCase`/`risks` se quitan.
+#[tokio::test]
+async fn repeated_bullets_are_deduplicated_within_and_across_lists() {
+    let f = facts();
+    let e = env().await;
+    e.mock.push_chat(stage("mixed", vec![finding("Hecho")]));
+    let rsi = format!("El RSI14 está en {}", f.rsi);
+    let atr = format!("El ATR14 es {}", f.nums[3]);
+    let body = json!({
+        "verdict": "accumulate", "confidence": 0.7, "horizon": "medium", "horizon_note": "", "summary": "Resumen.",
+        "thesis": f.thesis(),
+        "bull_case": [finding(&rsi), finding(&format!("{rsi}.")), finding(&atr)],
+        "bear_case": [finding(&atr), finding("Valoración exigente")],
+        "risks": [finding("Valoración exigente."), finding("Resultados cercanos")],
+        "catalysts": [], "entry_strategy": "", "exit_strategy": "", "would_change_if": [], "uncertainty": ""
+    });
+    e.mock.push_chat(reply(&body.to_string()));
+    let a = e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Quick)).await.unwrap();
+    assert_eq!(a.bull_case.len(), 2, "{:?}", a.bull_case);
+    assert_eq!(a.bear_case.len(), 1, "{:?}", a.bear_case);
+    assert_eq!(a.risks.len(), 1, "{:?}", a.risks);
+    assert!(a.bear_case[0].contains("Valoración exigente") && a.risks[0].contains("Resultados cercanos"));
+}
+
+/// Una fecha escrita con día > 12 que SÍ está en los datos no debe hacer caer la frase del escenario.
+#[test]
+fn a_known_written_date_does_not_drop_a_scenario_sentence() {
+    let snap = crate::fixture::stock_snapshot();
+    let lang = Lang::Es;
+    let plan = levels::plan(&snap, Verdict::Accumulate, lang).expect("plan");
+    let lv = levels::scenario_levels(&plan, lang);
+    let level = lv.bullish.clone().expect("nivel alcista");
+    let mut sc = vec![Scenario {
+        kind: "bullish".into(),
+        probability: 45.0,
+        description: "Tras los resultados del 30 de octubre podría subir.".into(),
+        target_price: Some(level.value),
+        target_basis: None,
+        return_pct: None,
+    }];
+    let notes = explain_scenarios(&mut sc, &plan, &snap, lang);
+    assert!(sc[0].description.contains("30 de octubre") && notes.is_empty(), "{} {notes:?}", sc[0].description);
+}
