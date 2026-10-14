@@ -865,7 +865,9 @@ pub enum ChatEvent {
     Token { text: String },
     ToolCall { id: String, name: String, arguments: serde_json::Value },
     ToolResult { id: String, name: String, ok: bool, summary: String },
-    Analysis { analysis: Analysis },
+    /// En `Box`: un `Analysis` es mucho mayor que el resto de variantes (clippy::large_enum_variant).
+    /// El JSON no cambia.
+    Analysis { analysis: Box<Analysis> },
     Done { message_id: String, model: String, prompt_tokens: Option<u32>, completion_tokens: Option<u32> },
     Error { message: String },
 }
@@ -1132,7 +1134,7 @@ mod tests {
         let err = "stock:a\r\nb".parse::<AssetId>().unwrap_err().to_string();
         assert!(!err.contains('\n') && !err.contains('\r'));
         assert!(serde_json::from_str::<AssetId>("\"stock:a/b\"").is_err());
-        assert!("stock:A".repeat(1).parse::<AssetId>().is_ok());
+        assert!("stock:A".parse::<AssetId>().is_ok());
         assert!(format!("stock:{}", "A".repeat(32)).parse::<AssetId>().is_ok());
     }
 

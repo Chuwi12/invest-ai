@@ -74,10 +74,10 @@ pub fn browser_request_allowed(headers: &HeaderMap, allowed_origins: &[String]) 
 pub async fn guard(State(settings): State<Arc<Settings>>, req: Request, next: Next) -> Response {
     let headers = req.headers();
     // Un navegador siempre envía `Host`; si falta (HTTP/1.0, pruebas en proceso) no hay rebinding posible.
-    if let Some(host) = headers.get(header::HOST) {
-        if !host.to_str().is_ok_and(|h| host_allowed(h, &settings.allowed_origins)) {
-            return forbidden("host no permitido");
-        }
+    if let Some(host) = headers.get(header::HOST)
+        && !host.to_str().is_ok_and(|h| host_allowed(h, &settings.allowed_origins))
+    {
+        return forbidden("host no permitido");
     }
     let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
     if (!safe || is_ws_upgrade(headers)) && !browser_request_allowed(headers, &settings.allowed_origins) {

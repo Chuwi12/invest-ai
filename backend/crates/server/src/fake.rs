@@ -513,7 +513,7 @@ impl Analyst for FakeAnalyst {
                 && let Some(id) = req.focus.first()
                 && let Ok(snapshot) = req.market.snapshot(id).await
             {
-                emit!(ChatEvent::Analysis { analysis: FakeAnalyst::build_analysis(&snapshot) });
+                emit!(ChatEvent::Analysis { analysis: Box::new(FakeAnalyst::build_analysis(&snapshot)) });
             }
 
             emit!(ChatEvent::Done {

@@ -163,7 +163,7 @@ never leave English words in tables or sentences.",
                             index.add_text(&out.text, Segment::Other);
                             yield ChatEvent::ToolResult { id: call_id, name: name.clone(), ok: true, summary: out.summary.clone() };
                             if let Some(a) = out.analysis {
-                                yield ChatEvent::Analysis { analysis: a };
+                                yield ChatEvent::Analysis { analysis: Box::new(a) };
                             }
                             messages.push(WireMessage::tool(&name, out.text));
                         }

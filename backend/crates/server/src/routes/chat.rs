@@ -260,7 +260,7 @@ impl ChatJob {
                 }
                 ChatEvent::Analysis { ref analysis } => {
                     self.save_analysis(analysis).await;
-                    acc.analysis = Some(analysis.clone());
+                    acc.analysis = Some((**analysis).clone());
                     sink.send(event).await;
                 }
                 ChatEvent::Done { model, prompt_tokens, completion_tokens, .. } => {

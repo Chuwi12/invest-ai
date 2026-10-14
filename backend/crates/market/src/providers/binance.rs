@@ -211,7 +211,9 @@ const MAX_KLINES: usize = 5 * KLINES_PAGE;
 /// `coerce_interval` en Yahoo). `Max` pide una sola página.
 fn plan_history(range: Range, interval: Interval, now: chrono::DateTime<Utc>) -> (Interval, usize) {
     let Some(start) = range_start_ms(range, now) else {
-        return (interval, KLINES_PAGE);
+        // `Max`: toda la historia disponible, hasta `MAX_KLINES` (la primera página corta, la del listado del par,
+        // termina la paginación). Con 1 página solo llegaban las últimas 1000 velas (~2,7 años en diario).
+        return (interval, MAX_KLINES);
     };
     let span_secs = ((now.timestamp_millis() - start) / 1000).max(0);
     let count = |i: Interval| (span_secs / i.seconds()) as usize + 2; // +2: vela en curso y borde
@@ -568,6 +570,13 @@ mod tests {
                 assert!(c[0].t * 1000 <= start + eff.seconds() * 1000, "{range:?}/{interval:?}: no cubre el rango");
             }
         }
+    }
+
+    #[test]
+    fn max_range_paginates_back_to_the_listing_instead_of_one_page() {
+        // Antes: (D1, 1000) -> solo ~2,7 años de BTC en diario. Ahora hasta MAX_KLINES; la página corta del
+        // listado del par termina antes la paginación.
+        assert_eq!(plan_history(Range::Max, Interval::D1, Utc::now()), (Interval::D1, MAX_KLINES));
     }
 
     #[test]
