@@ -18,6 +18,19 @@ describe('modelFit', () => {
   it('no cabe si falta RAM', () => expect(modelFit(model({ minVramGb: 40, minRamGb: 64 }), hw).kind).toBe('no'))
   it('sin GPU: CPU', () => expect(modelFit(model({}), { ...hw, gpus: [] }).kind).toBe('cpu'))
   it('sin requisitos: desconocido', () => expect(modelFit(model(null), hw).kind).toBe('unknown'))
+  it('no cuenta con la VRAM entera: 7,7 GB recomendados en 8 GB es justo (medido: 12 % a CPU)', () => {
+    const fit = modelFit(model({ minVramGb: 4.8, recommendedVramGb: 7.7 }), hw)
+    expect(fit.kind).toBe('partial')
+    expect(fit.text).toMatch(/CPU/)
+    expect(fit.text).toMatch(/10 %/)
+    // 14B: ~40 % fuera de la VRAM.
+    expect(modelFit(model({ minVramGb: 6.6, recommendedVramGb: 11.7 }), hw).text).toMatch(/40 %/)
+  })
+  it('cabe entero con margen tras la reserva (5,8 GB en 8 GB)', () => {
+    const fit = modelFit(model({ minVramGb: 3.2, recommendedVramGb: 5.8 }), hw)
+    expect(fit.kind).toBe('vram')
+    expect(fit.text).toMatch(/utilizables/)
+  })
   it('avisa si no hay disco para descargarlo', () => {
     expect(modelFit(model({ diskGb: 40 }, false), hw).note).toMatch(/disco/)
     expect(modelFit(model({ diskGb: 40 }, true), hw).note).toBeNull()
