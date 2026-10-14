@@ -132,3 +132,17 @@ CPU en reposo: 0 ticks de reloj en 20 s (y en 10 s con el servidor recién usado
 - `./invest-ai` completo con navegador y Ctrl+C no se repitió tras los cambios del script (se probó `selftest`, la instancia temporal, y el arranque con `--no-browser`).
 - Compresión de respuestas: el cliente de carga midió con `identity`; no se midió el coste de br/gzip.
 - Servicio systemd: probado el 13-oct-2026 (ver `ops.md`).
+
+## Tras el cierre (14-oct-2026, medido a las 20:31 UTC, 31 min después del cierre)
+Las comprobaciones programadas de la apertura y del cierre se perdieron (la sesión se cortó y el
+equipo se reinició a las 20:25 UTC), así que esto se midió a mano ya en post-market, servidor release
+en 127.0.0.1:8779 con las claves de FRED, Finnhub y Twelve Data en `.env`.
+- `marketState = post` en AAPL, MSFT, SPY e ^GSPC; `delaySecs = 0` (feeds etiquetados de tiempo
+  real); la cotización regular tiene 31 min de antigüedad, que es la hora del cierre.
+- **R-31 verificado en vivo**: AAPL `1d/5m` = 78 velas y `1d/1m` = 390 velas (sesión completa), 0
+  desalineadas, última vela 19:55 y 19:59 UTC respectivamente: sin vela fantasma a las 20:00.
+- Tiempo real (1 cliente, AAPL + MSFT, 150 s): el WS de Finnhub conecta y entrega trades de
+  post-market (MSFT 532,30 frente a 533,69 de cierre regular) con 327 ms de la hora del trade a la
+  recepción; al suscribirse llega primero el último tick conocido (la cotización de cierre). Peticiones
+  salientes a Yahoo en esos 150 s: 2 (sondeo espaciado; el feed WS cubre el resto).
+- Sin medir todavía: el instante exacto de la transición regular → post y pre → regular.
