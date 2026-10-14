@@ -175,3 +175,16 @@ Detalle de los hallazgos R-10…R-20 en `review.md → Segunda revisión`.
   sin puntuación; el inglés colado ignora nombres propios (mayúscula a mitad de frase); `dedupe_sentences` cuenta las
   cifras cortas.
 - **Fixture**: `ai::fixture` da `change_pct` en puntos porcentuales, como los proveedores.
+
+## Comparativa de modelos y arreglos asociados
+Informe completo (metodología, tablas, extractos, bugs): `model-eval.md`. Ejemplo reproducible con snapshot congelado:
+`cargo run --release -p ai --example compare_models -- snapshot.json <modelo> <depth> salida.json` (lee `LLM_*` del entorno,
+no el `.env`; la app usa `LLM_NUM_CTX=16384`). Resumen: qwen3:8b a 16384 se reparte 12 % CPU / 88 % GPU (KV-cache 2,6× mayor
+por token que qwen2.5:7b) y cuesta 2,1–2,5× el tiempo; el veredicto coincide siempre con la puntuación.
+- **Citas `[N#]` inexistentes** (`Verifier::claim`): si, quitada la cita, la afirmación lleva cifras y todas se verifican, se
+  conserva sin la cita y `qualityNotes` añade «Se quitaron N cita(s) a noticias inexistentes…»; sin cifras que la respalden, se
+  descarta como antes. Antes se perdía la afirmación entera (qwen3 inventa `[N11]`…).
+- **Fechas de catalizadores** (`assemble`/`catalyst_date`): la fecha del modelo solo se conserva si está entre las fechas de los
+  datos (`dates_in_data`: resultados, ATH, vencimiento, fechas ISO de `fundamentals.extra` como `exDividendDate`, noticias,
+  marcas de tiempo, macro); si no se quita y se avisa en `qualityNotes`. No cubre fechas dentro de la prosa.
+- `analysis::lint` es `pub` (lo usa el ejemplo).

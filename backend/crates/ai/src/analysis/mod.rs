@@ -17,7 +17,7 @@
 
 mod gaps;
 mod levels;
-mod lint;
+pub mod lint;
 mod prompts;
 mod types;
 mod verify;
@@ -496,7 +496,8 @@ impl AnalysisEngine {
 
         // --- Avisos y metadatos ---
         let mut notes: Vec<String> = Vec::new();
-        for w in v.warnings.iter().chain(&stage_notes).chain(&built.trimmed).chain(&quality_notes) {
+        let citation_note = v.citation_note();
+        for w in v.warnings.iter().chain(&stage_notes).chain(&built.trimmed).chain(&quality_notes).chain(citation_note.iter()) {
             if !w.trim().is_empty() && !notes.contains(w) {
                 notes.push(w.clone());
             }
@@ -829,6 +830,33 @@ fn expected_return(sc: &[Scenario]) -> Option<f64> {
     Some((e * 10.0).round() / 10.0)
 }
 
+/// Todas las fechas que traen los datos: resultados, máximo histórico, vencimiento, cualquier fecha
+/// ISO de `fundamentals.extra` (p. ej. `exDividendDate` de Yahoo), publicación de noticias, marcas
+/// de tiempo de cotización, indicadores y macro, y la fecha del propio snapshot.
+fn dates_in_data(snap: &AssetSnapshot) -> std::collections::HashSet<NaiveDate> {
+    let mut d = std::collections::HashSet::new();
+    d.insert(snap.generated_at.date_naive());
+    d.extend(snap.news.iter().map(|n| n.published_at.date_naive()));
+    d.extend(snap.quote.iter().map(|q| q.timestamp.date_naive()));
+    d.extend(snap.indicators.iter().filter_map(|i| i.as_of).map(|t| t.date_naive()));
+    if let Some(m) = &snap.macro_context {
+        d.extend(m.as_of.map(|t| t.date_naive()));
+        d.extend(m.indicators.iter().map(|i| i.as_of.date_naive()));
+    }
+    if let Some(f) = &snap.fundamentals {
+        d.extend([f.next_earnings_date, f.all_time_high_date, f.maturity_date].into_iter().flatten());
+        d.extend(f.as_of.map(|t| t.date_naive()));
+        d.extend(f.extra.values().filter_map(|v| v.as_str()).filter_map(|s| NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok()));
+    }
+    d
+}
+
+/// El modelo a veces inventa la fecha de un catalizador (qwen3 pone fechas sueltas como 25-oct que no
+/// figuran en ningún sitio): se conserva solo si está entre las fechas de los datos.
+fn catalyst_date(date: Option<NaiveDate>, allowed: &std::collections::HashSet<NaiveDate>) -> Option<NaiveDate> {
+    date.filter(|d| allowed.contains(d))
+}
+
 /// Convierte la salida del juez (ya sin confiar en ella) en un `Analysis` parcial: el llamador
 /// completa id, fuentes, avisos, niveles, modelo y marcas de tiempo.
 fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifier<'_>, lang: Lang, deep: bool) -> Analysis {
@@ -856,16 +884,35 @@ fn assemble(j: JudgeOut, snap: &AssetSnapshot, card: &Scorecard, v: &mut Verifie
         }
     }
 
+    let mut undated = 0usize;
+    let allowed_dates = dates_in_data(snap);
     let catalysts = j
         .catalysts
         .iter()
         .filter(|c| !c.description.trim().is_empty())
         .map(|c| Catalyst {
-            date: c.date.as_deref().and_then(|d| NaiveDate::parse_from_str(d.trim(), "%Y-%m-%d").ok()),
+            date: {
+                let parsed = c.date.as_deref().and_then(|d| NaiveDate::parse_from_str(d.trim(), "%Y-%m-%d").ok());
+                let known = catalyst_date(parsed, &allowed_dates);
+                undated += usize::from(parsed.is_some() && known.is_none());
+                known
+            },
             description: v.prose(&c.description, lang.t("catalizador", "catalyst")),
             impact: c.impact.filter(|i| i.is_finite()).map(|i| i.clamp(-1.0, 1.0)),
         })
         .collect();
+
+    if undated > 0 {
+        let w = tr!(
+            lang,
+            "Se quitó la fecha de {} catalizador(es): no figura en los datos.",
+            "The date of {} catalyst(s) was removed: it is not in the data.",
+            undated
+        );
+        if !v.warnings.contains(&w) {
+            v.warnings.push(w);
+        }
+    }
 
     // Escenarios (deep): tres tipos distintos, probabilidades normalizadas a 100.
     let scenarios = if deep { build_scenarios(&j, v, lang) } else { None };

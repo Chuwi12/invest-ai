@@ -86,7 +86,7 @@ fn judge_with(f: &Facts, thesis: &str, entry: &str, deep: bool) -> Vec<String> {
         "bull_case": [finding(&format!("RSI14 en {}", f.rsi)), finding("Objetivo del 987.65")],
         "bear_case": [finding("Valoración exigente")],
         "risks": [finding("Resultados cercanos")],
-        "catalysts": [{"date": "2026-10-28", "description": "Resultados trimestrales", "impact": 0.5}],
+        "catalysts": [{"date": "2026-10-30", "description": "Resultados trimestrales", "impact": 0.5}],
         "entry_strategy": entry, "exit_strategy": "Salir si rompe el stop",
         "would_change_if": ["Cae bajo el stop"], "uncertainty": "Datos de un solo día."
     });
@@ -191,7 +191,7 @@ async fn deep_pipeline_runs_all_stages_and_verifies_figures() {
     assert_eq!(sc.iter().map(|s| s.probability).sum::<f32>(), 100.0);
     assert!(sc.iter().all(|s| s.target_price.is_some() && s.target_basis.is_some() && s.return_pct.is_some()), "{sc:?}");
     assert!(a.expected_return_pct.is_some());
-    assert_eq!(a.catalysts[0].date.unwrap().to_string(), "2026-10-28");
+    assert_eq!(a.catalysts[0].date.unwrap().to_string(), "2026-10-30");
     assert_eq!(a.scores.overall, scoring::score(&snap, Lang::Es).scores.overall, "puntuaciones deterministas");
     assert_eq!(a.price_at_analysis, snap.quote.as_ref().map(|q| q.price));
     assert!(!a.id.is_empty());
@@ -485,4 +485,24 @@ async fn news_shown_to_a_stage_can_be_cited_even_if_the_full_context_was_trimmed
     assert!(judge_user.contains("Foxconn entrega 5233 unidades"), "el hallazgo citable no debe descartarse:\n{judge_user}");
     let q = a.quality_notes.unwrap_or_default();
     assert!(q.iter().all(|w| !w.contains("no existe")), "{q:?}");
+}
+
+/// qwen3 rellena `catalysts[].date` con fechas inventadas (25-oct…) que no figuran en los datos: solo se
+/// conservan las que aparecen en el snapshot (resultados, ex-dividendo de `extra`, ATH, noticias…).
+#[test]
+fn catalyst_dates_not_in_the_data_are_dropped() {
+    let mut snap = crate::fixture::stock_snapshot();
+    let day = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+    snap.fundamentals.as_mut().unwrap().extra.insert("exDividendDate".into(), json!("2026-11-07"));
+    let earnings = snap.fundamentals.as_ref().and_then(|f| f.next_earnings_date).expect("fixture con resultados");
+    let allowed = dates_in_data(&snap);
+    assert_eq!(catalyst_date(Some(earnings), &allowed), Some(earnings));
+    assert_eq!(catalyst_date(Some(day("2026-11-07")), &allowed), Some(day("2026-11-07")), "ex-dividendo de extra");
+    let news_day = snap.news[0].published_at.date_naive();
+    assert_eq!(catalyst_date(Some(news_day), &allowed), Some(news_day), "fecha de una noticia");
+    assert_eq!(catalyst_date(Some(day("2026-12-25")), &allowed), None, "fecha inventada");
+    assert_eq!(catalyst_date(None, &allowed), None);
+    // Sin la clave de extra, la misma fecha deja de estar respaldada.
+    snap.fundamentals.as_mut().unwrap().extra.clear();
+    assert_eq!(catalyst_date(Some(day("2026-11-07")), &dates_in_data(&snap)), None);
 }

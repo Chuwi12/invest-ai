@@ -35,6 +35,8 @@ pub struct Verifier<'a> {
     pub dropped: usize,
     /// Cifras sin verificar que se dejaron marcadas con ⚠ en prosa.
     pub marked: usize,
+    /// Citas `[N#]` a noticias inexistentes que se quitaron conservando la afirmación.
+    pub stripped_citations: usize,
     used: Vec<Segment>,
 }
 
@@ -48,6 +50,7 @@ impl<'a> Verifier<'a> {
             warnings: Vec::new(),
             dropped: 0,
             marked: 0,
+            stripped_citations: 0,
             used: Vec::new(),
         }
     }
@@ -102,15 +105,29 @@ impl<'a> Verifier<'a> {
             return None;
         }
         let l = self.lang;
-        // Citas de noticias: todas deben existir.
-        for n in extract_citations(&text) {
-            if self.registry.get(&format!("N{n}")).is_none() {
+        // Citas de noticias: todas deben existir. qwen3 añade «[N11]»… por encima del número de
+        // noticias aunque el hecho salga de los datos: si lo que queda tras quitar la cita
+        // inexistente lleva cifras y todas se verifican, se conserva la afirmación sin la cita;
+        // sin cifras que la respalden, la cita era la única base y se descarta.
+        let missing: Vec<usize> = extract_citations(&text).into_iter().filter(|n| self.registry.get(&format!("N{n}")).is_none()).collect();
+        let text = if missing.is_empty() {
+            text
+        } else {
+            let mut stripped = text.clone();
+            for n in &missing {
+                stripped = stripped.replace(&format!(" [N{n}]"), "").replace(&format!("[N{n}]"), "");
+            }
+            let has_figures = extract_numbers(&stripped).iter().any(|n| !n.exempt);
+            let still_cited = extract_citations(&stripped).iter().any(|n| missing.contains(n));
+            if !has_figures || still_cited || !self.idx.unverified(&stripped).is_empty() {
                 self.dropped += 1;
-                let w = tr!(l, "Se descartó una afirmación que citaba la noticia [N{}], que no existe: «{}»", "A claim citing news [N{}], which does not exist, was dropped: «{}»", n, truncate_chars(&text, 90));
+                let w = tr!(l, "Se descartó una afirmación que citaba la noticia [N{}], que no existe: «{}»", "A claim citing news [N{}], which does not exist, was dropped: «{}»", missing[0], truncate_chars(&text, 90));
                 self.warn(w);
                 return None;
             }
-        }
+            self.stripped_citations += missing.len();
+            stripped
+        };
         let text = self.clean_citations(&text);
         let mut segs = match self.idx.check_figures(&c.figures) {
             Ok(s) => s,
@@ -137,6 +154,19 @@ impl<'a> Verifier<'a> {
         segs.truncate(2);
         let suffix = self.cite(&segs, &text);
         Some(Checked { text: format!("{text}{suffix}"), plain: text, area: c.area.clone() })
+    }
+
+    /// Nota agregada para `qualityNotes` si se quitaron citas a noticias inexistentes.
+    pub fn citation_note(&self) -> Option<String> {
+        let n = self.stripped_citations;
+        (n > 0).then(|| {
+            tr!(
+                self.lang,
+                "Se quitaron {} cita(s) a noticias inexistentes; las cifras de esas frases sí están en los datos.",
+                "{} citation(s) to non-existent news were removed; the figures in those sentences are in the data.",
+                n
+            )
+        })
     }
 
     fn reject(&mut self, text: &str, bad: &[String]) -> Option<Checked> {
@@ -465,6 +495,25 @@ mod tests {
         assert_eq!(v.dropped, 3);
         assert_eq!(v.warnings.len(), 3);
         assert!(v.claim(&claim("Cualitativa sin números", &[])).is_some());
+    }
+
+    /// qwen3 pega «[N11]»… en hechos que salen de los datos: la afirmación se conserva sin la cita
+    /// inexistente si sus cifras se verifican, y se descarta si la cita era su única base.
+    #[test]
+    fn a_nonexistent_news_tag_is_stripped_when_the_figures_check_out() {
+        let f = fx();
+        let mut v = Verifier::new(&f.text, &f.snap, &f.reg, Lang::Es);
+        let rsi = format!("{:.1}", f.snap.indicators.as_ref().unwrap().rsi14.unwrap());
+        let c = v.claim(&claim(&format!("El RSI14 está en {rsi} [N42]"), &[&rsi])).expect("se conserva");
+        assert!(!c.text.contains("N42") && c.text.contains(&rsi), "{}", c.text);
+        assert_eq!(v.dropped, 0);
+        let note = v.citation_note().expect("nota agregada");
+        assert!(note.contains("Se quitaron 1 cita(s)") && note.contains("sí están en los datos"), "{note}");
+        // Cifra inventada + cita inexistente: se descarta igual.
+        assert!(v.claim(&claim("El PER es 87.43 [N42]", &["87.43"])).is_none());
+        // Sin cifras, la noticia inexistente era la única base.
+        assert!(v.claim(&claim("El gobierno vende sus reservas [N42]", &[])).is_none());
+        assert_eq!(v.dropped, 2);
     }
 
     #[test]
