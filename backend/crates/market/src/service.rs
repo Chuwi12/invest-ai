@@ -853,7 +853,16 @@ impl Inner {
             }
             Ok(Arc::new(news::merge(lists, rel.as_ref(), 50, Utc::now())))
         }))
-        .await?;
+        .await;
+        let arc = match arc {
+            Ok(arc) => arc,
+            // Si fallan todos los de primer plano pero un proveedor en segundo plano ya trajo noticias de
+            // esta clave, se sirven esas en vez de un error.
+            Err(e) => match self.late_news.get(&key).await {
+                Some(late) if !late.is_empty() => return Ok(late.iter().take(limit).cloned().collect()),
+                _ => return Err(e),
+            },
+        };
         // Noticias de los proveedores en segundo plano que ya han llegado (ya filtradas).
         let list = match self.late_news.get(&key).await {
             Some(late) => Arc::new(news::merge(vec![arc.to_vec(), late.to_vec()], None, 50, Utc::now())),
@@ -1668,6 +1677,24 @@ mod latency_tests {
         assert_eq!(merged.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), ["alfa", "gamma", "beta"]);
         assert_eq!(slow.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(fast.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// Si fallan todos los de primer plano pero el de segundo plano ya trajo noticias, se sirven esas
+    /// en lugar de un error (antes `news()` devolvía el error aunque `late_news` tuviera la lista).
+    #[tokio::test(start_paused = true)]
+    async fn late_news_are_served_when_every_foreground_provider_fails() {
+        let bad = fake_news("google_news", 50, None);
+        let slow = fake_news("gdelt", 12_000, Some(vec![news_item("gamma", "gdelt", 10)]));
+        let inner = test_inner(vec![
+            Arc::new(Slot::new(bad, Arc::new(Vec::new()))),
+            Arc::new(Slot::new(slow, Arc::new(Vec::new()))),
+        ]);
+        // Sin nada todavía: error, como antes.
+        assert!(inner.news(None, 50).await.is_err());
+        // GDELT contesta a los ~12 s; el primer plano sigue fallando.
+        tokio::time::sleep(Duration::from_secs(13)).await;
+        let served = inner.news(None, 50).await.expect("debería servir las noticias tardías");
+        assert_eq!(providers_of(&served), ["gdelt"]);
     }
 
     #[tokio::test(start_paused = true)]
