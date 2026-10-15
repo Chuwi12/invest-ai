@@ -1022,3 +1022,24 @@ fn high_debt_to_equity_is_not_divided_again() {
         "un D/E de 40x no puede puntuar mejor que uno de 3x"
     );
 }
+
+#[test]
+fn combine_matches_score_overall_for_default_weights() {
+    for snap in [fixture::stock_snapshot(), fixture::crypto_snapshot(), fixture::sparse_snapshot()] {
+        let c = sc(&snap);
+        let s = &c.scores;
+        let f = [
+            s.technical,
+            s.momentum,
+            s.valuation,
+            s.fundamental,
+            s.sentiment,
+            s.macro_score,
+            s.risk.map(|r| 100.0 - r),
+        ]
+        .map(|x| x.map(f64::from));
+        let got = combine(snap.summary.class, &f, &[1.0; 7]);
+        // `overall` se redondea a 1 decimal y los componentes también: tolerancia de 0,1.
+        assert!((got - f64::from(s.overall)).abs() < 0.11, "{got} vs {}", s.overall);
+    }
+}

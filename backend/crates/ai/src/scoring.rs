@@ -1019,7 +1019,7 @@ fn risk(c: &Ctx) -> Option<Out> {
 
 /// Peso de cada componente en `overall`, según la clase de activo:
 /// `[técnico, momentum, valoración, fundamentales, sentimiento, macro, riesgo]`.
-fn weights(class: AssetClass) -> [f64; 7] {
+pub fn default_weights(class: AssetClass) -> [f64; 7] {
     match class {
         AssetClass::Stock => [0.17, 0.13, 0.20, 0.22, 0.08, 0.08, 0.12],
         AssetClass::Etf | AssetClass::Fund | AssetClass::Index => {
@@ -1028,6 +1028,50 @@ fn weights(class: AssetClass) -> [f64; 7] {
         AssetClass::Crypto => [0.24, 0.20, 0.14, 0.0, 0.12, 0.10, 0.20],
         _ => [0.28, 0.22, 0.05, 0.0, 0.08, 0.20, 0.17],
     }
+}
+
+/// Multiplicadores por componente aprendidos por el crate `learning` (versión de pesos vigente).
+/// `None` = pesos por defecto, sin ningún cambio de comportamiento.
+static LEARNED_MULTIPLIERS: std::sync::RwLock<Option<[f64; 7]>> = std::sync::RwLock::new(None);
+
+/// Instala (o quita con `None`) los multiplicadores vigentes. Se ignoran si no son finitos o no
+/// están en (0, 10].
+pub fn set_learned_multipliers(m: Option<[f64; 7]>) {
+    let ok = m.filter(|m| m.iter().all(|x| x.is_finite() && *x > 0.0 && *x <= 10.0));
+    if let Ok(mut g) = LEARNED_MULTIPLIERS.write() {
+        *g = ok;
+    }
+}
+
+pub fn learned_multipliers() -> Option<[f64; 7]> {
+    LEARNED_MULTIPLIERS.read().ok().and_then(|g| *g)
+}
+
+/// Pesos vigentes: los de `default_weights` por los multiplicadores aprendidos, si los hay.
+fn weights(class: AssetClass) -> [f64; 7] {
+    let mut w = default_weights(class);
+    if let Some(m) = learned_multipliers() {
+        for (x, k) in w.iter_mut().zip(m) {
+            *x *= k;
+        }
+    }
+    w
+}
+
+/// Puntuación global a partir de los componentes en orientación «favorable» (riesgo ya invertido)
+/// y unos multiplicadores explícitos: la misma media ponderada que `score`. La usa `learning`
+/// para reevaluar puntuaciones guardadas con otros pesos; un test fija que coincide con `score`.
+pub fn combine(class: AssetClass, favorable: &[Option<f64>; 7], multipliers: &[f64; 7]) -> f64 {
+    let w = default_weights(class);
+    let (mut num, mut den) = (0.0, 0.0);
+    for i in 0..7 {
+        if let Some(x) = favorable[i] {
+            let wi = w[i] * multipliers[i];
+            num += wi * x;
+            den += wi;
+        }
+    }
+    if den > 0.0 { num / den } else { 50.0 }
 }
 
 /// Componentes que *deberían* tener datos para esta clase (para listar carencias).
