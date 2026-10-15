@@ -1,0 +1,272 @@
+# Archivo de conocimiento local (RAG)
+
+Estado: **crate `knowledge` implementado y probado sin red ni Ollama; sin cablear** (ver «Para el coordinador»).
+Ningún embedding real se ha calculado todavía: no se usó Ollama ni la GPU y no se descargó ningún modelo.
+
+## Principio
+El LLM no aprende: consulta. El archivo guarda texto que la app ya tiene (noticias descargadas, secciones de
+folletos de OPV, análisis pasados), lo trocea, calcula un vector por fragmento y, al preguntar, devuelve los
+fragmentos más relevantes **con fuente, fecha y URL**. El modelo los recibe numerados `[D1]…[Dn]`, igual que las
+noticias `[N#]`, y sus citas se verifican en Rust contra lo que realmente se le entregó. Es la misma filosofía que
+`docs/ARCHITECTURE.md` («por qué no se hace fine-tuning»): cifras verificables y con fecha, no memoria del modelo.
+
+## Qué se guarda
+| Tipo (`DocKind`) | Origen | Qué se indexa | Clave lógica (`doc_key`) |
+|---|---|---|---|
+| `news` | `NewsItem` que `market` ya devolvió (sin peticiones extra) | título + resumen | `news:<NewsItem.id>` |
+| `filing` | S-1/F-1/424B… que obtiene el otro agente, por secciones | cada sección troceada | `filing:<accession>` |
+| `analysis` | `Analysis` guardado (más adelante, con su resultado en `meta`) | tesis, casos alcista/bajista | `analysis:<uuid>` |
+
+Esquema (`backend/crates/server/migrations/0004_knowledge.sql`, misma BD SQLite, fechas en ms Unix):
+- `documents`: `doc_key` único, `content_hash` único, `kind`, `subtype` (S-1…), `source`, `publisher`, `title`, `url`,
+  `issuer`, `language`, `published_at`, `ingested_at`, `chunk_count`, `pinned`, `meta` (JSON libre).
+- `document_assets(document_id, asset_id)`: un documento puede pertenecer a varios activos (`stock:AAPL`).
+- `chunks`: `document_id`, `ordinal`, `section`, `text`, `text_hash`, `token_count`.
+- `embeddings(chunk_id, model, dim, vec BLOB f32 LE normalizado)`: PK `(chunk_id, model)`. `model` identifica el
+  ESPACIO vectorial (`modelo|estilo de prompt|dimensiones`); el índice solo carga el del modelo activo, así que
+  cambiar `RAG_EMBED_MODEL` nunca mezcla espacios: los fragmentos quedan «pendientes» y `embed_pending` los recalcula.
+- Los embeddings son datos **derivados** (regenerables desde `chunks.text`); el texto no.
+
+Metadatos pedidos: fuente (`source`/`publisher`), URL, fecha (`published_at`), activo/emisor (`document_assets`/`issuer`),
+tipo (`kind`+`subtype`), idioma, hash (`content_hash` del documento, `text_hash` del fragmento).
+
+## Troceado (`chunk.rs`)
+- Por **secciones** (nunca se mezcla texto de dos secciones). `sections_from_text` detecta cabeceras de folleto
+  (`ITEM 1A. RISK FACTORS`, `USE OF PROCEEDS`, líneas en mayúsculas, `# …`); si el origen ya trae secciones
+  estructuradas, es mejor pasarlas tal cual (las cabeceras en Title Case no se detectan).
+- Dentro de cada sección: cortes en fin de **oración** (con lista de abreviaturas: `Inc.`, `U.S.`, `Dr.`, decimales),
+  objetivo **400 tokens**, máximo **600**, solape de **60** tokens (las últimas oraciones del fragmento anterior), cola
+  nueva < 80 tokens se funde con el anterior si cabe. Una oración > 600 se parte por palabras. Determinista.
+- Tokens **estimados** a 3,5 caracteres/token (conservador para castellano y cifras). No es el tokenizador real: un
+  fragmento de «600» puede ser ~700 reales; cabe de sobra en los 2048 de embeddinggemma/nomic.
+- Lo que se embebe en folletos es `«Título — Sección\nTexto»` (un fragmento suelto no dice de qué empresa habla). En
+  noticias el título ya es la primera línea. El texto **almacenado** es el original, sin cabecera.
+
+## Deduplicación
+1. Misma `doc_key` y mismo `content_hash` → `Unchanged` (solo se fusionan activos nuevos: la misma noticia pedida desde
+   AAPL y luego desde MSFT queda enlazada a ambos).
+2. Misma `doc_key`, contenido distinto → `Updated` (se reemplazan sus fragmentos).
+3. Otra `doc_key` con el mismo `content_hash` → `Duplicate`. Noticias: hash = título sin « - Medio» + día (colapsa el
+   mismo titular de Yahoo y Google News); folletos: texto normalizado completo.
+4. **Fragmentos idénticos entre documentos** (un S-1/A repite casi todo el S-1): se reutiliza el embedding por
+   `text_hash` (no se recalcula) y en los resultados se colapsan (gana el mejor puntuado).
+
+## Recuperación
+1. Se embebe la consulta (`EmbedKind::Query`; cada familia de modelos usa su prefijo, ver abajo).
+2. **Prefiltro** en memoria por metadatos: activos (cualquiera de; `include_general` añade los documentos sin activo),
+   tipos, emisor, rango de fechas. Con filtro por activo el escaneo baja de 30 ms a ~0,3 ms (medido).
+3. Similitud coseno exacta (producto escalar, vectores normalizados) → `5k` candidatos (mín. 25).
+4. **Reranking** simple: `score = 0,80·sim + 0,12·recencia + 0,08·peso_fuente`.
+   - recencia = `0,5^(edad/vida_media)`: noticias 14 d, folletos 365 d, análisis 90 d.
+   - peso de fuente: folleto/`sec` 1,0; noticia 0,75; `google_news` 0,6 (agregador); análisis propio 0,6 (no es fuente
+     primaria). Configurable en `KnowledgeConfig::source_weights`. Son **heurísticas razonadas, no calibradas**: sin
+     un conjunto de evaluación propio no puedo decir que 0,80/0,12/0,08 sea óptimo; la similitud domina a propósito
+     para que la recencia desempate y no sustituya a la relevancia.
+5. Colapso de texto idéntico y tope por documento (`max_per_doc`, 2) para que un S-1 largo no ocupe los `k`.
+6. `min_similarity` opcional: el umbral depende del modelo, hay que calibrarlo con datos reales (no hay valor por defecto).
+
+Si el embedder falla, `search` devuelve error: el llamador debe seguir **sin** conocimiento y decirlo, no inventar.
+Tras un fallo transitorio hay 30 s de pausa para no martillear a Ollama (los textos quedan pendientes).
+
+## Citas `[D#]` y verificación (`citation.rs`)
+- `Citations::new(hits)` numera `D1…Dn` por orden de puntuación (por fragmento, no por documento).
+- `render(lang)` produce el bloque para el prompt: `<knowledge_base>` + una entrada por fragmento con tipo, fuente, fecha,
+  emisor, sección, URL y el texto en una línea. `source_refs(tags)` da `domain::SourceRef` para `Analysis.sources`.
+- `clean(text)` revisa cada `[D#]` de la salida: etiqueta inexistente → se quita; la frase no comparte **ninguna cifra ni
+  2 palabras de contenido** con el fragmento → se quita (misma heurística que `Verifier::clean_citations` para `[N#]`).
+  Devuelve `CitationIssue::{Unknown, Unsupported}` para `qualityNotes`.
+- Es una heurística léxica: detecta citas inventadas o sin relación, **no** garantiza que la frase sea fiel (una frase
+  que reutiliza dos palabras del fragmento pero afirma otra cosa pasa). Para cifras, lo robusto es que `ai` meta el texto
+  de los fragmentos en su `NumberIndex` (ver coordinador).
+
+## Prompt injection
+Los fragmentos son datos no fiables (un titular o un folleto pueden decir «ignora las instrucciones anteriores»).
+- **Se guardan y recuperan sin alterar un carácter** (alterarlos falsearía la evidencia y daría falsa seguridad). Solo
+  se registra un `warn` y `IngestReport.suspicious` si coinciden patrones conocidos (`looks_like_injection`); no cambia el ranking.
+- Al **renderizar** se aplica la misma política auditada que `ai::safety::sanitize_untrusted`: una línea, sin `<>` (ni
+  `<|…|>`), sin `[]` (no pueden falsificar `[D2]` ni cerrar `</knowledge_base>`), sin vallas ni caracteres invisibles. Los
+  metadatos (título, sección, URL, emisor) pasan por lo mismo.
+- El bloque lleva una cabecera que lo declara dato; el system prompt de `ai` debe repetirlo (ver coordinador).
+- El texto de un fragmento no puede validar una cita: `clean` solo mira la salida del modelo (test
+  `a_fragment_cannot_vouch_for_other_tags`). Las herramientas de `ai` son de solo lectura (S-10), así que una inyección
+  no puede actuar; el riesgo residual es que el 7B repita una orden o una afirmación falsa del fragmento.
+- Riesgo propio de los folletos: son texto promocional del emisor. El peso de fuente 1,0 significa «primaria y
+  verificable», no «imparcial»; el prompt debe tratarlos como declaraciones de la empresa.
+
+## Índice vectorial: por qué en memoria y no `sqlite-vec`
+**Decisión: matriz plana `Vec<f32>` en RAM cargada desde SQLite y búsqueda exacta por fuerza bruta**
+(`index.rs`; el contrato `Embedder`/`KnowledgeBase` no depende del índice, se puede cambiar sin tocar nada más).
+Medido (`cargo run --release --example bench_index -- 50000 256 768 1024`, CPU de este equipo, ablación de GPU en
+marcha pero esto no usa GPU; 30 búsquedas top-30, mediana):
+
+| 50 000 vectores | RAM de vectores (teórica) | RSS añadido (medido) | top-30 sin filtro p50 / máx | con filtro por activo p50 |
+|---|---|---|---|---|
+| 256 dim | 48,8 MiB | 54,1 MiB | 6,6 / 10,1 ms | 0,21 ms |
+| 768 dim | 146,5 MiB | 150,6 MiB | 22,7 / 25,2 ms | 0,29 ms |
+| 1024 dim | 195,3 MiB | 200,1 MiB | 30,3 / 32,7 ms | 0,32 ms |
+
+Por fragmento: `4·dim` bytes + 32 B de fila (+ metadatos por documento). Con el tope por defecto de 100 000 fragmentos:
+~300 MiB a 768 dim (~400 MiB a 1024), latencia ~45–60 ms sin filtro (extrapolación lineal, no medida). En disco, cada
+fragmento ocupa ~`4·dim` + ~1,4 KB de texto (estimado): 100 000 ≈ 450 MB en SQLite (+ WAL). Los embeddings no
+compiten con la VRAM: el índice está en RAM del sistema (31 GB en este equipo).
+Arranque: leer ~150 MB de BLOBs de SQLite y construir el índice; no medido con Ollama pero es lectura local.
+
+`sqlite-vec` **no aporta ahora**: (1) su README advierte «pre-v1, expect breaking changes»; (2) se compila con C y se
+registra con `sqlite3_auto_extension` + `transmute` (`unsafe`), y su guía de Rust solo cubre rusqlite, no `sqlx`
+(no lo he probado); (3) con metadatos, su propia documentación habla de «slower full scan»; la documentación que leí
+no dice si `vec0` es exacto o aproximado, así que **no puedo afirmar que sea más rápido** que 23 ms para 50 000×768, y
+una búsqueda exacta dentro de SQLite no puede bajar de ese orden. Revisarlo si algún día pasamos de ~500 k vectores
+o de ~1 GB de RAM.
+
+## Modelos de embeddings en Ollama
+Datos de **manifest del registro** (`registry.ollama.ai`, tamaño de la capa del modelo) y **cabecera GGUF** leída con
+una petición `Range` de 128 KiB por modelo (dimensión, contexto, capas; no se descargó ningún modelo), más las fichas de
+Hugging Face. Puntuaciones MTEB: de las fichas oficiales de cada modelo (autodeclaradas por sus autores).
+
+| Modelo (tag) | Tamaño real | Params | Dim | Contexto | Idiomas | MTEB multiling. v2 (media tareas) | Prefijos |
+|---|---|---|---|---|---|---|---|
+| `nomic-embed-text` | 274,3 MB (F16) | 137 M | 768 (MRL 512/256/128/64) | 2048 en GGUF (params: `num_ctx` 8192) | etiqueta de la ficha: solo inglés | — | `search_document:` / `search_query:` |
+| `embeddinggemma:300m-qat-q8_0` | **338,0 MB** | 307,6 M | 768 (MRL 512/256/128) | 2048 | 100+ | **60,93** | `title: none \| text:` / `task: search result \| query:` |
+| `embeddinggemma:300m-qat-q4_0` | 238,5 MB | 307,6 M | 768 | 2048 | 100+ | 60,62 | ídem |
+| `embeddinggemma` (latest = BF16) | 621,9 MB | 307,6 M | 768 | 2048 | 100+ | 61,15 | ídem |
+| `qwen3-embedding:0.6b` (Q8_0) | **639,2 MB** | 595,8 M | 1024 (MRL 32–1024) | 32 768 | 100+ | **64,33** (inglés v2: 70,70) | consulta: `Instruct: …\nQuery:`; documento: ninguno |
+| `qwen3-embedding:4b` (Q4_K_M) | 2496,7 MB | 4,0 B | 2560 | 40 960 | 100+ | 69,45 | ídem |
+| `qwen3-embedding` (latest = 8b Q4_K_M) | 4676,8 MB | 7,6 B | 4096 | — | 100+ | 70,58 | ídem |
+| `bge-m3` (solo F16) | 1157,7 MB | 566,7 M | 1024 | 8192 | 100+ | 59,56 | ninguno |
+| `snowflake-arctic-embed2` | 1160,3 MB | 566,7 M | 1024 | 8192 | 74 (lista en el GGUF) | no consultado | — |
+| `paraphrase-multilingual` | 562,8 MB | 277 M | 768 | 512 | ~50 | no es de recuperación | — |
+| `mxbai-embed-large` / `all-minilm` / `granite-embedding` | 669,6 / 45,9 / 62,5 MB | 334 / 23 / 30 M | 1024 / 384 / 384 | 512 | inglés | — | — |
+
+(Las 59,56 de bge-m3 y 64,33 de Qwen3-0.6B salen de la misma tabla del repositorio de Qwen; la de embeddinggemma, de su
+ficha. Mismo benchmark nominal, pero fuentes distintas y media de todas las tareas, no solo recuperación.)
+
+Criterio: la app mezcla **consultas en español** con **folletos y noticias en inglés** (S-1/F-1, Yahoo) y noticias en
+español (Google News `es`), así que hace falta recuperación **entre idiomas**. Eso descarta `nomic-embed-text`,
+`all-minilm`, `mxbai` y `granite` (inglés). Contexto de 2048 sobra para fragmentos de ≤ 600 tokens.
+
+VRAM (RTX 4070 de 8 GB con el LLM cargado: `nvidia-smi` marcaba 5623/8188 MiB en el momento de consultar, con más carga
+de otros agentes): caché KV por token calculada de la cabecera GGUF = `2·capas·kv_heads·head_dim·2 B`:
+embeddinggemma 24·1·256 → 24 576 B/token (~48 MiB a 2048); Qwen3-0.6B 28·8·128 → 114 688 B/token (~448 MiB a 4096
+tokens; el `num_ctx` real que usa Ollama para embeddings **no lo he verificado**). Pesos: 338 MB frente a 639 MB.
+
+### Recomendación (provisional, con datos de fichas; falta medirla en nuestro corpus)
+**`RAG_EMBED_MODEL=embeddinggemma:300m-qat-q8_0`**: es multilingüe, el más pequeño de los multilingües (338 MB, ~48 MiB
+de KV), 768 dim (la mitad de memoria por vector que 1536) y la cuantización Q8 pierde 0,22 puntos MTEB frente a la
+precisión completa según su ficha. Es el que menos disputa VRAM al LLM de 7B.
+**Alternativa: `qwen3-embedding:0.6b`**: +3,4 puntos MTEB multilingüe (64,33 frente a 60,93), Apache-2.0 (Gemma tiene sus
+propios términos de uso), pero ~2× de pesos, ~2× de cómputo y bastante más KV. Sería la elección si la medida real
+muestra que embeddinggemma falla en el cruce es↔en.
+No recomiendo `bge-m3` (1,16 GB solo en F16, puntuación inferior) ni `qwen3-embedding:latest` (4,7 GB).
+
+**Qué NO está verificado** (la GPU estaba ocupada): velocidad real en esta máquina (chunks/s en GPU y CPU),
+que Ollama 0.40.3 sirva bien los tags `qat-q8_0` y `qwen3-embedding:0.6b`, si competir con el LLM por VRAM provoca
+descargas/recargas del modelo de chat, y la calidad real es↔en sobre nuestros textos. Hay un comentario de terceros sobre
+un posible deterioro de calidad con lotes grandes (issue #6262 de Ollama) que **no pude verificar**; por eso el lote por
+defecto es 16 y conviene comprobar que `embed([a,b,c])` ≈ `embed([a])`.
+**Protocolo para decidir** cuando haya GPU libre (necesita aprobación para `ollama pull`): 1) descargar ambos; 2) 40
+pares (consulta es/en → pasaje en/es) sacados de folletos y titulares reales; 3) medir recall@5, MRR, ms/fragmento y
+VRAM (`ollama ps`) con LLM cargado; 4) elegir el menor que no pierda > 5 puntos de recall@5.
+Notas de uso: `RAG_EMBED_DIMS=512` trunca (Matryoshka) y ahorra 33 % de RAM por -0,44 MTEB en gemma (ficha); `RAG_EMBED_NUM_GPU=0`
+pide a Ollama CPU para no competir por VRAM (opción de Ollama, **sin verificar** su efecto con estos modelos).
+
+## Retención y tamaño
+- Noticias 90 días (`RAG_NEWS_RETENTION_DAYS`), folletos 1095 (3 años), análisis sin caducidad (0).
+- Tope duro `RAG_MAX_CHUNKS` = 100 000. Al superarlo `purge` expulsa primero noticias antiguas, luego folletos antiguos;
+  **nunca** análisis ni documentos `pinned` (p. ej. los citados por un análisis guardado, `KnowledgeBase::pin`).
+- Estimación: unas 600 noticias/día con 20 activos seguidos × 90 d ≈ 54 000 fragmentos (~165 MiB a 768 dim); 20 OPV
+  con secciones clave ≈ 6 000 fragmentos. Es una estimación de volumen, no una medida: `stats()` da las cifras reales.
+- `purge(now)` hay que llamarla periódicamente (cada pocas horas); el crate no lanza temporizadores propios.
+- Los embeddings viven en la misma SQLite que las conversaciones: la BD crece cientos de MB. Si molesta, mover a un
+  fichero propio es sencillo (misma migración, otro pool).
+
+## API pública (`knowledge`)
+```rust
+KnowledgeConfig::from_env() / from_lookup(..)            // RAG_*; enabled=false por defecto
+OllamaEmbedder::new(cfg.embed.clone())?                   // impl Embedder sobre POST /api/embed (no descarga modelos)
+FakeEmbedder { dim }                                      // determinista, para tests y demo (no semántico)
+let kb = KnowledgeBase::open(pool, Arc<dyn Embedder>, cfg).await?;   // comprueba esquema, carga índice
+kb.ingest(NewDocument) -> IngestReport                    // Added | Updated | Unchanged | Duplicate{of}
+kb.ingest_news(Option<&AssetId>, &[NewsItem]) -> BatchReport
+kb.search(&SearchRequest) -> SearchResults               // hits con texto original + DocumentInfo + score/sim/recencia
+kb.embed_pending(limit) / kb.purge(now) / kb.pin(id, bool) / kb.merge_meta(id, json) / kb.delete_by_key(key) / kb.stats()
+trait KnowledgeSearch { async fn search(&self, &SearchRequest) }   // contrato mínimo para `ai`
+spawn_news_worker(kb, CancellationToken) -> (NewsSink, JoinHandle) // sink.offer(asset, &[NewsItem]): síncrono, no bloquea
+sections_from_text(text) -> Vec<Section>; chunk_sections(..)
+Citations::new(hits).render("es") / .clean(text) / .source_refs(["D1"])
+```
+Código: `chunk.rs` troceado · `embed.rs`/`ollama.rs` embeddings · `index.rs` búsqueda · `store.rs` SQLite · `kb.rs` núcleo ·
+`ingest.rs` enganche de noticias · `citation.rs` citas y contexto seguro · `config.rs` entorno.
+
+## Tests (sin red ni Ollama; Ollama simulado con un servidor axum local)
+46 tests (34 unitarios + 12 de integración): troceado (límites, solape, no se pierde texto, secciones separadas, abreviaturas, UTF-8, oración
+gigante, cola, determinismo, cabeceras SEC); normalización/hash; índice (top-k = ordenación ingenua, filtros, compactación
+tras borrar, dimensión); `OllamaEmbedder` (forma exacta de la petición, lotes, prefijos por modelo, truncado Matryoshka,
+404→modelo ausente, 5xx/caído→transitorio, recuento incorrecto); deduplicación (clave, hash, actualización, reutilización
+de embeddings y colapso S-1/S-1/A); filtros (activo, general, tipo, fechas, emisor); ranking (relevancia, recencia,
+fuente, tope por documento); persistencia en fichero y cambio de modelo (pendientes → `embed_pending`); embedder caído
+(texto a salvo, búsqueda falla de forma explícita); retención, tope y `pinned`; **inyección** («ignora las instrucciones
+anteriores» + `</knowledge_base>` + `[D1]` + `<|im_start|>`: se almacena y recupera íntegro, no cierra el bloque, no fabrica
+citas y no altera la recuperación de los demás); enganche de noticias (deduplica ofertas repetidas, no bloquea).
+
+## Pendiente / límites
+- **Medir con Ollama real** (velocidad, VRAM, calidad es↔en, lotes) y decidir modelo con el protocolo de arriba. Sin esto
+  la recomendación es de ficha técnica.
+- **Búsqueda léxica (FTS5/BM25) híbrida**: los embeddings flojean con identificadores exactos (tickers, «Item 1A», cifras).
+  Daría además recuperación sin Ollama. No se hizo: no he verificado que el SQLite empaquetado por sqlx incluya FTS5 y una
+  migración fallida rompería el arranque de toda la app. Es el siguiente paso con más valor.
+- Sin reranker neuronal (cross-encoder): el reranking es heurístico y sin calibrar.
+- Los pesos 0,80/0,12/0,08, las vidas medias y los pesos de fuente son razonados, no ajustados con datos.
+- Análisis pasados: el tipo existe y el `meta` admite el resultado, pero **no hay conversión desde `Analysis`** ni lo
+  recomiendo como evidencia: el modelo podría citar su propia alucinación anterior. Si se usa, solo con la etiqueta
+  «análisis previo de esta app (no es fuente primaria)» (ya la lleva `render`) y para comparar «qué cambió desde entonces».
+- `Citations::clean` es léxico (ver arriba). Las cifras de los fragmentos aún no entran en `NumberIndex`.
+- Detección de cabeceras de folleto: heurística de texto plano; HTML de EDGAR conviene seccionarlo en origen.
+
+## Para el coordinador
+1. **Migración**: `0004_knowledge.sql` ya está en `server/migrations/`. `knowledge::SCHEMA_SQL` la incluye con `include_str!`
+   (única copia); `KnowledgeBase::open` falla con un mensaje claro si no se aplicó. `Cargo.lock` cambia (paquete nuevo,
+   dependencias que ya estaban en el lock).
+2. **Workspace**: `crates/knowledge` añadido a `members` y `knowledge = { path = … }` a `[workspace.dependencies]`.
+3. **`server/Cargo.toml`**: `knowledge.workspace = true`.
+4. **`server/src/main.rs`** (tras `db::connect` y antes de `AppState::new`; con `RAG_ENABLED=1`):
+```rust
+let kcfg = knowledge::KnowledgeConfig::from_env();
+let mut kb = None;
+if kcfg.enabled && !config.fake {
+    let embedder = Arc::new(knowledge::OllamaEmbedder::new(kcfg.embed.clone())?);
+    let k = knowledge::KnowledgeBase::open(pool.clone(), embedder, kcfg).await?;
+    let (sink, worker) = knowledge::spawn_news_worker(k.clone(), state_shutdown.clone()); // el CancellationToken de AppState
+    market = Arc::new(TeeMarket::new(market, sink));      // ver abajo; ninguna petición extra a proveedores
+    // tarea periódica: k.purge(Utc::now()) cada 6 h, y k.embed_pending(64) al arrancar
+    kb = Some(k);
+}
+```
+   y `AppState.knowledge: Option<Arc<KnowledgeBase>>`. Esperar al `worker` en el apagado junto a `state.tasks`.
+5. **Enganche de noticias sin duplicar peticiones** (`server/src/knowledge.rs`; no lo incluí en el crate porque
+   `MarketData` no tiene métodos por defecto y otro agente puede añadirle alguno: un decorador en `knowledge` rompería su compilación):
+```rust
+pub struct TeeMarket { inner: Arc<dyn MarketData>, sink: knowledge::NewsSink }
+#[async_trait] impl MarketData for TeeMarket {
+    async fn news(&self, id: Option<&AssetId>, limit: usize) -> Result<Vec<NewsItem>> {
+        let r = self.inner.news(id, limit).await?; self.sink.offer(id, &r); Ok(r)
+    }
+    async fn snapshot(&self, id: &AssetId) -> Result<AssetSnapshot> {
+        let s = self.inner.snapshot(id).await?; self.sink.offer(Some(id), &s.news); Ok(s)
+    }
+    // …el resto delega en `inner`
+}
+```
+   `offer` es síncrono, descarta lo ya ofrecido sin tocar la BD y, con la cola llena, descarta contando (`dropped()`); nunca
+   retrasa una respuesta. Alternativa sin decorador: una línea `sink.offer(..)` en `routes/market.rs` (2 sitios), `dashboard.rs`
+   y `ai/src/tools.rs:263`. Los filings de la SEC que ya salen como `NewsItem` con `provider="sec"` se archivarían como `news`;
+   el otro agente debería usar `NewDocument { kind: Filing, sections, subtype, issuer, … }` para los folletos de OPV.
+6. **`ai`** (no lo toqué): (a) herramienta de chat `search_knowledge(query, asset?, kind?, since?)` sobre `KnowledgeSearch`
+   (solo lectura, `k` ≤ 8); (b) en el análisis, una recuperación por activo antes del juez (`assets=[id]`, `include_general=false`,
+   k=6 en standard/deep y 3–4 en quick) e inyectar `Citations::render(lang)`; cuesta ~2,5 k tokens de entrada con k=6;
+   (c) system prompt: el bloque `<knowledge_base>` es dato no fiable, se cita con `[D#]`, los folletos son declaraciones de la
+   empresa; (d) tras la generación, `Citations::clean` y `source_refs` hacia `Analysis.sources`; (e) meter el texto de los
+   fragmentos en `NumberIndex` para verificar cifras; (f) si `search` falla, seguir sin conocimiento y anotarlo en `dataWarnings`.
+7. **Ollama**: el modelo de embeddings compite por VRAM con el LLM; `RAG_EMBED_KEEP_ALIVE=2m` lo descarga pronto. Valorar
+   pausar la ingesta mientras hay un análisis en curso hasta tener la medida real.
+8. Aviso de colisión: si otro agente crea otra `0004_*.sql`, `sqlx::migrate!` fallará por versión repetida (el coordinador
+   ya asignó 0004 a este crate y 0005 al agente de aprendizaje).

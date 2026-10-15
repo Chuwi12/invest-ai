@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/domain", "crates/market", "crates/ai", "crates/server"]
+members = ["crates/domain", "crates/market", "crates/ai", "crates/knowledge", "crates/server"]
 
 [workspace.package]
 edition = "2024"
@@ -12,6 +12,7 @@ publish = false
 domain = { path = "crates/domain" }
 market = { path = "crates/market" }
 ai = { path = "crates/ai" }
+knowledge = { path = "crates/knowledge" }
 
 anyhow = "1"
 async-trait = "0.1"

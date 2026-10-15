@@ -1,0 +1,576 @@
+//! `KnowledgeBase`: ingesta, búsqueda, retención y estadísticas sobre SQLite + índice en memoria.
+
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex, RwLock},
+    time::{Duration, Instant},
+};
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use domain::{AssetId, NewsItem};
+use sqlx::SqlitePool;
+
+use crate::{
+    chunk::chunk_sections,
+    config::KnowledgeConfig,
+    embed::{EmbedKind, Embedder, normalize_l2},
+    error::{EmbedError, KnowledgeError, Result},
+    index::{Candidate, DocMeta, Filter, VectorIndex},
+    model::*,
+    store::{self, ChunkRow, InsertDoc},
+    text::{fold_key, hash128, hash128_hex, looks_like_injection, normalize_text},
+};
+
+/// Tras un fallo transitorio del embedder no se vuelve a intentar durante este tiempo.
+const EMBED_BACKOFF: Duration = Duration::from_secs(30);
+
+/// Búsqueda de conocimiento. Contrato mínimo que puede consumir `ai` (o moverse a `domain`).
+#[async_trait]
+pub trait KnowledgeSearch: Send + Sync + 'static {
+    async fn search(&self, req: &SearchRequest) -> Result<SearchResults>;
+}
+
+pub struct KnowledgeBase {
+    pool: SqlitePool,
+    embedder: Arc<dyn Embedder>,
+    model: String,
+    cfg: KnowledgeConfig,
+    index: Arc<RwLock<VectorIndex>>,
+    write_gate: tokio::sync::Mutex<()>,
+    backoff_until: Mutex<Option<Instant>>,
+}
+
+fn meta_of(d: &DocumentInfo) -> DocMeta {
+    DocMeta {
+        id: d.id,
+        kind: d.kind,
+        source: d.source.clone(),
+        issuer_key: d.issuer.as_deref().map(fold_key).filter(|s| !s.is_empty()),
+        published_ms: d.published_at.timestamp_millis(),
+        assets: d.assets.clone(),
+    }
+}
+
+/// Texto que se embebe: los folletos llevan «Título — Sección» delante (el fragmento solo, sin
+/// el nombre del emisor, se recupera mal). En noticias el título ya es la primera línea.
+fn embed_text(kind: DocKind, title: &str, section: Option<&str>, text: &str) -> String {
+    if kind == DocKind::News {
+        return text.to_string();
+    }
+    match section {
+        Some(s) if !s.is_empty() => format!("{title} — {s}\n{text}"),
+        _ => format!("{title}\n{text}"),
+    }
+}
+
+fn recency(kind: DocKind, age_days: f64) -> f32 {
+    let half_life = match kind {
+        DocKind::News => 14.0,
+        DocKind::Filing => 365.0,
+        DocKind::Analysis => 90.0,
+    };
+    0.5f64.powf(age_days.max(0.0) / half_life) as f32
+}
+
+impl KnowledgeBase {
+    /// Abre la base, comprueba el esquema y carga el índice del modelo activo en memoria.
+    pub async fn open(pool: SqlitePool, embedder: Arc<dyn Embedder>, cfg: KnowledgeConfig) -> Result<Arc<Self>> {
+        store::check_schema(&pool).await?;
+        let model = embedder.model_id();
+        let mut index = VectorIndex::new();
+        for d in store::load_documents(&pool).await? {
+            index.upsert_doc(meta_of(&d));
+        }
+        let mut skipped = 0usize;
+        for v in store::load_vectors(&pool, &model).await? {
+            if index.add(v.chunk_id, v.document_id, v.text_hash, &v.vec).is_err() {
+                skipped += 1;
+            }
+        }
+        if skipped > 0 {
+            tracing::warn!(skipped, "vectores descartados al cargar el índice (dimensión o documento incoherente)");
+        }
+        tracing::info!(model = %model, vectors = index.len(), docs = index.doc_count(), "archivo de conocimiento cargado");
+        Ok(Arc::new(Self {
+            pool,
+            embedder,
+            model,
+            cfg,
+            index: Arc::new(RwLock::new(index)),
+            write_gate: tokio::sync::Mutex::new(()),
+            backoff_until: Mutex::new(None),
+        }))
+    }
+
+    pub fn config(&self) -> &KnowledgeConfig {
+        &self.cfg
+    }
+
+    pub fn model_id(&self) -> &str {
+        &self.model
+    }
+
+    fn index_read(&self) -> std::sync::RwLockReadGuard<'_, VectorIndex> {
+        self.index.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn index_write(&self) -> std::sync::RwLockWriteGuard<'_, VectorIndex> {
+        self.index.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    async fn embed_texts(&self, texts: &[String], kind: EmbedKind) -> std::result::Result<Vec<Vec<f32>>, EmbedError> {
+        if let Some(until) = *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner())
+            && Instant::now() < until
+        {
+            return Err(EmbedError::Unavailable("embedder en pausa tras un fallo reciente".into()));
+        }
+        let res = self.embedder.embed(texts, kind).await;
+        match res {
+            Ok(mut vs) => {
+                if vs.len() != texts.len() {
+                    return Err(EmbedError::Bad("número de vectores incorrecto".into()));
+                }
+                let dim = vs.first().map_or(0, Vec::len);
+                for v in &mut vs {
+                    if v.len() != dim {
+                        return Err(EmbedError::Bad("dimensiones desiguales".into()));
+                    }
+                    normalize_l2(v)?;
+                }
+                *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                Ok(vs)
+            }
+            Err(e) => {
+                if e.is_transient() {
+                    *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now() + EMBED_BACKOFF);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- ingesta
+
+    pub async fn ingest(&self, doc: NewDocument) -> Result<IngestReport> {
+        let key = doc.doc_key.trim();
+        if key.is_empty() || key.len() > 300 {
+            return Err(KnowledgeError::Invalid("doc_key vacía o demasiado larga".into()));
+        }
+        if doc.title.trim().is_empty() {
+            return Err(KnowledgeError::Invalid("el documento no tiene título".into()));
+        }
+        let bytes: usize = doc.sections.iter().map(|s| s.text.len()).sum();
+        if bytes > self.cfg.max_doc_bytes {
+            return Err(KnowledgeError::Invalid(format!("documento de {bytes} bytes; tope {}", self.cfg.max_doc_bytes)));
+        }
+        let mut assets: Vec<String> = doc.assets.iter().map(|a| a.trim().to_string()).filter(|a| !a.is_empty() && a.len() <= 64).collect();
+        assets.sort();
+        assets.dedup();
+        assets.truncate(20);
+
+        let _gate = self.write_gate.lock().await;
+        let hash = doc.content_hash();
+        let mut replacing = None;
+        if let Some(ex) = store::find_by_key(&self.pool, key).await? {
+            if ex.content_hash == hash {
+                return self.merge_assets(ex.id, &assets, IngestOutcome::Unchanged).await;
+            }
+            replacing = Some(ex.id);
+        }
+        if let Some(dup) = store::find_by_hash(&self.pool, &hash).await?
+            && Some(dup) != replacing
+        {
+            return self.merge_assets(dup, &assets, IngestOutcome::Duplicate { of: dup }).await;
+        }
+
+        let mut drafts = chunk_sections(&doc.sections, &self.cfg.chunk);
+        let truncated = drafts.len() > self.cfg.max_chunks_per_doc;
+        drafts.truncate(self.cfg.max_chunks_per_doc);
+        if drafts.is_empty() {
+            return Err(KnowledgeError::Invalid("el documento no tiene texto".into()));
+        }
+        let suspicious = doc.sections.iter().any(|s| looks_like_injection(&s.text)) || looks_like_injection(&doc.title);
+        if suspicious {
+            tracing::warn!(doc_key = key, source = %doc.source, "documento con órdenes al modelo: se guarda como dato, sin alterar");
+        }
+
+        // Embeddings: primero los ya calculados para el mismo texto; luego el resto, fuera de la transacción.
+        let hashes: Vec<String> = drafts.iter().map(|d| hash128_hex(&d.text)).collect();
+        let mut vectors: HashMap<String, Vec<f32>> = store::embeddings_by_text_hash(&self.pool, &self.model, &hashes).await?;
+        let reused = hashes.iter().filter(|h| vectors.contains_key(*h)).count();
+        let mut todo: Vec<(String, String)> = Vec::new();
+        let mut seen: HashSet<&String> = HashSet::new();
+        for (d, h) in drafts.iter().zip(&hashes) {
+            if !vectors.contains_key(h) && seen.insert(h) {
+                todo.push((h.clone(), embed_text(doc.kind, &doc.title, d.section.as_deref(), &d.text)));
+            }
+        }
+        let mut embedded = 0usize;
+        if !todo.is_empty() {
+            let texts: Vec<String> = todo.iter().map(|t| t.1.clone()).collect();
+            match self.embed_texts(&texts, EmbedKind::Document).await {
+                Ok(vs) => {
+                    for ((h, _), v) in todo.iter().zip(vs) {
+                        vectors.insert(h.clone(), v);
+                    }
+                    embedded = hashes.iter().filter(|h| todo.iter().any(|t| &t.0 == *h)).count();
+                }
+                Err(e) => tracing::warn!(error = %e, doc_key = key, "sin embeddings: los fragmentos quedan pendientes"),
+            }
+        }
+
+        let now_ms = Utc::now().timestamp_millis();
+        let meta = serde_json::to_string(&doc.meta).unwrap_or_else(|_| "{}".into());
+        let mut tx = self.pool.begin().await?;
+        if let Some(old) = replacing {
+            store::delete_documents(&mut tx, &[old]).await?;
+        }
+        let id = store::insert_document(
+            &mut tx,
+            &InsertDoc {
+                doc_key: key,
+                content_hash: &hash,
+                kind: doc.kind,
+                subtype: doc.subtype.as_deref(),
+                source: &doc.source,
+                publisher: doc.publisher.as_deref(),
+                title: doc.title.trim(),
+                url: doc.url.as_deref(),
+                issuer: doc.issuer.as_deref(),
+                language: doc.language.as_deref(),
+                published_ms: doc.published_at.timestamp_millis(),
+                ingested_ms: now_ms,
+                chunk_count: drafts.len() as i64,
+                meta: &meta,
+            },
+        )
+        .await?;
+        store::add_assets(&mut tx, id, &assets).await?;
+        let mut new_rows: Vec<(i64, u128, &Vec<f32>)> = Vec::new();
+        let mut pending = 0usize;
+        for (d, h) in drafts.iter().zip(&hashes) {
+            let cid = store::insert_chunk(
+                &mut tx,
+                id,
+                &ChunkRow { ordinal: d.ordinal as i64, section: d.section.clone(), text: d.text.clone(), text_hash: h.clone(), tokens: d.tokens as i64 },
+            )
+            .await?;
+            match vectors.get(h) {
+                Some(v) => {
+                    store::insert_embedding(&mut tx, cid, &self.model, v, now_ms).await?;
+                    new_rows.push((cid, hash128(&d.text), v));
+                }
+                None => pending += 1,
+            }
+        }
+        tx.commit().await?;
+
+        let info = DocMeta {
+            id,
+            kind: doc.kind,
+            source: doc.source.clone(),
+            issuer_key: doc.issuer.as_deref().map(fold_key).filter(|s| !s.is_empty()),
+            published_ms: doc.published_at.timestamp_millis(),
+            assets,
+        };
+        {
+            let mut ix = self.index_write();
+            if let Some(old) = replacing {
+                ix.remove_docs(&HashSet::from([old]));
+            }
+            ix.upsert_doc(info);
+            for (cid, th, v) in new_rows {
+                if let Err(e) = ix.add(cid, id, th, v) {
+                    tracing::warn!(error = %e, "vector fuera del índice en memoria");
+                }
+            }
+        }
+        Ok(IngestReport {
+            outcome: if replacing.is_some() { IngestOutcome::Updated } else { IngestOutcome::Added },
+            document_id: id,
+            chunks: drafts.len(),
+            embedded,
+            reused,
+            pending,
+            suspicious,
+            truncated,
+        })
+    }
+
+    async fn merge_assets(&self, doc_id: i64, assets: &[String], outcome: IngestOutcome) -> Result<IngestReport> {
+        let current = store::assets_of(&self.pool, doc_id).await?;
+        let new: Vec<String> = assets.iter().filter(|a| !current.contains(a)).cloned().collect();
+        if !new.is_empty() {
+            let mut tx = self.pool.begin().await?;
+            store::add_assets(&mut tx, doc_id, &new).await?;
+            tx.commit().await?;
+            let mut all = current;
+            all.extend(new);
+            all.sort();
+            let mut ix = self.index_write();
+            if let Some(mut m) = ix.doc_by_id(doc_id).cloned() {
+                m.assets = all;
+                ix.upsert_doc(m);
+            }
+        }
+        Ok(IngestReport { outcome, document_id: doc_id, chunks: 0, embedded: 0, reused: 0, pending: 0, suspicious: false, truncated: false })
+    }
+
+    /// Noticias que la app YA ha descargado. No hace ninguna petición a proveedores.
+    pub async fn ingest_news(&self, asset: Option<&AssetId>, items: &[NewsItem]) -> BatchReport {
+        let mut rep = BatchReport::default();
+        for item in items {
+            let Some(doc) = NewDocument::from_news_item(item, asset) else {
+                rep.skipped += 1;
+                continue;
+            };
+            match self.ingest(doc).await {
+                Ok(r) => match r.outcome {
+                    IngestOutcome::Added => rep.added += 1,
+                    IngestOutcome::Updated => rep.updated += 1,
+                    IngestOutcome::Unchanged => rep.unchanged += 1,
+                    IngestOutcome::Duplicate { .. } => rep.duplicates += 1,
+                },
+                Err(e) => {
+                    tracing::warn!(error = %e, "no se pudo ingerir una noticia");
+                    rep.failed += 1;
+                }
+            }
+        }
+        rep
+    }
+
+    /// Calcula los embeddings que faltan para el modelo activo (embedder caído al ingerir, o modelo
+    /// cambiado). Devuelve cuántos fragmentos se completaron.
+    pub async fn embed_pending(&self, limit: usize) -> Result<usize> {
+        let _gate = self.write_gate.lock().await;
+        let pend = store::pending_chunks(&self.pool, &self.model, limit.clamp(1, 2000) as i64).await?;
+        if pend.is_empty() {
+            return Ok(0);
+        }
+        let hashes: Vec<String> = pend.iter().map(|p| p.text_hash.clone()).collect();
+        let mut vectors = store::embeddings_by_text_hash(&self.pool, &self.model, &hashes).await?;
+        let mut todo: Vec<(String, String)> = Vec::new();
+        for p in &pend {
+            if !vectors.contains_key(&p.text_hash) && !todo.iter().any(|t| t.0 == p.text_hash) {
+                todo.push((p.text_hash.clone(), embed_text(p.kind, &p.title, p.section.as_deref(), &p.text)));
+            }
+        }
+        for batch in todo.chunks(self.cfg.embed.batch_size.max(1) * 4) {
+            let texts: Vec<String> = batch.iter().map(|t| t.1.clone()).collect();
+            match self.embed_texts(&texts, EmbedKind::Document).await {
+                Ok(vs) => {
+                    for ((h, _), v) in batch.iter().zip(vs) {
+                        vectors.insert(h.clone(), v);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "embed_pending interrumpido");
+                    break;
+                }
+            }
+        }
+        let now_ms = Utc::now().timestamp_millis();
+        let mut tx = self.pool.begin().await?;
+        let mut done: Vec<(i64, i64, u128, &Vec<f32>)> = Vec::new();
+        for p in &pend {
+            if let Some(v) = vectors.get(&p.text_hash) {
+                store::insert_embedding(&mut tx, p.chunk_id, &self.model, v, now_ms).await?;
+                done.push((p.chunk_id, p.document_id, hash128(&p.text), v));
+            }
+        }
+        tx.commit().await?;
+        let mut ix = self.index_write();
+        for (cid, did, th, v) in &done {
+            if ix.doc_by_id(*did).is_some()
+                && let Err(e) = ix.add(*cid, *did, *th, v)
+            {
+                tracing::warn!(error = %e, "vector fuera del índice en memoria");
+            }
+        }
+        Ok(done.len())
+    }
+
+    // --------------------------------------------------------------- búsqueda
+
+    /// Embebe la consulta y busca. Si el embedder falla devuelve el error: el llamador debe
+    /// seguir SIN conocimiento y decirlo, no inventar.
+    pub async fn search(&self, req: &SearchRequest) -> Result<SearchResults> {
+        let q = normalize_text(&req.query);
+        if q.is_empty() {
+            return Err(KnowledgeError::Invalid("consulta vacía".into()));
+        }
+        let mut vs = self.embed_texts(&[q], EmbedKind::Query).await?;
+        let v = vs.pop().ok_or_else(|| KnowledgeError::Internal("sin vector de consulta".into()))?;
+        self.search_vector(req, &v).await
+    }
+
+    /// Búsqueda con un vector de consulta ya calculado (normalizado).
+    pub async fn search_vector(&self, req: &SearchRequest, qv: &[f32]) -> Result<SearchResults> {
+        let k = req.k.clamp(1, 50);
+        let max_per_doc = req.max_per_doc.max(1);
+        let now = req.now.unwrap_or_else(Utc::now);
+        let filter = Filter {
+            assets: req.assets.iter().map(|a| a.trim().to_string()).collect(),
+            include_general: req.include_general,
+            kinds: req.kinds.clone(),
+            issuer_key: req.issuer.as_deref().map(fold_key).filter(|s| !s.is_empty()),
+            since_ms: req.since.map(|t| t.timestamp_millis()),
+            until_ms: req.until.map(|t| t.timestamp_millis()),
+        };
+        struct Ranked {
+            c: Candidate,
+            score: f32,
+            recency: f32,
+            srcw: f32,
+        }
+        let (ranked, scanned) = {
+            let ix = self.index_read();
+            let (cands, scanned) = ix.search(qv, &filter, (k * 5).max(25), req.min_similarity);
+            let mut ranked: Vec<Ranked> = cands
+                .into_iter()
+                .filter_map(|c| {
+                    let d = ix.doc(c.slot)?;
+                    let age_days = (now.timestamp_millis() - d.published_ms) as f64 / 86_400_000.0;
+                    let recency = recency(d.kind, age_days);
+                    let srcw = self.cfg.source_weight(d.kind, &d.source);
+                    let score = 0.80 * c.similarity.clamp(0.0, 1.0) + 0.12 * recency + 0.08 * srcw;
+                    Some(Ranked { c, score, recency, srcw })
+                })
+                .collect();
+            ranked.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.c.chunk_id.cmp(&b.c.chunk_id)));
+            (ranked, scanned)
+        };
+        // Colapsa fragmentos idénticos (S-1 y su enmienda S-1/A) y limita por documento.
+        let mut seen_text: HashSet<u128> = HashSet::new();
+        let mut per_doc: HashMap<i64, usize> = HashMap::new();
+        let mut picked: Vec<Ranked> = Vec::new();
+        for r in ranked {
+            if picked.len() >= k {
+                break;
+            }
+            if seen_text.contains(&r.c.text_hash) {
+                continue;
+            }
+            let n = per_doc.entry(r.c.doc_id).or_default();
+            if *n >= max_per_doc {
+                continue;
+            }
+            *n += 1;
+            seen_text.insert(r.c.text_hash);
+            picked.push(r);
+        }
+        let ids: Vec<i64> = picked.iter().map(|r| r.c.chunk_id).collect();
+        let mut rows = store::chunks_with_docs(&self.pool, &ids).await?;
+        let hits = picked
+            .into_iter()
+            .filter_map(|r| {
+                let (section, text, doc) = rows.remove(&r.c.chunk_id)?;
+                Some(SearchHit { chunk_id: r.c.chunk_id, section, text, score: r.score, similarity: r.c.similarity, recency: r.recency, source_weight: r.srcw, doc })
+            })
+            .collect();
+        Ok(SearchResults { hits, scanned, model: self.model.clone() })
+    }
+
+    // -------------------------------------------------------------- retención
+
+    /// Aplica la retención por antigüedad y el tope de fragmentos. Los fijados y los análisis
+    /// (retención 0) nunca se tocan.
+    pub async fn purge(&self, now: DateTime<Utc>) -> Result<PurgeReport> {
+        let _gate = self.write_gate.lock().await;
+        let mut rep = PurgeReport::default();
+        let mut ids: Vec<i64> = Vec::new();
+        let mut gone: HashSet<i64> = HashSet::new();
+        let mut removed_chunks_est = 0i64;
+        for kind in [DocKind::News, DocKind::Filing, DocKind::Analysis] {
+            let days = self.cfg.retention_days(kind);
+            if days == 0 {
+                continue;
+            }
+            let cutoff = (now - chrono::Duration::days(i64::from(days))).timestamp_millis();
+            for (id, cc) in store::expired(&self.pool, kind, cutoff).await? {
+                if gone.insert(id) {
+                    ids.push(id);
+                    removed_chunks_est += cc;
+                    rep.documents_by_age += 1;
+                }
+            }
+        }
+        let total = store::total_chunks(&self.pool).await? - removed_chunks_est;
+        let mut overflow = total - self.cfg.max_chunks as i64;
+        if overflow > 0 {
+            for (id, cc) in store::eviction_order(&self.pool).await? {
+                if overflow <= 0 {
+                    break;
+                }
+                if gone.insert(id) {
+                    ids.push(id);
+                    overflow -= cc;
+                    rep.documents_by_cap += 1;
+                }
+            }
+        }
+        if ids.is_empty() {
+            return Ok(rep);
+        }
+        let mut tx = self.pool.begin().await?;
+        rep.chunks_removed = store::delete_documents(&mut tx, &ids).await?;
+        tx.commit().await?;
+        self.index_write().remove_docs(&gone);
+        Ok(rep)
+    }
+
+    /// Fija (o suelta) un documento: no se purga por antigüedad ni por tope.
+    pub async fn pin(&self, document_id: i64, pinned: bool) -> Result<bool> {
+        store::set_pinned(&self.pool, document_id, pinned).await
+    }
+
+    /// Fusiona campos en `documents.meta` (p. ej. el resultado de un análisis). No toca el texto
+    /// ni los embeddings.
+    pub async fn merge_meta(&self, document_id: i64, patch: serde_json::Value) -> Result<()> {
+        let cur = store::get_meta(&self.pool, document_id).await?.ok_or_else(|| KnowledgeError::Invalid("documento inexistente".into()))?;
+        let mut base: serde_json::Value = serde_json::from_str(&cur).unwrap_or_else(|_| serde_json::json!({}));
+        if let (Some(b), Some(p)) = (base.as_object_mut(), patch.as_object()) {
+            for (k, v) in p {
+                b.insert(k.clone(), v.clone());
+            }
+        }
+        store::set_meta(&self.pool, document_id, &base.to_string()).await
+    }
+
+    /// Borra un documento por su clave lógica.
+    pub async fn delete_by_key(&self, doc_key: &str) -> Result<bool> {
+        let _gate = self.write_gate.lock().await;
+        let Some(ex) = store::find_by_key(&self.pool, doc_key).await? else { return Ok(false) };
+        let mut tx = self.pool.begin().await?;
+        store::delete_documents(&mut tx, &[ex.id]).await?;
+        tx.commit().await?;
+        self.index_write().remove_docs(&HashSet::from([ex.id]));
+        Ok(true)
+    }
+
+    pub async fn stats(&self) -> Result<Stats> {
+        let (documents, text_bytes, embedding_bytes) = store::sizes(&self.pool).await?;
+        let chunks = store::total_chunks(&self.pool).await? as usize;
+        let pending = store::count_pending(&self.pool, &self.model).await? as usize;
+        let ix = self.index_read();
+        Ok(Stats {
+            documents: documents as usize,
+            chunks,
+            indexed: ix.len(),
+            pending,
+            text_bytes,
+            embedding_bytes,
+            index_memory_bytes: ix.memory_bytes(),
+            model: self.model.clone(),
+        })
+    }
+}
+
+#[async_trait]
+impl KnowledgeSearch for KnowledgeBase {
+    async fn search(&self, req: &SearchRequest) -> Result<SearchResults> {
+        KnowledgeBase::search(self, req).await
+    }
+}
