@@ -146,3 +146,16 @@ en 127.0.0.1:8779 con las claves de FRED, Finnhub y Twelve Data en `.env`.
   recepción; al suscribirse llega primero el último tick conocido (la cotización de cierre). Peticiones
   salientes a Yahoo en esos 150 s: 2 (sondeo espaciado; el feed WS cubre el resto).
 - Sin medir todavía: el instante exacto de la transición regular → post y pre → regular.
+
+## Con la bolsa abierta (15-oct-2026, 13:35–13:38 UTC, 5 min tras la apertura)
+Binario release del 14-oct (sin cambios en market/server desde entonces), 127.0.0.1:8779, BD temporal,
+portátil enchufado, claves de FRED, Finnhub y Twelve Data en `.env`.
+- `marketState = regular` en AAPL, MSFT, SPY e ^GSPC; `delaySecs = 0`; antigüedad real de la cotización
+  0,4–1,4 s en las dos lecturas (13:35:13 y 13:38:14).
+- Velas de AAPL `1d/5m` (2) y `1d/1m` (9): 0 desalineadas con la sesión abierta (el punto en vivo de Yahoo
+  se pliega en su tramo; R-31 queda verificado también con la sesión abierta).
+- Tiempo real (1 cliente, AAPL + MSFT, 180 s): 404 ticks; 402 de Finnhub (AAPL 266, MSFT 136) y los 2
+  iniciales de Yahoo (último valor conocido). Latencia hora del trade → recepción: p50 385 ms, p95 786 ms,
+  máx. 1,3 s. Peticiones a Yahoo durante los 180 s: 0 (2 antes y 2 después): con el feed WS de Finnhub
+  conectado no hay sondeo, así que el espaciado 60 s ↔ 5 s ya no interviene en acciones de EE. UU.
+- Sin medir: el instante exacto pre → regular (la medida empezó 5 min después de la apertura).
