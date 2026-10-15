@@ -234,3 +234,28 @@ type PositionSizing = { maxPortfolioPct: number; riskPerTradePct: number | null;
 Cambios de significado: `keyLevels.entryZone/stopLoss/targets` los **calcula el backend** (stop = soporte − 1×ATR14,
 objetivos = resistencias y niveles de los datos), no el modelo; `null` = sin base en los datos (ver `levelsNote`).
 `dataWarnings` contiene solo carencias reales de los datos; la nota de método ya no va ahí sino en `method`.
+
+## OPV de EE. UU. (tipos en `domain`; rutas sugeridas en `docs/notes/market.md → Para el coordinador`)
+
+Métodos de `MarketService` (no forman parte del trait `MarketData`). Todos los `Option` sin valor viajan como `null`.
+
+```ts
+type IpoEntry = { date: string /*YYYY-MM-DD*/; symbol: string | null; name: string; exchange: string | null;
+  status: "expected" | "priced" | "filed" | "withdrawn" | "unknown";
+  priceLow: number | null; priceHigh: number | null;   // iguales = precio definitivo
+  shares: number | null; totalValue: number | null;    // USD; en expected incluye +15 % de sobreasignación
+  spacLikely: boolean; source: "finnhub" | "sec"; sourceUrl: string | null; asOf: string };
+type ProspectusSection = { key: "summary" | "offering" | "summary_financial_data" | "risk_factors" | "use_of_proceeds"
+  | "dividend_policy" | "capitalization" | "dilution" | "principal_stockholders" | "shares_eligible" | "lock_up" | "underwriting";
+  title: string; text: string; parent: string | null; truncated: boolean; originalChars: number };
+type Prospectus = { issuer: string; cik: number; ticker: string | null; form: string; preliminary: boolean;
+  filedOn: string; accession: string; url: string; indexUrl: string; offerPrice: number | null;
+  sections: ProspectusSection[]; missing: string[]; documentChars: number; source: "sec"; fetchedAt: string };
+type IpoReturnPoint = { horizon: "1m" | "3m" | "6m" | "12m"; targetDate: string; priceDate: string | null; price: number | null;
+  returnPct: number | null; sinceFirstClosePct: number | null; benchmarkReturnPct: number | null; excessPct: number | null };
+type IpoPerformance = { symbol: string; ipoDate: string; offerPrice: number; offerPriceSource: "manual" | "calendar" | "prospectus";
+  firstDayClose: number; firstDayReturnPct: number; firstDayHighPct: number; points: IpoReturnPoint[];
+  latestPrice: number; latestDate: string; latestReturnPct: number; maxDrawdownPct: number /* <= 0 */;
+  benchmark: string; source: "yahoo"; sourceUrl: string | null; warnings: string[]; asOf: string };
+```
+Porcentajes en puntos porcentuales (`12.5` = +12,5 %). Un horizonte aún no alcanzado lleva `null` (nunca se extrapola). `url`/`sourceUrl` apuntan al documento original para verificar.

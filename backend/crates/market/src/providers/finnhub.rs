@@ -6,7 +6,7 @@ use std::{collections::HashSet, sync::Mutex};
 
 use async_trait::async_trait;
 use chrono::{Duration, NaiveDate, Utc};
-use domain::{AssetClass, AssetId, Fundamentals, MarketState, NewsItem, Quote};
+use domain::{AssetClass, AssetId, Fundamentals, IpoEntry, IpoStatus, MarketState, NewsItem, Quote};
 use reqwest::Client;
 use serde_json::{Value, json};
 use url::Url;
@@ -105,6 +105,89 @@ impl Finnhub {
         }
         Ok(v)
     }
+}
+
+/// Tope de filas que devuelve `calendar/ipo` por petición (medido: una ventana de un año
+/// devuelve exactamente 200, las más recientes); si se alcanza, la ventana se parte en dos.
+pub const IPO_PAGE_CAP: usize = 200;
+
+impl Finnhub {
+    /// Calendario de OPV entre dos fechas (incluidas). Disponible en el plan gratuito.
+    pub async fn ipo_calendar(&self, from: NaiveDate, to: NaiveDate) -> PResult<Vec<IpoEntry>> {
+        if self.key.is_none() {
+            return Err(ProviderError::Unsupported);
+        }
+        let mut out = Vec::new();
+        let mut pending = vec![(from, to, 0u8)];
+        let now = Utc::now();
+        while let Some((a, b, depth)) = pending.pop() {
+            let v = self
+                .get("calendar/ipo", &[("from", a.to_string()), ("to", b.to_string())])
+                .await?;
+            let rows = parse_ipo_calendar(&v, now);
+            if rows.len() >= IPO_PAGE_CAP && a < b && depth < 8 {
+                let mid = a + Duration::days((b - a).num_days() / 2);
+                pending.push((a, mid, depth + 1));
+                pending.push((mid + Duration::days(1), b, depth + 1));
+                continue;
+            }
+            out.extend(rows);
+        }
+        out.sort_by(|x, y| y.date.cmp(&x.date).then_with(|| x.name.cmp(&y.name)));
+        out.dedup_by(|x, y| x.date == y.date && x.name == y.name && x.status == y.status);
+        Ok(out)
+    }
+}
+
+/// `calendar/ipo`: `{"ipoCalendar":[{date,exchange,name,numberOfShares,price,status,symbol,totalSharesValue}]}`.
+/// `price` es texto: «14.00» (definitivo), «17.00-19.00» (rango) o null.
+pub fn parse_ipo_calendar(v: &Value, now: chrono::DateTime<Utc>) -> Vec<IpoEntry> {
+    v["ipoCalendar"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            let date = NaiveDate::parse_from_str(r["date"].as_str()?, "%Y-%m-%d").ok()?;
+            let name = text(&r["name"])?;
+            let status = match r["status"].as_str().unwrap_or("") {
+                "expected" => IpoStatus::Expected,
+                "priced" => IpoStatus::Priced,
+                "filed" => IpoStatus::Filed,
+                "withdrawn" => IpoStatus::Withdrawn,
+                _ => IpoStatus::Unknown,
+            };
+            let (price_low, price_high) = match r["price"].as_str().map(str::trim) {
+                Some(p) if p.contains('-') => {
+                    let (a, b) = p.split_once('-').unwrap_or((p, p));
+                    (a.trim().parse::<f64>().ok(), b.trim().parse::<f64>().ok())
+                }
+                Some(p) => {
+                    let x = p.parse::<f64>().ok();
+                    (x, x)
+                }
+                None => (num(&r["price"]), num(&r["price"])),
+            };
+            let symbol = text(&r["symbol"]);
+            let low = name.to_ascii_lowercase();
+            let spac_likely = low.contains("acquisition")
+                && (price_low == Some(10.0) || symbol.as_deref().is_some_and(|s| s.len() == 5 && s.ends_with('U')));
+            Some(IpoEntry {
+                date,
+                symbol,
+                name,
+                exchange: text(&r["exchange"]),
+                status,
+                price_low,
+                price_high,
+                shares: r["numberOfShares"].as_u64().filter(|n| *n > 0),
+                total_value: num(&r["totalSharesValue"]).filter(|x| *x > 0.0),
+                spac_likely,
+                source: "finnhub".into(),
+                source_url: None,
+                as_of: now,
+            })
+        })
+        .collect()
 }
 
 #[async_trait]

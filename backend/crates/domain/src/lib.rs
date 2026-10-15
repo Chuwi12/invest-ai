@@ -1105,6 +1105,134 @@ pub trait SettingsStore: Send + Sync + 'static {
     async fn set(&self, key: &str, value: &str) -> Result<()>;
 }
 
+// ---------------------------------------------------------------------------------------------
+// OPV (IPO): calendario, folleto y rendimiento posterior
+// ---------------------------------------------------------------------------------------------
+
+/// Estado de una OPV en el calendario.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpoStatus {
+    /// Anunciada con rango de precio y fecha prevista.
+    Expected,
+    /// Fijado el precio definitivo (la fecha es la del primer día de cotización).
+    Priced,
+    /// Registro presentado, sin fecha firme (la fecha es la de presentación).
+    Filed,
+    Withdrawn,
+    Unknown,
+}
+
+/// Una OPV del calendario. Todo lo que el proveedor no da va a `null`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoEntry {
+    pub date: NaiveDate,
+    pub symbol: Option<String>,
+    pub name: String,
+    pub exchange: Option<String>,
+    pub status: IpoStatus,
+    /// Límite bajo del rango de precio, o el precio definitivo si `priceHigh` es igual.
+    pub price_low: Option<f64>,
+    pub price_high: Option<f64>,
+    pub shares: Option<u64>,
+    /// Importe en USD. En `expected` es el máximo posible (límite alto x acciones x 1,15 de
+    /// sobreasignación); en `priced`, acciones x precio.
+    pub total_value: Option<f64>,
+    /// Indicio (no certeza) de sociedad vehículo (SPAC): nombre con «Acquisition» y precio 10.
+    pub spac_likely: bool,
+    pub source: String,
+    pub source_url: Option<String>,
+    pub as_of: DateTime<Utc>,
+}
+
+/// Sección de un folleto, en texto limpio.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProspectusSection {
+    /// summary, offering, summary_financial_data, risk_factors, use_of_proceeds, dividend_policy,
+    /// capitalization, dilution, principal_stockholders, shares_eligible, lock_up, underwriting.
+    pub key: String,
+    /// Título tal como aparece en el documento.
+    pub title: String,
+    pub text: String,
+    /// Clave de la sección que ya contiene este texto (subsecciones: no indexar dos veces).
+    pub parent: Option<String>,
+    /// `text` se cortó por el tope de caracteres.
+    pub truncated: bool,
+    /// Caracteres del texto completo antes de cortar.
+    pub original_chars: usize,
+}
+
+/// Folleto de una OPV obtenido de SEC EDGAR.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Prospectus {
+    pub issuer: String,
+    pub cik: u64,
+    pub ticker: Option<String>,
+    /// 424B4, 424B1, 253G2 (definitivos) o S-1/A, F-1/A... (preliminares).
+    pub form: String,
+    pub preliminary: bool,
+    pub filed_on: NaiveDate,
+    pub accession: String,
+    /// Documento original en sec.gov (verificable).
+    pub url: String,
+    pub index_url: String,
+    /// Precio de la OPV leído de la portada, si se encontró.
+    pub offer_price: Option<f64>,
+    pub sections: Vec<ProspectusSection>,
+    /// Claves de secciones que no se localizaron.
+    pub missing: Vec<String>,
+    pub document_chars: usize,
+    pub source: String,
+    pub fetched_at: DateTime<Utc>,
+}
+
+/// Rentabilidad a un horizonte tras la OPV.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoReturnPoint {
+    /// 1m, 3m, 6m, 12m.
+    pub horizon: String,
+    pub target_date: NaiveDate,
+    /// Sesión usada (última con cierre a o antes de `targetDate`); `null` si aún no se alcanza.
+    pub price_date: Option<NaiveDate>,
+    pub price: Option<f64>,
+    /// Desde el precio de la OPV, en puntos porcentuales.
+    pub return_pct: Option<f64>,
+    /// Desde el cierre del primer día.
+    pub since_first_close_pct: Option<f64>,
+    /// Del índice de referencia en el mismo periodo (cierre previo a la OPV hasta `priceDate`).
+    pub benchmark_return_pct: Option<f64>,
+    pub excess_pct: Option<f64>,
+}
+
+/// Historial de resultados de una OPV pasada.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoPerformance {
+    pub symbol: String,
+    pub ipo_date: NaiveDate,
+    pub offer_price: f64,
+    /// calendar, prospectus o manual.
+    pub offer_price_source: String,
+    pub first_day_close: f64,
+    pub first_day_return_pct: f64,
+    pub first_day_high_pct: f64,
+    pub points: Vec<IpoReturnPoint>,
+    pub latest_price: f64,
+    pub latest_date: NaiveDate,
+    pub latest_return_pct: f64,
+    /// Peor caída desde un máximo de cierre, desde el primer día (valor <= 0).
+    pub max_drawdown_pct: f64,
+    pub benchmark: String,
+    pub source: String,
+    pub source_url: Option<String>,
+    pub warnings: Vec<String>,
+    pub as_of: DateTime<Utc>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -251,6 +251,29 @@ impl Yahoo {
         }
     }
 
+    /// Serie diaria entre dos instantes (segundos Unix) con escisiones (`events=split`) y cierre
+    /// ajustado por dividendos. Se pide con `period1/period2`: con `range=max` Yahoo cambia la
+    /// granularidad en las salidas a bolsa recientes (devuelve barras de 5 min o 1 h).
+    pub async fn daily_between(&self, symbol: &str, from: i64, to: i64) -> PResult<DailySeries> {
+        let url = Self::url(&["v8", "finance", "chart", symbol])?;
+        let text = self
+            .get_plain(
+                url,
+                &[
+                    ("period1", from.to_string()),
+                    ("period2", to.to_string()),
+                    ("interval", "1d".into()),
+                    ("includePrePost", "false".into()),
+                    ("events", "split".into()),
+                ],
+            )
+            .await;
+        match text {
+            Err(ProviderError::NotFound(_)) => Err(ProviderError::NotFound(format!("símbolo {symbol} no encontrado"))),
+            other => parse_daily_series(&other?),
+        }
+    }
+
     async fn chart_quote(&self, id: &AssetId, symbol: &str) -> PResult<Quote> {
         let data = self.chart(symbol, "1d", "1d").await?;
         Ok(quote_from_chart(id, &data, Utc::now()))
@@ -711,6 +734,55 @@ struct Period {
 pub struct ChartData {
     meta: ChartMeta,
     pub candles: Vec<Candle>,
+}
+
+/// Serie diaria con cierre ajustado y escisiones.
+#[derive(Debug, Clone)]
+pub struct DailySeries {
+    pub candles: Vec<Candle>,
+    /// Cierre ajustado por dividendos y escisiones, alineado con `candles`.
+    pub adj_close: Vec<f64>,
+    /// `(instante, numerador, denominador)`: 2:1 = (2, 1); inversa 1:10 = (1, 10). Los precios de
+    /// `candles` ya vienen ajustados por ellas.
+    pub splits: Vec<(i64, f64, f64)>,
+}
+
+pub fn parse_daily_series(text: &str) -> PResult<DailySeries> {
+    let v: serde_json::Value = parse_json(text)?;
+    if let Some(e) = v["chart"]["error"].as_object() {
+        let msg = e.get("description").and_then(|d| d.as_str()).unwrap_or("");
+        return Err(if e.get("code").and_then(|c| c.as_str()) == Some("Not Found") {
+            ProviderError::NotFound(msg.to_string())
+        } else {
+            ProviderError::Upstream(format!("Yahoo chart: {msg}"))
+        });
+    }
+    let r = v["chart"]["result"]
+        .get(0)
+        .ok_or_else(|| ProviderError::NotFound("Yahoo no devolvió datos".into()))?;
+    let data = parse_chart(text)?;
+    let adj: Vec<Option<f64>> = r["indicators"]["adjclose"][0]["adjclose"]
+        .as_array()
+        .map(|a| a.iter().map(|x| x.as_f64()).collect())
+        .unwrap_or_default();
+    // `parse_chart` descarta velas sin cierre: se vuelve a alinear por instante.
+    let times: Vec<i64> = r["timestamp"].as_array().map(|a| a.iter().filter_map(|t| t.as_i64()).collect()).unwrap_or_default();
+    let closes = r["indicators"]["quote"][0]["close"].as_array();
+    let mut adj_close = Vec::with_capacity(data.candles.len());
+    for c in &data.candles {
+        let idx = times.iter().position(|t| *t == c.t);
+        let a = idx.and_then(|i| adj.get(i).copied().flatten()).or_else(|| idx.and_then(|i| closes.and_then(|cl| cl.get(i)?.as_f64())));
+        adj_close.push(a.unwrap_or(c.c));
+    }
+    let mut splits: Vec<(i64, f64, f64)> = r["events"]["splits"]
+        .as_object()
+        .into_iter()
+        .flat_map(|m| m.values())
+        .filter_map(|e| Some((e["date"].as_i64()?, e["numerator"].as_f64()?, e["denominator"].as_f64()?)))
+        .filter(|(_, n, d)| *n > 0.0 && *d > 0.0)
+        .collect();
+    splits.sort_by_key(|s| s.0);
+    Ok(DailySeries { candles: data.candles, adj_close, splits })
 }
 
 pub fn parse_chart(text: &str) -> PResult<ChartData> {

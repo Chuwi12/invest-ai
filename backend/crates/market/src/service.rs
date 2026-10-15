@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use domain::{
     AssetClass, AssetId, AssetSnapshot, AssetSummary, Candle, DomainError, Fundamentals,
-    Indicators, Interval, MacroContext, MarketData, NewsItem, PriceTick, ProviderStatus, Quote,
+    IpoEntry, IpoPerformance, IpoStatus, Prospectus, Indicators, Interval, MacroContext, MarketData, NewsItem, PriceTick, ProviderStatus, Quote,
     Range, TimestampOrigin,
 };
 use futures::{FutureExt, StreamExt, stream::BoxStream};
@@ -46,7 +46,7 @@ use crate::{
         marketaux::Marketaux,
         newsapi::NewsApi,
         plain_ticker,
-        sec::Sec,
+        sec::{ProspectusPick, Sec},
         twelvedata::TwelveData,
         us_symbol,
         yahoo::Yahoo,
@@ -382,6 +382,10 @@ struct Inner {
     slots: Vec<Arc<Slot>>,
     yahoo: Arc<Yahoo>,
     sec: Arc<Sec>,
+    finnhub: Arc<Finnhub>,
+    ipo_calendar: Cache<String, Arc<Vec<IpoEntry>>>,
+    prospectuses: Cache<String, Arc<Prospectus>>,
+    ipo_perf: Cache<String, Arc<IpoPerformance>>,
     quotes: Cache<String, Quote>,
     /// Lotes de cotizaciones en vuelo (vida de 200 ms): peticiones iguales y simultáneas comparten una.
     quote_batches: Cache<String, Arc<Vec<Quote>>>,
@@ -1031,6 +1035,124 @@ impl Inner {
         })
     }
 
+
+    // ---- OPV (IPO) ---------------------------------------------------------------------
+
+    /// Calendario de OPV: Finnhub (plan gratuito) y, si no hay clave o falla, folletos
+    /// definitivos recientes del índice de EDGAR (sin precio ni símbolo).
+    async fn ipo_calendar(&self, from: chrono::NaiveDate, to: chrono::NaiveDate) -> domain::Result<Vec<IpoEntry>> {
+        if from > to || (to - from).num_days() > 730 {
+            return Err(DomainError::InvalidInput("rango de fechas no válido (máx. 2 años)".into()));
+        }
+        let key = format!("{from}|{to}");
+        let arc = cached(&self.ipo_calendar, key, async {
+            let fh = self.slot("finnhub").filter(|s| s.provider.info().enabled());
+            let mut last: Option<DomainError> = None;
+            if let Some(slot) = fh {
+                let f = self.finnhub.clone();
+                match slot.run(&|_p: Arc<dyn Provider>| { let f = f.clone(); async move { f.ipo_calendar(from, to).await } }).await {
+                    Ok(v) => return Ok(Arc::new(v)),
+                    Err(e) => last = Some(self.to_domain("finnhub", e)),
+                }
+            }
+            let slot = self.slot("sec").ok_or_else(|| DomainError::Unavailable("SEC no disponible".into()))?;
+            let sec = self.sec.clone();
+            match slot.run(&|_p: Arc<dyn Provider>| { let s = sec.clone(); async move { s.recent_final_prospectuses(from, to).await } }).await {
+                Ok(v) => Ok(Arc::new(v)),
+                Err(e) => Err(last.unwrap_or_else(|| self.to_domain("sec", e))),
+            }
+        })
+        .await?;
+        Ok((*arc).clone())
+    }
+
+    async fn ipo_prospectus(&self, issuer: &str, pick: ProspectusPick, max_chars: usize) -> domain::Result<Prospectus> {
+        let issuer = issuer.trim();
+        if issuer.is_empty() || issuer.len() > 80 || issuer.chars().any(char::is_control) {
+            return Err(DomainError::InvalidInput("emisor no válido".into()));
+        }
+        let key = format!("{}|{pick:?}|{max_chars}", issuer.to_ascii_lowercase());
+        let arc = cached(&self.prospectuses, key, async {
+            let slot = self.slot("sec").ok_or_else(|| DomainError::Unavailable("SEC no disponible".into()))?;
+            let sec = self.sec.clone();
+            let issuer = issuer.to_string();
+            slot.run(&|_p: Arc<dyn Provider>| { let s = sec.clone(); let i = issuer.clone(); async move { s.prospectus(&i, pick, max_chars).await } })
+                .await
+                .map(Arc::new)
+                .map_err(|e| self.to_domain("sec", e))
+        })
+        .await?;
+        Ok((*arc).clone())
+    }
+
+    async fn daily_series(&self, symbol: &str, from: i64, to: i64) -> domain::Result<crate::providers::yahoo::DailySeries> {
+        let slot = self.slot("yahoo").ok_or_else(|| DomainError::Unavailable("Yahoo no disponible".into()))?;
+        let y = self.yahoo.clone();
+        let sym = symbol.to_string();
+        slot.run(&|_p: Arc<dyn Provider>| { let y = y.clone(); let s = sym.clone(); async move { y.daily_between(&s, from, to).await } })
+            .await
+            .map_err(|e| self.to_domain("yahoo", e))
+    }
+
+    async fn ipo_performance(
+        &self,
+        symbol: &str,
+        ipo_date: chrono::NaiveDate,
+        offer_price: Option<f64>,
+        benchmark: &str,
+    ) -> domain::Result<IpoPerformance> {
+        let symbol = symbol.trim().to_ascii_uppercase();
+        let bench = benchmark.trim().to_ascii_uppercase();
+        if !crate::ipo::BENCHMARKS.contains(&bench.as_str()) {
+            return Err(DomainError::InvalidInput(format!("índice no admitido (usa {:?})", crate::ipo::BENCHMARKS)));
+        }
+        symbol::validate(&AssetId::new(AssetClass::Stock, symbol.clone()))?;
+        let key = format!("{symbol}|{ipo_date}|{offer_price:?}|{bench}");
+        let arc = cached(&self.ipo_perf, key, async {
+            // Precio de salida: el dado, si no el del calendario y, si no, el de la portada del folleto.
+            let (offer, src) = match offer_price {
+                Some(p) => (p, "manual"),
+                None => match self.calendar_price(&symbol, ipo_date).await {
+                    Some(p) => (p, "calendar"),
+                    None => {
+                        let pr = self.ipo_prospectus(&symbol, ProspectusPick::Initial, 1).await?;
+                        (pr.offer_price.ok_or_else(|| DomainError::NotFound(format!("{symbol}: sin precio de OPV en el calendario ni en el folleto")))?, "prospectus")
+                    }
+                },
+            };
+            let from = ipo_date.and_hms_opt(0, 0, 0).map_or(0, |d| d.and_utc().timestamp());
+            let to = (Utc::now() + chrono::Duration::days(2)).timestamp();
+            let (s, b) = tokio::join!(
+                self.daily_series(&symbol, from - 86_400, to),
+                self.daily_series(&bench, from - 12 * 86_400, to)
+            );
+            let (s, b) = (s?, b?);
+            crate::ipo::compute(&crate::ipo::PerfInput {
+                symbol: &symbol,
+                ipo_date,
+                offer_price: offer,
+                offer_price_source: src,
+                series: &s,
+                bench: &b,
+                bench_name: &bench,
+                source_url: symbol::verify_url("yahoo", &AssetId::new(AssetClass::Stock, symbol.clone())),
+                now: Utc::now(),
+            })
+            .map(Arc::new)
+            .map_err(DomainError::InvalidInput)
+        })
+        .await?;
+        Ok((*arc).clone())
+    }
+
+    /// Precio definitivo del calendario para un símbolo cuya OPV cae a ±5 días de `date`.
+    async fn calendar_price(&self, symbol: &str, date: chrono::NaiveDate) -> Option<f64> {
+        let rows = self.ipo_calendar(date - chrono::Duration::days(5), date + chrono::Duration::days(5)).await.ok()?;
+        rows.iter()
+            .find(|e| e.status == IpoStatus::Priced && e.symbol.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(symbol)))
+            .and_then(|e| e.price_low.filter(|p| Some(*p) == e.price_high))
+    }
+
     // ---- extras fuera del contrato ----------------------------------------------------
 
     async fn options_chain(
@@ -1107,6 +1229,7 @@ impl MarketService {
         }
         let yahoo = Arc::new(Yahoo::new(http.clone()));
         let sec = Arc::new(Sec::new(http.clone(), config.sec_user_agent.clone()));
+        let finnhub = Arc::new(Finnhub::new(http.clone(), config.finnhub_key.clone()));
         let providers: Vec<Arc<dyn Provider>> = vec![
             yahoo.clone(),
             Arc::new(Binance::with_base(
@@ -1117,7 +1240,7 @@ impl MarketService {
             Arc::new(GoogleNews::new(http.clone(), config.news_languages.clone())),
             sec.clone(),
             Arc::new(Fred::new(http.clone(), config.fred_key.clone())),
-            Arc::new(Finnhub::new(http.clone(), config.finnhub_key.clone())),
+            finnhub.clone(),
             Arc::new(AlphaVantage::new(
                 http.clone(),
                 config.alphavantage_key.clone(),
@@ -1148,6 +1271,10 @@ impl MarketService {
             slots,
             yahoo,
             sec,
+            finnhub,
+            ipo_calendar: cache(Duration::from_secs(30 * 60), 64),
+            prospectuses: cache(Duration::from_secs(6 * 3600), 16),
+            ipo_perf: cache(Duration::from_secs(3600), 256),
             quotes: cache(Duration::from_secs(3), 5_000),
             quote_batches: cache(Duration::from_millis(200), 200),
             history_intraday: cache(Duration::from_secs(60), 500),
@@ -1213,6 +1340,52 @@ impl MarketService {
     /// Últimos filings de la SEC (10-K, 10-Q, 8-K...) de una acción de EE. UU.
     pub async fn filings(&self, id: &AssetId, limit: usize) -> domain::Result<Vec<NewsItem>> {
         self.inner.filings(id, limit).await
+    }
+
+    /// Calendario de OPV de EE. UU. entre dos fechas (Finnhub; respaldo: índice de EDGAR).
+    pub async fn ipo_calendar(&self, from: chrono::NaiveDate, to: chrono::NaiveDate) -> domain::Result<Vec<IpoEntry>> {
+        self.inner.ipo_calendar(from, to).await
+    }
+
+    /// Folleto de la OPV de un emisor (CIK, ticker o nombre) con sus secciones clave en texto limpio.
+    /// `latest = true` toma el folleto definitivo más reciente en vez del de la OPV.
+    /// `max_chars` acota cada sección (0 = sin tope).
+    pub async fn ipo_prospectus(&self, issuer: &str, latest: bool, max_chars: usize) -> domain::Result<Prospectus> {
+        let pick = if latest { ProspectusPick::Latest } else { ProspectusPick::Initial };
+        self.inner.ipo_prospectus(issuer, pick, max_chars).await
+    }
+
+    /// Rentabilidad posterior a la OPV (primer día, 1/3/6/12 meses) frente a `SPY`, `IWM` o `QQQ`.
+    /// Sin `offer_price` se toma el del calendario y, si falta, el de la portada del folleto.
+    pub async fn ipo_performance(
+        &self,
+        symbol: &str,
+        ipo_date: chrono::NaiveDate,
+        offer_price: Option<f64>,
+        benchmark: &str,
+    ) -> domain::Result<IpoPerformance> {
+        self.inner.ipo_performance(symbol, ipo_date, offer_price, benchmark).await
+    }
+
+    /// Historial de resultados de las OPV con precio definitivo de los últimos `months` meses
+    /// (hasta `limit`, las más recientes primero). Las que fallan se omiten.
+    pub async fn recent_ipo_performance(&self, months: u32, limit: usize, benchmark: &str) -> domain::Result<Vec<IpoPerformance>> {
+        let to = Utc::now().date_naive();
+        let from = to.checked_sub_months(chrono::Months::new(months.clamp(1, 24))).unwrap_or(to);
+        let cal = self.inner.ipo_calendar(from, to).await?;
+        let wanted: Vec<IpoEntry> = cal
+            .into_iter()
+            .filter(|e| e.status == IpoStatus::Priced && !e.spac_likely && e.symbol.is_some() && e.price_low.is_some() && e.price_low == e.price_high)
+            .take(limit.clamp(1, 50))
+            .collect();
+        let mut out = Vec::new();
+        for e in wanted {
+            let sym = e.symbol.clone().unwrap_or_default();
+            if let Ok(p) = self.inner.ipo_performance(&sym, e.date, e.price_low, benchmark).await {
+                out.push(p);
+            }
+        }
+        Ok(out)
     }
 
     /// Ficha del activo (nombre, mercado...).
@@ -1541,7 +1714,11 @@ mod latency_tests {
         let inner = Arc::new(Inner {
             slots: vec![Arc::new(Slot::new(prov.clone(), Arc::new(Vec::new())))],
             yahoo: Arc::new(Yahoo::new(http.clone())),
-            sec: Arc::new(Sec::new(http, "test test@example.com".into())),
+            sec: Arc::new(Sec::new(http.clone(), "test test@example.com".into())),
+            finnhub: Arc::new(Finnhub::new(http, None)),
+            ipo_calendar: cache(Duration::from_secs(60), 10),
+            prospectuses: cache(Duration::from_secs(60), 10),
+            ipo_perf: cache(Duration::from_secs(60), 10),
             quotes: cache(Duration::from_secs(3), 100),
             quote_batches: cache(Duration::from_millis(200), 10),
             history_intraday: cache(Duration::from_secs(60), 10),
@@ -1575,7 +1752,11 @@ mod latency_tests {
         Arc::new(Inner {
             slots,
             yahoo: Arc::new(Yahoo::new(http.clone())),
-            sec: Arc::new(Sec::new(http, "test test@example.com".into())),
+            sec: Arc::new(Sec::new(http.clone(), "test test@example.com".into())),
+            finnhub: Arc::new(Finnhub::new(http, None)),
+            ipo_calendar: cache(Duration::from_secs(60), 10),
+            prospectuses: cache(Duration::from_secs(60), 10),
+            ipo_perf: cache(Duration::from_secs(60), 10),
             quotes: cache(Duration::from_secs(3), 100),
             quote_batches: cache(Duration::from_millis(200), 10),
             history_intraday: cache(Duration::from_secs(60), 10),

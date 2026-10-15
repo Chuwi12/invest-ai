@@ -5,8 +5,8 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use domain::{AssetClass, AssetId, NewsItem};
+use chrono::{DateTime, NaiveDate, Utc};
+use domain::{AssetClass, AssetId, IpoEntry, IpoStatus, NewsItem, Prospectus};
 use moka::future::Cache;
 use reqwest::{Client, header};
 use serde_json::Value;
@@ -15,7 +15,11 @@ use super::{
     Capability, NewsQuery, PResult, Provider, ProviderError, ProviderInfo, from_ymd,
     text as json_text,
 };
-use crate::http::{parse_json, send_ok};
+use crate::{
+    http::{parse_json, send_ok},
+    prospectus,
+    ratelimit::RateLimiter,
+};
 
 const TICKERS_URL: &str = "https://www.sec.gov/files/company_tickers.json";
 
@@ -36,6 +40,8 @@ pub struct Sec {
     info: ProviderInfo,
     user_agent: String,
     tickers: Cache<(), Arc<HashMap<String, Company>>>,
+    /// Límite por petición HTTP (la SEC permite 10/s; un método puede encadenar varias).
+    limiter: RateLimiter,
 }
 
 impl Sec {
@@ -44,6 +50,7 @@ impl Sec {
         Self {
             http,
             user_agent,
+            limiter: RateLimiter::new(8.0, 3),
             tickers: Cache::builder()
                 .time_to_live(Duration::from_secs(86_400))
                 .max_capacity(1)
@@ -62,6 +69,10 @@ impl Sec {
     }
 
     async fn get(&self, url: String) -> PResult<String> {
+        self.limiter
+            .acquire(Duration::from_secs(20))
+            .await
+            .map_err(|_| ProviderError::RateLimited { retry_after: None })?;
         send_ok(
             self.http
                 .get(url)
@@ -71,6 +82,10 @@ impl Sec {
     }
 
     async fn company(&self, id: &AssetId) -> PResult<Company> {
+        self.company_by_symbol(&id.symbol).await
+    }
+
+    async fn company_by_symbol(&self, symbol: &str) -> PResult<Company> {
         let map = self
             .tickers
             .try_get_with((), async {
@@ -84,9 +99,9 @@ impl Sec {
                 },
                 other => ProviderError::Upstream(other.to_string()),
             })?;
-        map.get(&id.symbol.to_ascii_uppercase())
+        map.get(&symbol.to_ascii_uppercase())
             .cloned()
-            .ok_or_else(|| ProviderError::NotFound(format!("{} no figura en la SEC", id.symbol)))
+            .ok_or_else(|| ProviderError::NotFound(format!("{symbol} no figura en la SEC")))
     }
 
     /// Últimos filings (más recientes primero).
@@ -102,6 +117,254 @@ impl Sec {
             ))
             .await?;
         parse_submissions(&text, limit, Utc::now())
+    }
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Folletos de OPV
+// ---------------------------------------------------------------------------------------------
+
+/// Qué folleto se quiere de un emisor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProspectusPick {
+    /// El folleto definitivo más antiguo (el de la OPV).
+    #[default]
+    Initial,
+    /// El definitivo más reciente (puede ser de una oferta posterior).
+    Latest,
+}
+
+/// Formularios que contienen el folleto definitivo de una OPV: 424B4/424B1 (S-1, F-1) y 253G2
+/// (circular de oferta de la Regulation A+).
+pub const FINAL_FORMS: &[&str] = &["424B4", "424B1", "253G2"];
+/// Borradores con precio orientativo, solo si aún no hay definitivo.
+pub const DRAFT_FORMS: &[&str] = &["S-1/A", "F-1/A", "S-1", "F-1", "253G1"];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilingRow {
+    pub accession: String,
+    pub form: String,
+    pub filed: NaiveDate,
+    pub document: String,
+}
+
+/// Filas de un bloque columnar de `submissions` (`filings.recent` o un fichero de `filings.files`).
+pub fn parse_filing_rows(block: &Value) -> Vec<FilingRow> {
+    let col = |k: &str| block[k].as_array();
+    let (Some(acc), Some(form), Some(date), Some(doc)) = (
+        col("accessionNumber"),
+        col("form"),
+        col("filingDate"),
+        col("primaryDocument"),
+    ) else {
+        return Vec::new();
+    };
+    (0..acc.len())
+        .filter_map(|i| {
+            let accession = acc[i].as_str()?.to_string();
+            let form = form.get(i)?.as_str()?.to_string();
+            let filed = NaiveDate::parse_from_str(date.get(i)?.as_str()?, "%Y-%m-%d").ok()?;
+            let document = doc.get(i)?.as_str()?.to_string();
+            let clean = accession.chars().all(|c| c.is_ascii_digit() || c == '-');
+            (clean && safe_path(&document)).then_some(FilingRow { accession, form, filed, document })
+        })
+        .collect()
+}
+
+/// Elige el folleto. `(fila, preliminar)`.
+pub fn pick_prospectus(rows: &[FilingRow], pick: ProspectusPick) -> Option<(FilingRow, bool)> {
+    let mut finals: Vec<&FilingRow> = rows.iter().filter(|r| FINAL_FORMS.contains(&r.form.as_str())).collect();
+    finals.sort_by(|a, b| (a.filed, &a.accession).cmp(&(b.filed, &b.accession)));
+    let chosen = match pick {
+        ProspectusPick::Initial => finals.first(),
+        ProspectusPick::Latest => finals.last(),
+    };
+    if let Some(r) = chosen {
+        return Some(((*r).clone(), false));
+    }
+    rows.iter()
+        .filter(|r| DRAFT_FORMS.contains(&r.form.as_str()))
+        .max_by(|a, b| (a.filed, &a.accession).cmp(&(b.filed, &b.accession)))
+        .map(|r| (r.clone(), true))
+}
+
+/// Resultado de buscar un emisor en el índice de texto completo de EDGAR.
+#[derive(Debug, Clone)]
+pub struct FtsHit {
+    pub cik: u64,
+    pub name: String,
+    pub form: String,
+    pub filed: NaiveDate,
+    pub accession: String,
+}
+
+/// Respuesta de `efts.sec.gov/LATEST/search-index` (sin el texto de los documentos).
+pub fn parse_fts(text: &str) -> PResult<Vec<FtsHit>> {
+    let v: Value = parse_json(text)?;
+    let hits = v["hits"]["hits"]
+        .as_array()
+        .ok_or_else(|| ProviderError::upstream("búsqueda EDGAR sin hits"))?;
+    Ok(hits
+        .iter()
+        .filter_map(|h| {
+            let s = &h["_source"];
+            let cik: u64 = s["ciks"].get(0)?.as_str()?.parse().ok()?;
+            let raw = s["display_names"].get(0)?.as_str()?;
+            let name = raw.split("(CIK").next().unwrap_or(raw).trim().to_string();
+            Some(FtsHit {
+                cik,
+                name,
+                form: s["form"].as_str()?.to_string(),
+                filed: NaiveDate::parse_from_str(s["file_date"].as_str()?, "%Y-%m-%d").ok()?,
+                accession: s["adsh"].as_str()?.to_string(),
+            })
+        })
+        .collect())
+}
+
+fn fts_url(q: Option<&str>, forms: &str, from: Option<NaiveDate>, to: Option<NaiveDate>, offset: usize) -> String {
+    let mut u = url::Url::parse("https://efts.sec.gov/LATEST/search-index").expect("url fija");
+    {
+        let mut qp = u.query_pairs_mut();
+        if let Some(q) = q {
+            qp.append_pair("q", &format!("\"{q}\""));
+        }
+        qp.append_pair("forms", forms);
+        if let (Some(f), Some(t)) = (from, to) {
+            qp.append_pair("dateRange", "custom");
+            qp.append_pair("startdt", &f.to_string());
+            qp.append_pair("enddt", &t.to_string());
+        }
+        if offset > 0 {
+            qp.append_pair("from", &offset.to_string());
+        }
+    }
+    u.to_string()
+}
+
+/// Nombre apto para una consulta de frase exacta (sin comillas ni operadores).
+fn fts_name(q: &str) -> Option<String> {
+    let n: String = q
+        .chars()
+        .filter(|c| c.is_alphanumeric() || " .&,-'".contains(*c))
+        .collect();
+    let n = n.split_whitespace().collect::<Vec<_>>().join(" ");
+    (n.len() >= 3 && n.len() <= 80).then_some(n)
+}
+
+impl Sec {
+    /// CIK de un emisor dado como CIK numérico, ticker o nombre (búsqueda en EDGAR).
+    pub async fn resolve_issuer(&self, query: &str) -> PResult<(Company, Option<String>)> {
+        let q = query.trim();
+        if q.is_empty() || q.len() > 80 {
+            return Err(ProviderError::NotFound("emisor vacío o demasiado largo".into()));
+        }
+        if q.chars().all(|c| c.is_ascii_digit()) {
+            let cik: u64 = q.parse().map_err(|_| ProviderError::NotFound("CIK no válido".into()))?;
+            return Ok((Company { cik, name: String::new() }, None));
+        }
+        let looks_ticker = q.len() <= 10 && q.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+        if looks_ticker && let Ok(c) = self.company_by_symbol(&q.replace('.', "-")).await {
+            return Ok((c, Some(q.to_ascii_uppercase())));
+        }
+        let name = fts_name(q).ok_or_else(|| ProviderError::NotFound("nombre de emisor no válido".into()))?;
+        let text = self.get(fts_url(Some(&name), "424B4,424B1,S-1,F-1,S-1/A,F-1/A", None, None, 0)).await?;
+        let hits = parse_fts(&text)?;
+        let want = prospectus::normalize(&name);
+        let hit = hits
+            .iter()
+            .find(|h| prospectus::normalize(&h.name).contains(&want))
+            .ok_or_else(|| ProviderError::NotFound(format!("{name} no tiene folletos en EDGAR")))?;
+        Ok((Company { cik: hit.cik, name: hit.name.clone() }, None))
+    }
+
+    /// Todas las presentaciones de un CIK (`recent` + ficheros históricos si el emisor es antiguo).
+    async fn filing_rows(&self, cik: u64, need_old: bool) -> PResult<(String, Option<String>, Vec<FilingRow>)> {
+        let text = self.get(format!("https://data.sec.gov/submissions/CIK{cik:010}.json")).await?;
+        let v: Value = parse_json(&text)?;
+        let name = v["name"].as_str().unwrap_or("").to_string();
+        let ticker = v["tickers"].get(0).and_then(Value::as_str).map(str::to_string);
+        let mut rows = parse_filing_rows(&v["filings"]["recent"]);
+        let has_final = rows.iter().any(|r| FINAL_FORMS.contains(&r.form.as_str()));
+        if need_old || !has_final {
+            for f in v["filings"]["files"].as_array().into_iter().flatten().take(8) {
+                let Some(n) = f["name"].as_str().filter(|n| safe_path(n) && !n.contains('/')) else {
+                    continue;
+                };
+                let t = self.get(format!("https://data.sec.gov/submissions/{n}")).await?;
+                rows.extend(parse_filing_rows(&parse_json::<Value>(&t)?));
+            }
+        }
+        Ok((name, ticker, rows))
+    }
+
+    /// Localiza y descarga el folleto de un emisor y extrae sus secciones.
+    pub async fn prospectus(
+        &self,
+        issuer: &str,
+        pick: ProspectusPick,
+        max_chars: usize,
+    ) -> PResult<Prospectus> {
+        let (co, ticker) = self.resolve_issuer(issuer).await?;
+        // «Initial» necesita ver también los ficheros antiguos: el 424B4 de la OPV queda fuera de `recent`.
+        let (name, listed, rows) = self.filing_rows(co.cik, pick == ProspectusPick::Initial).await?;
+        let (row, preliminary) = pick_prospectus(&rows, pick)
+            .ok_or_else(|| ProviderError::NotFound(format!("{issuer}: sin folleto S-1/F-1/424B4 en EDGAR")))?;
+        let acc = row.accession.replace('-', "");
+        let base = format!("https://www.sec.gov/Archives/edgar/data/{}/{acc}", co.cik);
+        let url = format!("{base}/{}", row.document);
+        let html = self.get(url.clone()).await?;
+        let ex = tokio::task::spawn_blocking(move || prospectus::extract(&html, max_chars))
+            .await
+            .map_err(|e| ProviderError::upstream(format!("extracción interrumpida: {e}")))?;
+        Ok(Prospectus {
+            issuer: if name.is_empty() { co.name } else { name },
+            cik: co.cik,
+            ticker: ticker.or(listed),
+            form: row.form,
+            preliminary,
+            filed_on: row.filed,
+            accession: row.accession.clone(),
+            url,
+            index_url: format!("{base}/{}-index.htm", row.accession),
+            offer_price: ex.offer_price,
+            sections: ex.sections,
+            missing: ex.missing,
+            document_chars: ex.document_chars,
+            source: "sec".into(),
+            fetched_at: Utc::now(),
+        })
+    }
+
+    /// Alternativa sin clave al calendario: folletos definitivos (424B4/424B1) presentados en el
+    /// rango, del índice de texto completo de EDGAR. Incluye ofertas posteriores a la OPV y
+    /// no trae precio ni símbolo: es un indicio de que hubo oferta, no un calendario completo.
+    pub async fn recent_final_prospectuses(&self, from: NaiveDate, to: NaiveDate) -> PResult<Vec<IpoEntry>> {
+        let text = self.get(fts_url(None, "424B4,424B1", Some(from), Some(to), 0)).await?;
+        let now = Utc::now();
+        Ok(parse_fts(&text)?
+            .into_iter()
+            .map(|h| IpoEntry {
+                date: h.filed,
+                symbol: None,
+                name: h.name,
+                exchange: None,
+                status: IpoStatus::Priced,
+                price_low: None,
+                price_high: None,
+                shares: None,
+                total_value: None,
+                spac_likely: false,
+                source: "sec".into(),
+                source_url: Some(format!(
+                    "https://www.sec.gov/Archives/edgar/data/{}/{}/",
+                    h.cik,
+                    h.accession.replace('-', "")
+                )),
+                as_of: now,
+            })
+            .collect())
     }
 }
 

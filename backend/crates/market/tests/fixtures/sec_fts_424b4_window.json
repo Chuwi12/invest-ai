@@ -1,0 +1,299 @@
+{
+ "took": 81,
+ "timed_out": false,
+ "_shards": {
+  "total": 50,
+  "successful": 50,
+  "skipped": 0,
+  "failed": 0
+ },
+ "hits": {
+  "total": {
+   "value": 6,
+   "relation": "eq"
+  },
+  "max_score": null,
+  "hits": [
+   {
+    "_index": "edgar_file",
+    "_id": "0001683168-26-007757:sunshine_424b4.htm",
+    "_score": null,
+    "_source": {
+     "ciks": [
+      "0001402328"
+     ],
+     "period_ending": null,
+     "file_num": [
+      "333-299274"
+     ],
+     "display_names": [
+      "Sunshine Biopharma Inc.  (SBFM, SBFMW)  (CIK 0001402328)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "424B4"
+     ],
+     "file_date": "2026-10-09",
+     "biz_states": [
+      "FL"
+     ],
+     "sics": [
+      "2834"
+     ],
+     "form": "424B4",
+     "adsh": "0001683168-26-007757",
+     "film_num": [
+      "261453766"
+     ],
+     "biz_locations": [
+      "Fort Lauderdale, FL"
+     ],
+     "file_type": "424B4",
+     "ma_i_individual": null,
+     "file_description": "PROSPECTUS",
+     "inc_states": [
+      "CO"
+     ],
+     "items": []
+    },
+    "sort": [
+     1791504000000,
+     "0001683168-26-007757:sunshine_424b4.htm"
+    ]
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001493152-26-046432:form424b4.htm",
+    "_score": null,
+    "_source": {
+     "ciks": [
+      "0002058584"
+     ],
+     "period_ending": null,
+     "file_num": [
+      "333-299200"
+     ],
+     "display_names": [
+      "DarkIris Inc.  (DKI)  (CIK 0002058584)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "424B4"
+     ],
+     "file_date": "2026-10-09",
+     "biz_states": [],
+     "sics": [
+      "7372"
+     ],
+     "form": "424B4",
+     "adsh": "0001493152-26-046432",
+     "film_num": [
+      "261451168"
+     ],
+     "biz_locations": [
+      "Sheung Wan"
+     ],
+     "file_type": "424B4",
+     "ma_i_individual": null,
+     "file_description": "424B4",
+     "inc_states": [],
+     "items": []
+    },
+    "sort": [
+     1791504000000,
+     "0001493152-26-046432:form424b4.htm"
+    ]
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001493152-26-046431:form424b4.htm",
+    "_score": null,
+    "_source": {
+     "ciks": [
+      "0002058584"
+     ],
+     "period_ending": null,
+     "file_num": [
+      "333-299359"
+     ],
+     "display_names": [
+      "DarkIris Inc.  (DKI)  (CIK 0002058584)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "424B4"
+     ],
+     "file_date": "2026-10-09",
+     "biz_states": [],
+     "sics": [
+      "7372"
+     ],
+     "form": "424B4",
+     "adsh": "0001493152-26-046431",
+     "film_num": [
+      "261451167"
+     ],
+     "biz_locations": [
+      "Sheung Wan"
+     ],
+     "file_type": "424B4",
+     "ma_i_individual": null,
+     "file_description": "424B4",
+     "inc_states": [],
+     "items": []
+    },
+    "sort": [
+     1791504000000,
+     "0001493152-26-046431:form424b4.htm"
+    ]
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001213900-26-108587:ea0276911-10.htm",
+    "_score": null,
+    "_source": {
+     "ciks": [
+      "0002002988"
+     ],
+     "period_ending": null,
+     "file_num": [
+      "333-299024"
+     ],
+     "display_names": [
+      "Retension Pharmaceuticals, Inc.  (CIK 0002002988)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "424B4"
+     ],
+     "file_date": "2026-10-09",
+     "biz_states": [
+      "VA"
+     ],
+     "sics": [
+      "2834"
+     ],
+     "form": "424B4",
+     "adsh": "0001213900-26-108587",
+     "film_num": [
+      "261453816"
+     ],
+     "biz_locations": [
+      "Mclean, VA"
+     ],
+     "file_type": "424B4",
+     "ma_i_individual": null,
+     "file_description": "PROSPECTUS",
+     "inc_states": [
+      "DE"
+     ],
+     "items": []
+    },
+    "sort": [
+     1791504000000,
+     "0001213900-26-108587:ea0276911-10.htm"
+    ]
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001193125-26-419203:project_dino_-_424b4.htm",
+    "_score": null,
+    "_source": {
+     "ciks": [
+      "0002139097"
+     ],
+     "period_ending": null,
+     "file_num": [
+      "333-299018"
+     ],
+     "display_names": [
+      "TRex Bio, Inc.  (CIK 0002139097)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "424B4"
+     ],
+     "file_date": "2026-10-09",
+     "biz_states": [
+      "CA"
+     ],
+     "sics": [
+      "2836"
+     ],
+     "form": "424B4",
+     "adsh": "0001193125-26-419203",
+     "film_num": [
+      "261453583"
+     ],
+     "biz_locations": [
+      "South San Francisco, CA"
+     ],
+     "file_type": "424B4",
+     "ma_i_individual": null,
+     "file_description": "424B4",
+     "inc_states": [
+      "DE"
+     ],
+     "items": []
+    },
+    "sort": [
+     1791504000000,
+     "0001193125-26-419203:project_dino_-_424b4.htm"
+    ]
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001493152-26-046355:form424b4.htm",
+    "_score": null,
+    "_source": {
+     "ciks": [
+      "0002004489"
+     ],
+     "period_ending": null,
+     "file_num": [
+      "333-298988"
+     ],
+     "display_names": [
+      "Basel Medical Group Ltd  (BMGL)  (CIK 0002004489)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "424B4"
+     ],
+     "file_date": "2026-10-08",
+     "biz_states": [
+      "U0"
+     ],
+     "sics": [
+      "8011"
+     ],
+     "form": "424B4",
+     "adsh": "0001493152-26-046355",
+     "film_num": [
+      "261450372"
+     ],
+     "biz_locations": [
+      "Singapore, U0"
+     ],
+     "file_type": "424B4",
+     "ma_i_individual": null,
+     "file_description": "424B4",
+     "inc_states": [
+      "D8"
+     ],
+     "items": []
+    },
+    "sort": [
+     1791417600000,
+     "0001493152-26-046355:form424b4.htm"
+    ]
+   }
+  ]
+ }
+}
