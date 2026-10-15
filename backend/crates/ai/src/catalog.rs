@@ -20,8 +20,12 @@
 //! ```
 //!
 //! Es una estimación: no contempla KV cuantizada (`OLLAMA_KV_CACHE_TYPE`), flash-attention ni
-//! lotes grandes. Los modelos con atención por ventana o recurrente (gemma3, gpt-oss, qwen3.5)
-//! cuentan solo las capas globales a `ctx` completo.
+//! lotes grandes. Los modelos con atención por ventana o recurrente (gemma3/4, gpt-oss, qwen3.5/3.6/3.8,
+//! nemotron-h) cuentan solo las capas globales a `ctx` completo y las de ventana a `min(ctx, ventana)`;
+//! `tools/gen_catalog.py` decide capa a capa (cabecera GGUF) cuáles guardan KV: las recurrentes/SSM y las
+//! que comparten KV (gemma4 E2B/E4B) no suman. Quedan fuera, por pequeños y sin medir: el estado recurrente
+//! (≈50 MiB en qwen3.5:4b, ≈150 MiB en un 27B) y el margen que llama.cpp añade a la ventana (`n_ubatch`).
+//! `disk_bytes` suma todas las capas del manifest (pesos, proyector de visión y borrador MTP si lo hay).
 
 use std::sync::OnceLock;
 
@@ -227,5 +231,117 @@ mod tests {
         .unwrap();
         let p = profile_from_show(&show).unwrap();
         assert_eq!(p.kv_bytes_per_token_full, 32 * 8 * 256 * 2);
+    }
+
+    /// Etiquetas añadidas al regenerar el catálogo el 14-oct-2026 (verificadas contra el registro).
+    const NEW_TAGS: &[&str] = &[
+        "qwen3.5:0.8b",
+        "qwen3.5:2b",
+        "qwen3.5:4b",
+        "qwen3.5:9b",
+        "qwen3.5:27b",
+        "qwen3.5:35b-a3b",
+        "qwen3.5:122b-a10b",
+        "qwen3.6:27b",
+        "qwen3.6:35b-a3b",
+        "qwen3.8:27b",
+        "gemma4:e2b",
+        "gemma4:e4b",
+        "gemma4:12b",
+        "gemma4:26b-a4b",
+        "gemma4:31b",
+        "muse-glimmer:30b",
+        "nemotron-3.5-lightning:30b-a3b",
+    ];
+
+    fn vram(id: &str, ctx: u32, kv_factor: f64) -> ModelRequirements {
+        entry_requirements(find(id).unwrap_or_else(|| panic!("{id} no está en el catálogo")), ctx, kv_factor)
+    }
+
+    #[test]
+    fn new_tags_have_kv_profile_and_coherent_requirements() {
+        for id in NEW_TAGS {
+            let m = find(id).unwrap_or_else(|| panic!("{id} no está en el catálogo"));
+            assert!(m.supports_tools && m.reasoning, "{id}: tools y razonamiento verificados en el registro");
+            assert!(m.arch.kv_bytes_per_token_full > 0, "{id} sin perfil de KV");
+            assert_eq!(m.arch.sliding_window.is_some(), m.arch.kv_bytes_per_token_swa > 0, "{id}: ventana y bytes SWA deben ir juntos");
+            assert!(!m.description.trim().is_empty() && m.context_window >= 128_000, "{id}");
+            let f16 = vram(id, 16_384, 1.0);
+            // pesos (disk_gb) + KV + 0,6 de overhead; la RAM solo-CPU añade 1,5.
+            assert!(f16.recommended_vram_gb >= f16.disk_gb + 0.5, "{id}: la VRAM recomendada no cubre los pesos");
+            assert!(f16.min_vram_gb < f16.recommended_vram_gb && f16.recommended_vram_gb < f16.min_ram_gb, "{id}");
+            // KV q8_0 ahorra VRAM (con 128k, para que el ahorro supere el redondeo a 0,1 GiB incluso en los híbridos).
+            let (long16, long8) = (vram(id, 131_072, 1.0), vram(id, 131_072, crate::config::kv_cache_factor("q8_0")));
+            assert!(long8.recommended_vram_gb < long16.recommended_vram_gb && long8.disk_gb == long16.disk_gb, "{id}");
+            // El KV de 16k no puede ser mayor que los pesos en ninguno de estos modelos (sí lo sería sin tratar
+            // las capas recurrentes/de ventana): detecta un perfil que cuente todas las capas como globales.
+            let kv_gib = f64::from(f16.recommended_vram_gb - f16.disk_gb) - OVERHEAD_GIB;
+            assert!(kv_gib < f64::from(f16.disk_gb), "{id}: KV de 16k = {kv_gib:.2} GiB, desproporcionado");
+        }
+    }
+
+    #[test]
+    fn qwen3_5_4b_needs_less_vram_than_qwen2_5_7b_at_every_context() {
+        for ctx in [8_192, 16_384, 32_768, 131_072] {
+            let (small, big) = (vram("qwen3.5:4b", ctx, 1.0), vram("qwen2.5:7b", ctx, 1.0));
+            assert!(small.recommended_vram_gb < big.recommended_vram_gb, "ctx {ctx}: {small:?} vs {big:?}");
+            assert!(small.min_vram_gb < big.min_vram_gb && small.min_ram_gb < big.min_ram_gb, "ctx {ctx}");
+        }
+        // Y la brecha crece con el contexto: 8 de 32 capas guardan KV (4 cabezas·512 B) frente a 28 de 28 en qwen2.5.
+        let gap = |ctx| vram("qwen2.5:7b", ctx, 1.0).recommended_vram_gb - vram("qwen3.5:4b", ctx, 1.0).recommended_vram_gb;
+        assert!(gap(131_072) > gap(8_192));
+    }
+
+    #[test]
+    fn hybrid_models_grow_slower_with_context_than_dense_ones() {
+        let slope = |id: &str| vram(id, 32_768, 1.0).recommended_vram_gb - vram(id, 8_192, 1.0).recommended_vram_gb;
+        // qwen3:8b: 147456 B/token; qwen3.5:9b: 32768 B/token (8 capas de atención de 32).
+        assert!(slope("qwen3.5:9b") < slope("qwen3:8b") / 3.0, "{} vs {}", slope("qwen3.5:9b"), slope("qwen3:8b"));
+        assert!(slope("qwen3.5:27b") < slope("qwen3:32b") / 3.0);
+        // MTP activa por defecto (qwen3.6/3.8): +1 capa de atención propia, algo más de KV que qwen3.5:27b.
+        let (q35, q36, q38) = (find("qwen3.5:27b").unwrap(), find("qwen3.6:27b").unwrap(), find("qwen3.8:27b").unwrap());
+        assert_eq!(q36.arch.kv_bytes_per_token_full, q35.arch.kv_bytes_per_token_full + 4096);
+        assert_eq!(q38.arch.kv_bytes_per_token_full, q36.arch.kv_bytes_per_token_full);
+    }
+
+    #[test]
+    fn qwen3_5_family_requirements_grow_with_size() {
+        let order = ["qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen3.5:27b", "qwen3.5:35b-a3b", "qwen3.5:122b-a10b"];
+        for w in order.windows(2) {
+            let (a, b) = (vram(w[0], 16_384, 1.0), vram(w[1], 16_384, 1.0));
+            assert!(a.recommended_vram_gb < b.recommended_vram_gb && a.disk_gb < b.disk_gb, "{} < {}", w[0], w[1]);
+        }
+        // 8 GB de VRAM (RTX 4070): el 9B con 16k cabe entero; el 27B no.
+        assert!(vram("qwen3.5:9b", 16_384, 1.0).recommended_vram_gb < 8.0);
+        assert!(vram("qwen3.5:27b", 16_384, 1.0).recommended_vram_gb > 16.0);
+    }
+
+    #[test]
+    fn new_moe_models_declare_active_parameters() {
+        let moe = ["qwen3.5:35b-a3b", "qwen3.5:122b-a10b", "qwen3.6:35b-a3b", "gemma4:26b-a4b", "nemotron-3.5-lightning:30b-a3b"];
+        for id in NEW_TAGS {
+            let m = find(id).unwrap();
+            assert_eq!(m.active_parameters.is_some(), moe.contains(id), "{id}");
+            let f = active_fraction(&m.parameters, m.active_parameters.as_deref());
+            assert!(if moe.contains(id) { f < 0.2 } else { f == 1.0 }, "{id}: fracción activa {f}");
+        }
+        // 35B-A3B: ~1,8 GiB leídos por token → viable solo con CPU; el denso de 27B no.
+        assert!(vram("qwen3.5:35b-a3b", 16_384, 1.0).cpu_only_ok && !vram("qwen3.5:27b", 16_384, 1.0).cpu_only_ok);
+    }
+
+    #[test]
+    fn gemma4_sliding_window_and_shared_kv_are_applied() {
+        for id in ["gemma4:e2b", "gemma4:e4b", "gemma4:12b", "gemma4:26b-a4b", "gemma4:31b"] {
+            let m = find(id).unwrap();
+            assert!(m.arch.sliding_window.is_some() && m.arch.kv_bytes_per_token_swa > 0, "{id}");
+            // Con 32k de contexto, contar las capas de ventana como globales daría más KV.
+            let as_global = KvProfile { sliding_window: None, ..m.arch.clone() };
+            let (win, glob) = (requirements(m.disk_bytes, &m.arch, 1.0, 32_768, 1.0), requirements(m.disk_bytes, &as_global, 1.0, 32_768, 1.0));
+            assert!(win.recommended_vram_gb < glob.recommended_vram_gb, "{id}: {win:?} vs {glob:?}");
+        }
+        // E2B/E4B comparten KV entre las últimas capas: guardan KV 15 de 35 y 24 de 42 capas, no todas.
+        let e4b = find("gemma4:e4b").unwrap();
+        assert_eq!(e4b.arch.kv_bytes_per_token_full, 4 * 2 * (512 + 512) * 2);
+        assert_eq!(e4b.arch.kv_bytes_per_token_swa, 20 * 2 * (256 + 256) * 2);
     }
 }

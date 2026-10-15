@@ -1,5 +1,5 @@
 {
- "verifiedAt": "2026-10-12T09:17Z",
+ "verifiedAt": "2026-10-14T21:21Z",
  "source": "https://registry.ollama.ai/v2/library/<nombre>/manifests/<tag>",
  "models": [
   {
@@ -25,9 +25,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 114688,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:3d0b790534fe4b79525fc3692950408dca41171676ed7e21db57af5c65ef6ab6"
+   "manifestDigest": "sha256:3d0b790534fe4b79525fc3692950408dca41171676ed7e21db57af5c65ef6ab6",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "qwen3:4b",
@@ -52,9 +55,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 147456,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f"
+   "manifestDigest": "sha256:3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "llama3.2:3b",
@@ -79,9 +85,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 114688,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:dde5aa3fc5ffc17176b5e8bdc82f587b24b2678c6c66101bf7da77af9f7ccdff"
+   "manifestDigest": "sha256:dde5aa3fc5ffc17176b5e8bdc82f587b24b2678c6c66101bf7da77af9f7ccdff",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "phi4-mini:3.8b",
@@ -106,9 +115,142 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 131072,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:3c168af1dea0a414299c7d9077e100ac763370e5a98b3c53801a958a47f0a5db"
+   "manifestDigest": "sha256:3c168af1dea0a414299c7d9077e100ac763370e5a98b3c53801a958a47f0a5db",
+   "capabilitiesSource": "plantilla"
+  },
+  {
+   "id": "qwen3.5:0.8b",
+   "name": "Qwen3.5 0.8B",
+   "family": "qwen35",
+   "parameters": "752.39M",
+   "activeParameters": null,
+   "quantization": "Q8_0",
+   "contextWindow": 262144,
+   "tier": "light",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "El más pequeño de Qwen3.5 (752M parámetros, Q8_0 por defecto): híbrido de capas recurrentes y atención, multimodal, contexto de 256K.",
+   "diskBytes": 1322069277,
+   "arch": {
+    "architecture": "qwen35",
+    "blocks": 24,
+    "kvHeads": 2,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 6,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 12288,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 18,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:889ea3b9143cdc32146c7d530ce5f3d452ec18069086f6f4167ce9ae72a9691f",
+   "speculative": {
+    "draftModel": "qwen35",
+    "draftBytes": 302867776,
+    "draftNumPredict": 2
+   },
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "qwen3.5:2b",
+   "name": "Qwen3.5 2B",
+   "family": "qwen35",
+   "parameters": "1.9B",
+   "activeParameters": null,
+   "quantization": "Q8_0",
+   "contextWindow": 262144,
+   "tier": "light",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.5 de 1,9B (Q8_0 por defecto): híbrido de capas recurrentes y atención, multimodal, contexto de 256K.",
+   "diskBytes": 2683396812,
+   "arch": {
+    "architecture": "qwen35",
+    "blocks": 24,
+    "kvHeads": 2,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 6,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 12288,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 18,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:e8bf47d40c5ba68baf8f3e503ee36710da6e8641cb0a670a508cff5b3f0cfbf7",
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "qwen3.5:4b",
+   "name": "Qwen3.5 4B",
+   "family": "qwen35",
+   "parameters": "4.2B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "light",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.5 de 4,2B: híbrido de capas recurrentes y atención (8 de 32 capas guardan KV), multimodal, contexto de 256K.",
+   "diskBytes": 3324173934,
+   "arch": {
+    "architecture": "qwen35",
+    "blocks": 32,
+    "kvHeads": 4,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 8,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 32768,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 24,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:a9d0a3e1d8c91732a3812becd31f8d4a8ff57414903f226306069f0437e2ac50",
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "gemma4:e2b",
+   "name": "Gemma 4 E2B",
+   "family": "gemma4",
+   "parameters": "4.6B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 131072,
+   "tier": "light",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Gemma 4 E2B: 4,6B de parámetros con embeddings por capa («E» = efectivos); multimodal con audio, atención con ventana y KV compartido entre capas.",
+   "diskBytes": 4587156505,
+   "arch": {
+    "architecture": "gemma4",
+    "blocks": 35,
+    "kvHeads": 1,
+    "keyLength": 512,
+    "valueLength": 512,
+    "fullAttentionLayers": 3,
+    "swaLayers": 12,
+    "slidingWindow": 512,
+    "kvBytesPerTokenFull": 6144,
+    "kvBytesPerTokenSwa": 12288,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 20
+   },
+   "manifestDigest": "sha256:6dd7ac24fe13a238898e16e253ebc7a72fa27fb83f2658c2f6c241df3af5937d",
+   "speculative": {
+    "draftModel": "gemma4-assistant",
+    "draftBytes": 97817696,
+    "draftNumPredict": 3
+   },
+   "capabilitiesSource": "parser:gemma4"
   },
   {
    "id": "qwen2.5:7b",
@@ -133,9 +275,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 57344,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:2bada8a7450677000f678be90653b85d364de7db25eb5ea54136ada5f3933730"
+   "manifestDigest": "sha256:2bada8a7450677000f678be90653b85d364de7db25eb5ea54136ada5f3933730",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "qwen3:8b",
@@ -160,9 +305,77 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 147456,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:a3de86cd1c132c822487ededd47a324c50491393e6565cd14bafa40d0b8e686f"
+   "manifestDigest": "sha256:a3de86cd1c132c822487ededd47a324c50491393e6565cd14bafa40d0b8e686f",
+   "capabilitiesSource": "plantilla"
+  },
+  {
+   "id": "qwen3.5:9b",
+   "name": "Qwen3.5 9B",
+   "family": "qwen35",
+   "parameters": "9.0B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "balanced",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.5 de 9B: híbrido de capas recurrentes y atención (8 de 32 capas guardan KV), multimodal, contexto de 256K.",
+   "diskBytes": 6550825550,
+   "arch": {
+    "architecture": "qwen35",
+    "blocks": 32,
+    "kvHeads": 4,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 8,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 32768,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 24,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "gemma4:e4b",
+   "name": "Gemma 4 E4B",
+   "family": "gemma4",
+   "parameters": "7.5B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 131072,
+   "tier": "balanced",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Gemma 4 E4B: 7,5B de parámetros con embeddings por capa; multimodal con audio, atención con ventana y KV compartido entre capas.",
+   "diskBytes": 6583656505,
+   "arch": {
+    "architecture": "gemma4",
+    "blocks": 42,
+    "kvHeads": 2,
+    "keyLength": 512,
+    "valueLength": 512,
+    "fullAttentionLayers": 4,
+    "swaLayers": 20,
+    "slidingWindow": 512,
+    "kvBytesPerTokenFull": 16384,
+    "kvBytesPerTokenSwa": 40960,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 18
+   },
+   "manifestDigest": "sha256:370c2879f17648d337b0ab4e208fdce348e24d1060064e93d7645daafd56d39c",
+   "speculative": {
+    "draftModel": "gemma4-assistant",
+    "draftBytes": 98653280,
+    "draftNumPredict": 3
+   },
+   "capabilitiesSource": "parser:gemma4"
   },
   {
    "id": "llama3.1:8b",
@@ -187,9 +400,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 131072,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:667b0c1932bc6ffc593ed1d03f895bf2dc8dc6df21db3042284a6f4416b06a29"
+   "manifestDigest": "sha256:667b0c1932bc6ffc593ed1d03f895bf2dc8dc6df21db3042284a6f4416b06a29",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "ministral-3:8b",
@@ -214,9 +430,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 139264,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:3ea32f882c990baebcfe6ab5cda2e3167d54ab16d7937c0b9aa3db11aba01574"
+   "manifestDigest": "sha256:3ea32f882c990baebcfe6ab5cda2e3167d54ab16d7937c0b9aa3db11aba01574",
+   "capabilitiesSource": "plantilla+parser:ministral"
   },
   {
    "id": "granite3.3:8b",
@@ -241,9 +460,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 163840,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:77bcee066a76dcdd10d0d123c87e32c8ec2c74e31b6ffd87ebee49c9ac215dca"
+   "manifestDigest": "sha256:77bcee066a76dcdd10d0d123c87e32c8ec2c74e31b6ffd87ebee49c9ac215dca",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "qwen3:14b",
@@ -268,9 +490,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 163840,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:a8cc1361f3145dc01f6d77c6c82c9116b9ffe3c97b34716fe20418455876c40e"
+   "manifestDigest": "sha256:a8cc1361f3145dc01f6d77c6c82c9116b9ffe3c97b34716fe20418455876c40e",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "qwen2.5:14b",
@@ -295,9 +520,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 196608,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:2049f5674b1e92b4464e5729975c9689fcfbf0b0e4443ccf10b5339f370f9a54"
+   "manifestDigest": "sha256:2049f5674b1e92b4464e5729975c9689fcfbf0b0e4443ccf10b5339f370f9a54",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "mistral-nemo:12b",
@@ -322,9 +550,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 163840,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:b559938ab7a0392fc9ea9675b82280f2a15669ec3e0e0fc491c9cb0a7681cf94"
+   "manifestDigest": "sha256:b559938ab7a0392fc9ea9675b82280f2a15669ec3e0e0fc491c9cb0a7681cf94",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "ministral-3:14b",
@@ -349,9 +580,47 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 163840,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:bfb40fc6bb9c3b2ed529b480e04f824c005ea8f86733d4ebbf0c204de484891e"
+   "manifestDigest": "sha256:bfb40fc6bb9c3b2ed529b480e04f824c005ea8f86733d4ebbf0c204de484891e",
+   "capabilitiesSource": "plantilla+parser:ministral"
+  },
+  {
+   "id": "gemma4:12b",
+   "name": "Gemma 4 12B",
+   "family": "gemma4",
+   "parameters": "11.9B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Gemma 4 denso de 11,9B; multimodal con audio, atención con ventana en 40 de 48 capas, contexto de 256K.",
+   "diskBytes": 8021618941,
+   "arch": {
+    "architecture": "gemma4",
+    "blocks": 48,
+    "kvHeads": 8,
+    "keyLength": 512,
+    "valueLength": 512,
+    "fullAttentionLayers": 8,
+    "swaLayers": 40,
+    "slidingWindow": 1024,
+    "kvBytesPerTokenFull": 16384,
+    "kvBytesPerTokenSwa": 327680,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:bb722270d54346adc198f213851dbe0207e87c3ecf2a0aff4d92262726215391",
+   "speculative": {
+    "draftModel": "gemma4-assistant",
+    "draftBytes": 465109152,
+    "draftNumPredict": 3
+   },
+   "capabilitiesSource": "parser:gemma4"
   },
   {
    "id": "gpt-oss:20b",
@@ -376,9 +645,12 @@
     "swaLayers": 12,
     "slidingWindow": 128,
     "kvBytesPerTokenFull": 24576,
-    "kvBytesPerTokenSwa": 24576
+    "kvBytesPerTokenSwa": 24576,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:8ecb5d4ad6172c63f9cbf1a07a04e525985a8a11a6e516da02b674c4010de716"
+   "manifestDigest": "sha256:8ecb5d4ad6172c63f9cbf1a07a04e525985a8a11a6e516da02b674c4010de716",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "qwen3:30b-a3b",
@@ -403,9 +675,47 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 98304,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:58574f2e94b99fb9e4391408b57e5aeaaaec10f6384e9a699fc2cb43a5c8eabf"
+   "manifestDigest": "sha256:58574f2e94b99fb9e4391408b57e5aeaaaec10f6384e9a699fc2cb43a5c8eabf",
+   "capabilitiesSource": "plantilla"
+  },
+  {
+   "id": "gemma4:26b-a4b",
+   "name": "Gemma 4 26B-A4B (MoE)",
+   "family": "gemma4",
+   "parameters": "25.2B",
+   "activeParameters": "4B",
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Gemma 4 MoE de 25,2B con 8 de 128 expertos activos (≈4B); multimodal con audio, atención con ventana, contexto de 256K.",
+   "diskBytes": 18731025629,
+   "arch": {
+    "architecture": "gemma4",
+    "blocks": 30,
+    "kvHeads": 8,
+    "keyLength": 512,
+    "valueLength": 512,
+    "fullAttentionLayers": 5,
+    "swaLayers": 25,
+    "slidingWindow": 1024,
+    "kvBytesPerTokenFull": 20480,
+    "kvBytesPerTokenSwa": 204800,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:a8bdd07a49b895083bb1420bb895ad9ab3e3b8f7d5cc42c7582ca0fa765eede2",
+   "speculative": {
+    "draftModel": "gemma4-assistant",
+    "draftBytes": 461766752,
+    "draftNumPredict": 3
+   },
+   "capabilitiesSource": "parser:gemma4"
   },
   {
    "id": "mistral-small3.2:24b",
@@ -430,9 +740,273 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 163840,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:41a5b0c36a28a3a0480ce2e4007d3a21e3298be70e2b9a103960581412997dca"
+   "manifestDigest": "sha256:41a5b0c36a28a3a0480ce2e4007d3a21e3298be70e2b9a103960581412997dca",
+   "capabilitiesSource": "plantilla"
+  },
+  {
+   "id": "qwen3.5:27b",
+   "name": "Qwen3.5 27B",
+   "family": "qwen35",
+   "parameters": "26.9B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.5 denso de 27B: híbrido de capas recurrentes y atención (16 de 64 capas guardan KV), multimodal, contexto de 256K.",
+   "diskBytes": 17478556591,
+   "arch": {
+    "architecture": "qwen35",
+    "blocks": 64,
+    "kvHeads": 4,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 16,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 65536,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 48,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:c7e0e920a0948849beb7074d8368cbd5ac6825fcd1f2450cf851276325d8a6a5",
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "qwen3.6:27b",
+   "name": "Qwen3.6 27B",
+   "family": "qwen35",
+   "parameters": "27.3B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.6 denso de 27B, misma arquitectura híbrida que Qwen3.5; multimodal, contexto de 256K.",
+   "diskBytes": 17769076933,
+   "arch": {
+    "architecture": "qwen35",
+    "blocks": 65,
+    "kvHeads": 4,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 17,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 69632,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 48,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:415aad607fc297a2ad84cda238febbde295f49f17c17ad7784e2246060fb06d0",
+   "speculative": {
+    "embeddedMtpLayers": 1,
+    "draftNumPredict": 3
+   },
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "qwen3.8:27b",
+   "name": "Qwen3.8 27B",
+   "family": "qwen35",
+   "parameters": "27.3B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.8 denso de 27B, misma arquitectura híbrida que Qwen3.5; multimodal, contexto de 256K.",
+   "diskBytes": 17741872154,
+   "arch": {
+    "architecture": "qwen35",
+    "blocks": 65,
+    "kvHeads": 4,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 17,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 69632,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 48,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:f5f1dd8920d417aac2718b0bda3403da274301efdd6760b4f0f4b864ff2ad57d",
+   "speculative": {
+    "embeddedMtpLayers": 1,
+    "draftNumPredict": 4
+   },
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "muse-glimmer:30b",
+   "name": "Muse Glimmer 30B",
+   "family": "muse-glimmer",
+   "parameters": "27.9B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 131072,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Modelo abierto de Meta para agentes locales (27,9B densos); multimodal, atención con ventana en 39 de 52 capas, contexto de 128K.",
+   "diskBytes": 18157010252,
+   "arch": {
+    "architecture": "muse-glimmer",
+    "blocks": 52,
+    "kvHeads": 2,
+    "keyLength": 128,
+    "valueLength": 128,
+    "fullAttentionLayers": 13,
+    "swaLayers": 39,
+    "slidingWindow": 2048,
+    "kvBytesPerTokenFull": 13312,
+    "kvBytesPerTokenSwa": 39936,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:71b5c9c9abbc2a9e7c13550b6f9fe1f062650117a24490b15a310cbd7de03f8b",
+   "capabilitiesSource": "parser:glimmer"
+  },
+  {
+   "id": "qwen3.5:35b-a3b",
+   "name": "Qwen3.5 35B-A3B (MoE)",
+   "family": "qwen35moe",
+   "parameters": "34.7B",
+   "activeParameters": "3B",
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.5 MoE de 34,7B con 8 de 256 expertos activos (≈3B); híbrido, multimodal, contexto de 256K.",
+   "diskBytes": 22069592181,
+   "arch": {
+    "architecture": "qwen35moe",
+    "blocks": 40,
+    "kvHeads": 2,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 10,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 20480,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 30,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:82cfd9a4c8343580c87b2557b3b5de744f171d4f077c61f0e519cf0a92a8500b",
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "qwen3.6:35b-a3b",
+   "name": "Qwen3.6 35B-A3B (MoE)",
+   "family": "qwen35moe",
+   "parameters": "35.5B",
+   "activeParameters": "3B",
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.6 MoE de 35,5B con ≈3B activos; misma arquitectura híbrida que Qwen3.5 35B-A3B.",
+   "diskBytes": 22621314381,
+   "arch": {
+    "architecture": "qwen35moe",
+    "blocks": 41,
+    "kvHeads": 2,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 11,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 22528,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 30,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:d372de8e934898a59e6ccfabc3368474711384d8f1fd4d22d87a3f0a45400cdc",
+   "speculative": {
+    "embeddedMtpLayers": 1,
+    "draftNumPredict": 2
+   },
+   "capabilitiesSource": "parser:qwen3.5"
+  },
+  {
+   "id": "nemotron-3.5-lightning:30b-a3b",
+   "name": "Nemotron 3.5 Lightning 30B-A3B (MoE)",
+   "family": "nemotron_h_moe",
+   "parameters": "32.9B",
+   "activeParameters": "3B",
+   "quantization": "Q4_K_M",
+   "contextWindow": 1048576,
+   "tier": "heavy",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "MoE híbrido con capas SSM de NVIDIA (32,9B, ≈3B activos); solo 6 de 52 capas guardan KV; contexto de hasta 1M.",
+   "diskBytes": 25430749387,
+   "arch": {
+    "architecture": "nemotron_h_moe",
+    "blocks": 53,
+    "kvHeads": 2,
+    "keyLength": 128,
+    "valueLength": 128,
+    "fullAttentionLayers": 7,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 7168,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 46,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:5c19f6282f4fc51cb114cb6c876d70ca2fc3b9cf0fbd0a018d9908f4fe1f63b3",
+   "speculative": {
+    "embeddedMtpLayers": 1,
+    "draftNumPredict": 2
+   },
+   "capabilitiesSource": "parser:nemotron-3.5-nano"
+  },
+  {
+   "id": "gemma4:31b",
+   "name": "Gemma 4 31B",
+   "family": "gemma4",
+   "parameters": "30.7B",
+   "activeParameters": null,
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "max",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Gemma 4 denso de 30,7B; multimodal con audio, atención con ventana en 50 de 60 capas, contexto de 256K.",
+   "diskBytes": 20385458234,
+   "arch": {
+    "architecture": "gemma4",
+    "blocks": 60,
+    "kvHeads": 16,
+    "keyLength": 512,
+    "valueLength": 512,
+    "fullAttentionLayers": 10,
+    "swaLayers": 50,
+    "slidingWindow": 1024,
+    "kvBytesPerTokenFull": 81920,
+    "kvBytesPerTokenSwa": 819200,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:cd20f2b3f2e30239023189c04e65754b0cc7c38959665ac727461ee470df16cf",
+   "speculative": {
+    "draftModel": "gemma4-assistant",
+    "draftBytes": 514687072,
+    "draftNumPredict": 3
+   },
+   "capabilitiesSource": "parser:gemma4"
   },
   {
    "id": "qwen3:32b",
@@ -457,9 +1031,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 262144,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312"
+   "manifestDigest": "sha256:3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "gpt-oss:120b",
@@ -484,9 +1061,12 @@
     "swaLayers": 18,
     "slidingWindow": 128,
     "kvBytesPerTokenFull": 36864,
-    "kvBytesPerTokenSwa": 36864
+    "kvBytesPerTokenSwa": 36864,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:a5b03e4c678e1671191c0115861445b61529f518e751ce38a2bb6030cca9b1d0"
+   "manifestDigest": "sha256:a5b03e4c678e1671191c0115861445b61529f518e751ce38a2bb6030cca9b1d0",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "llama3.3:70b",
@@ -511,9 +1091,12 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 327680,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:4824460d29f2058aaf6e1118a63a7a197a09bed509f0e7d4e2efb1ee273b447d"
+   "manifestDigest": "sha256:4824460d29f2058aaf6e1118a63a7a197a09bed509f0e7d4e2efb1ee273b447d",
+   "capabilitiesSource": "plantilla"
   },
   {
    "id": "qwen2.5:72b",
@@ -538,9 +1121,42 @@
     "swaLayers": 0,
     "slidingWindow": null,
     "kvBytesPerTokenFull": 327680,
-    "kvBytesPerTokenSwa": 0
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 0,
+    "sharedKvLayers": 0
    },
-   "manifestDigest": "sha256:6e7fdda508e91cb0f63de5c15ff79ac63a1584ccafd751c07ca12b7f442101b8"
+   "manifestDigest": "sha256:6e7fdda508e91cb0f63de5c15ff79ac63a1584ccafd751c07ca12b7f442101b8",
+   "capabilitiesSource": "plantilla"
+  },
+  {
+   "id": "qwen3.5:122b-a10b",
+   "name": "Qwen3.5 122B-A10B (MoE)",
+   "family": "qwen35moe",
+   "parameters": "125.1B",
+   "activeParameters": "10B",
+   "quantization": "Q4_K_M",
+   "contextWindow": 262144,
+   "tier": "max",
+   "supportsTools": true,
+   "reasoning": true,
+   "description": "Qwen3.5 MoE de 125B con ≈10B activos; 81 GB en disco.",
+   "diskBytes": 81370036360,
+   "arch": {
+    "architecture": "qwen35moe",
+    "blocks": 48,
+    "kvHeads": 2,
+    "keyLength": 256,
+    "valueLength": 256,
+    "fullAttentionLayers": 12,
+    "swaLayers": 0,
+    "slidingWindow": null,
+    "kvBytesPerTokenFull": 24576,
+    "kvBytesPerTokenSwa": 0,
+    "recurrentLayers": 36,
+    "sharedKvLayers": 0
+   },
+   "manifestDigest": "sha256:93c83617a40560a61cda911ee327efdb5b5fbd39caa8b777a4ec565c0af1af3d",
+   "capabilitiesSource": "parser:qwen3.5"
   }
  ]
 }

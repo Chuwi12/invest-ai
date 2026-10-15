@@ -193,6 +193,90 @@ Detalle de los hallazgos R-10…R-20 en `review.md → Segunda revisión`.
   cifras cortas.
 - **Fixture**: `ai::fixture` da `change_pct` en puntos porcentuales, como los proveedores.
 
+## Catálogo de modelos (`models.json`, regenerado el 14-oct-2026)
+Se genera con `python3 -I backend/crates/ai/tools/gen_catalog.py --out backend/crates/ai/models.json` (verifica cada tag contra
+`registry.ollama.ai`, aborta ante un 404 y no escribe nada si algo falla; solo HTTP: manifests, blobs de configuración/plantilla/params
+y una lectura Range de la cabecera GGUF, nunca `ollama pull`). Fórmula de requisitos: `catalog.rs`.
+- **Por qué faltaban qwen3.5 y compañía.** El generador exigía `.Tools` en la plantilla Go, pero los modelos nuevos llevan plantilla
+  `{{ .Prompt }}` y declaran `renderer`/`parser` en el blob de configuración: Ollama deriva tools y razonamiento del parser integrado
+  (`server/images.go::parserCapabilities`, `model/parsers/*.go`, v0.40.3). `qwen3.5:{4b,9b,27b,122b}` ya estaban en `CURATED` y se saltaban
+  sin ruido («plantilla no declara tool calling»). Ahora `PARSERS` en `gen_catalog.py` recoge (tools, razonamiento) de cada parser usado
+  (qwen3.5, gemma4, ministral, nemotron-3.5-nano, glimmer); parser desconocido o sin evidencia ⇒ descartado con aviso. La insignia de la
+  página de Ollama (`vision tools thinking`) coincide en todas las familias añadidas.
+- **Los 20 modelos anteriores no cambian**: regenerados salen idénticos campo a campo (digest, tamaño, KV) y ningún tag ha desaparecido
+  del registro. `deepseek-r1:8b/70b` siguen fuera (su plantilla no declara tools). `qwen3.3` y `qwen3.5:8b` dan 404 (re-comprobado).
+- **Perfil de KV capa a capa** (`kv_profile`): no cuentan las capas recurrentes (`full_attention_interval`/`recurrent_layers`), las que
+  tienen 0 cabezas KV (nemotron-h), las que comparten KV (`attention.shared_kv_layers`, gemma4 E2B/E4B) ni las NextN/MTP; las de ventana
+  salen de `attention.sliding_window_pattern` (gemma4, glimmer). Si el modelo trae MTP activo por defecto (`draft_num_predict` en sus
+  params), su capa NextN suma KV propio (lado seguro, +4 KiB/token en un 27B).
+- **Etiquetas**: se usa la etiqueta por defecto de cada tamaño, con la forma explícita en los MoE (`35b-a3b`, `122b-a10b`, `26b-a4b`);
+  `qwen3.5:35b`, `122b`, `qwen3.6:35b`, `gemma4:26b` y `qwen3.5:latest` son el mismo blob (comprobado por digest). **Cuantización por
+  defecto: Q4_K_M salvo `qwen3.5:0.8b` y `qwen3.5:2b`, que son Q8_0** (existe `2b-q4_K_M`, 1,9 GB; no se usa porque el id debe ser lo que
+  se descarga con el tag por defecto). `disk_bytes` suma todas las capas: incluye proyector de visión (0,2–1,4 GB) y modelo borrador.
+- **Añadidos** (14-oct-2026; disco real = suma de capas; VRAM recomendada con `num_ctx` 16384, f16 / q8_0; todos con tools y razonamiento):
+
+| tag | nivel | disco GB | VRAM rec. f16 / q8_0 | activos |
+|---|---|---|---|---|
+| qwen3.5:0.8b / 2b / 4b | light | 1,32 / 2,68 / 3,32 | 2,0/1,9 · 3,3/3,2 · 4,2/4,0 | |
+| gemma4:e2b | light | 4,59 | 5,0 / 4,9 | |
+| qwen3.5:9b · gemma4:e4b | balanced | 6,55 · 6,58 | 7,2/7,0 · 7,0/6,9 | |
+| gemma4:12b | heavy | 8,02 | 8,6 / 8,4 | |
+| qwen3.5:27b · qwen3.6:27b · qwen3.8:27b | heavy | 17,48 · 17,77 · 17,74 | 17,9/17,4 · 18,2/17,7 · 18,2/17,7 | |
+| muse-glimmer:30b | heavy | 18,16 | 17,8 / 17,7 | |
+| gemma4:26b-a4b | heavy | 18,73 | 18,6 / 18,3 | 4B |
+| qwen3.5:35b-a3b · qwen3.6:35b-a3b | heavy | 22,07 · 22,62 | 21,5/21,3 · 22,0/21,9 | 3B |
+| nemotron-3.5-lightning:30b-a3b | heavy | 25,43 | 24,4 / 24,3 | 3B |
+| gemma4:31b | max | 20,39 | 21,6 / 20,7 | |
+| qwen3.5:122b-a10b | max | 81,37 | 76,8 / 76,6 | 10B |
+
+- **Familias valoradas y no añadidas**: `granite4.2` (sin plantilla ni parser: su soporte de tools solo está en el Jinja del GGUF, no verificable
+  sin leer `tokenizer.chat_template`; la página no muestra «tools»), `qwen3.8-flash-next` (vista previa experimental de la arquitectura de
+  Qwen4), `ornith-1.5` (sin insignia «tools»), los modelos «decision» (nimble, tev1, clef, kev: clasificadores, no chat), los solo-nube
+  (mistral-large-4, glm-5.3, kimi-k3…) y las variantes `-mlx`/`-nvfp4`/`-mxfp8` (otro motor). **No encontré ninguna familia de chat
+  local con tools publicada después del 12-oct**: el orden «newest» de ollama.com solo trae por delante modelos de decisión, embeddings y
+  solo-nube, y lo que cambió el 12–13-oct son re-publicaciones de tags (`q8_0`/`bf16` de qwen3.5/3.6 y gemma4). Las familias añadidas son las que
+  faltaban en el catálogo y siguen vigentes (gemma4, nemotron-3.5-lightning y muse-glimmer, la familia abierta nueva de Meta, son de jun–ago).
+  Llama/Mistral/Phi: nada local con tools en estos tamaños (llama4 = 109B, mistral-medium-3.5 = 128B, phi4-mini-reasoning sin tools).
+- **No verificado**: los requisitos de las familias nuevas no se han medido (solo `qwen3:8b`: 7,7 estimados frente a 7,8 reales). Supuestos
+  sin comprobar: el proyector de visión ocupa VRAM al cargar (`mmproj`; Ollama reserva su tamaño); el KV de las capas de ventana de gemma4
+  (ventana + `n_ubatch` = 512 celdas en llama.cpp: hasta ≈0,4 GiB más en `gemma4:31b` a 16k); estado recurrente de qwen3.5 (≈50 MiB en
+  `4b`, ≈150 MiB en 27B) y K=V en las capas globales de gemma4 no contados. Los parámetros activos de los MoE son los del nombre del tag.
+
+## Variantes MTP (multi-token prediction) en Ollama 0.40.3 — investigación del 14-oct-2026
+Resultado corto: **mecánicamente sí, con ganancia sin medir en esta máquina; las variantes `-mtp-` no entran en el catálogo.**
+- **Qué hace el binario instalado** (`ollama --version` = 0.40.3, CUDA 13): usa el runner `llama-server` (llama.cpp b11351) y este incluye
+  la implementación `draft-mtp` (`strings /usr/lib/ollama/llama-server`: «adding speculative implementation 'draft-mtp'»,
+  `--spec-type`, `--spec-draft-n-max`). Código de la etiqueta v0.40.3: `llm/llama_server.go` (`hasMTPDraft`: `nextn_predict_layers > 0` o
+  tensores `mtp.` en qwen35; `appendDraftArgs` añade `--spec-type draft-mtp --spec-draft-n-max N` solo si `draft_num_predict > 0`) y
+  `server/routes.go::modelOptions` (el valor por defecto 4 de `api.DefaultOptions` se pone a 0 en los modelos sin capa `draft` salvo que
+  `draft_num_predict` venga en los params del modelo o en la petición). `docs/modelfile.mdx`: «embedded MTP tensors require setting this
+  parameter». El `journalctl -u ollama` (desde el 1-sep) solo muestra «no implementations specified for speculative decoding» (qwen2.5/qwen3, sin MTP):
+  **no consta que aquí se haya ejecutado ningún modelo con MTP**.
+- **Qué lleva cada etiqueta en el registro** (por digest del blob de pesos y `params`): `qwen3.6:27b`, `qwen3.6:35b-a3b` y `qwen3.8:27b` son
+  byte a byte sus `-mtp-q4_K_M` (cabeza MTP embebida, `nextn_predict_layers = 1`; `draft_num_predict` 3/2/4 en los params), y
+  `nemotron-3.5-lightning` también la trae (2; no tiene tag `-mtp-`) ⇒ con 0.40.3 en llama-server arrancan **con MTP activo por defecto**.
+  `gemma4:*` (3) y `qwen3.5:0.8b` (2) traen una capa `draft` aparte (0,1–0,5 GB y 0,30 GB) ya sumada en `disk_bytes`. `qwen3.5:{2b,4b,9b,27b,35b-a3b}`
+  y `122b-a10b` no llevan MTP; sus `-mtp-` (4b, 9b, 27b, 35b-a3b) son el mismo blob más una capa `draft` (+0,81, +2,43, +3,16, +1,99 GB;
+  `draft_num_predict` 1/2/2/3); el `2b-mtp-q4_K_M` es otro blob (Q4_K_M, el por defecto es Q8_0). El KV del borrador solo se estima para las cabezas embebidas.
+- **Ganancia publicada** (ninguna es CUDA ni llama.cpp): Ollama la mide solo en MLX/Apple Silicon — Gemma 4 12B nvfp4 en M5 Max, ≈+90 % de media
+  en Aider polyglot (blog «Faster Gemma 4 on MLX with multi-token prediction», 29-jun-2026; notas v0.31.1) y «más de 2×» en Gemma 4 31B de
+  código (v0.23.1); v0.32.6 activa la cabeza MTP de Qwen3.5 en MLX sin cifra. Las notas de v0.40.0–v0.40.5-rc0 no mencionan MTP en llama.cpp.
+  Referencia upstream: llama.cpp PR #22673 (fusionado 16-may-2026, «llama + spec: MTP Support»): Qwen3.6 27B Q8_0 en DGX Spark, de 7,0–7,7 a
+  13,9–21,6 tok/s con `--spec-draft-n-max 3` (9 prompts: 201 s → 83,8 s, ≈2,4×; aceptación 72 %, mejor en código y peor en traducción).
+  Esa máquina está limitada por ancho de banda de memoria, y el propio PR avisa de que **el prefill empeora con MTP**. En esta app hay más
+  tokens de entrada que de salida (≈6–14k frente a 1,4–2,8k), pero el **tiempo** lo domina la generación (corrección del coordinador, con datos
+  medidos en la RTX 4070 y qwen2.5:7b: ~38 tok/s de generación frente a miles de tok/s de prefill; un `standard` de ~9,2k/1,7k tokens son ~3–9 s
+  de prefill y ~45 s de generación). MTP acelera justo el término dominante, así que podría ayudar más de lo que sugiere el recuento de tokens; la
+  penalización del prefill y la tasa de aceptación en análisis financiero en español son desconocidas: hay que medirlo antes de afirmar nada.
+  Coste en memoria: en `qwen3.5:4b/9b` MTP exige la variante `-mtp-` (capa `draft` aparte: +0,81 / +2,43 GB), y con +2,43 GB el 9b deja de caber
+  en 8 GB.
+- **Cómo controlarlo**: `options.draft_num_predict` en la petición (0 = sin MTP) o `PARAMETER draft_num_predict` en un Modelfile. El análisis
+  no lo envía, así que los modelos con el parámetro en sus params lo usan. Fuentes: https://github.com/ollama/ollama/tree/v0.40.3 ,
+  https://github.com/ollama/ollama/releases , https://ollama.com/blog/faster-gemma-4-mlx-mtp , https://github.com/ggml-org/llama.cpp/pull/22673 ,
+  manifests `registry.ollama.ai/v2/library/{qwen3.5,qwen3.6,qwen3.8,gemma4,nemotron-3.5-lightning}`.
+- **Por medir** (cuando la GPU esté libre): tok/s y tiempos de `quick/standard/deep` con y sin `draft_num_predict` en `qwen3.6:27b`/`qwen3.5:9b`
+  (con 8 GB el 27B se reparte con la CPU), VRAM real con MTP y si el prefill largo penaliza.
+
 ## Comparativa de modelos y arreglos asociados
 Informe completo (metodología, tablas, extractos, bugs): `model-eval.md`. Ejemplo reproducible con snapshot congelado:
 `cargo run --release -p ai --example compare_models -- snapshot.json <modelo> <depth> salida.json` (lee `LLM_*` del entorno,
