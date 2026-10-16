@@ -19,6 +19,8 @@ pub struct Config {
     pub language: String,
     /// `INVEST_AI_FAKE=1`: datos y analista de mentira (desarrollo sin red ni Ollama).
     pub fake: bool,
+    /// Análisis diarios de la lista de seguimiento (`WATCHLIST_*`).
+    pub watchlist: crate::watchlist::WatchlistConfig,
 }
 
 impl Config {
@@ -44,6 +46,7 @@ impl Config {
                 std::env::var("INVEST_AI_FAKE").ok().as_deref(),
                 Some("1" | "true" | "TRUE" | "yes")
             ),
+            watchlist: crate::watchlist::WatchlistConfig::from_env()?,
         })
     }
 }

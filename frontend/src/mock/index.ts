@@ -17,6 +17,7 @@ import { mockChatStream } from './chat'
 import { genAnalysis, genMacro, genNews, genSnapshot } from './content'
 import { getDb, nextId, saveDb } from './db'
 import { entryFor, genCandles, genFundamentals, genIndicators, genQuote } from './market'
+import { mockCalibrated, mockPerformance, mockRollback, mockWatchlist, mockWeights } from './learning'
 import { activeModelId, installedModelIds, mockDelete, mockModels, mockPull, mockSetActive } from './models'
 import { sleep } from './rng'
 import { MockSocket } from './socket'
@@ -374,6 +375,31 @@ export const mockApi: Api = {
   async deleteModel(id) {
     await lag(undefined, 150)
     mockDelete(id)
+  },
+
+  async performance(signal) {
+    await lag(signal, 160)
+    return mockPerformance()
+  },
+
+  async learningWeights(signal) {
+    await lag(signal)
+    return mockWeights()
+  },
+
+  async rollbackWeights(version) {
+    await lag(undefined, 200)
+    return mockRollback(version)
+  },
+
+  async calibratedConfidence(confidence, horizon = 4, signal) {
+    await lag(signal, 60)
+    return mockCalibrated(confidence, horizon)
+  },
+
+  async watchlist(signal) {
+    await lag(signal, 120)
+    return mockWatchlist()
   },
 }
 

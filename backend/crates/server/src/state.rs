@@ -6,7 +6,10 @@ use domain::{Analysis, Analyst, AssetId, MarketData, ModelService, NewsItem};
 use sqlx::SqlitePool;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
-use crate::singleflight::SingleFlight;
+use crate::{
+    singleflight::SingleFlight,
+    watchlist::{Clock, PowerProbe, SystemClock, SystemPower, WatchlistConfig},
+};
 
 /// Ajustes de ejecución que necesitan las rutas.
 #[derive(Debug, Clone)]
@@ -42,6 +45,12 @@ pub struct AppState {
     pub shutdown: CancellationToken,
     /// Topes de concurrencia (WebSockets, análisis, chats).
     pub limits: Arc<crate::limits::Limits>,
+    /// Lista de seguimiento (desactivada por defecto; `main` la activa con `with_watchlist`).
+    pub watchlist: Arc<WatchlistConfig>,
+    /// Reloj del programador y de `/watchlist` (inyectable en pruebas).
+    pub clock: Arc<dyn Clock>,
+    /// Fuente de energía (la pasada diaria se aplaza si el equipo va con batería).
+    pub power: Arc<dyn PowerProbe>,
 }
 
 impl AppState {
@@ -58,11 +67,25 @@ impl AppState {
             tasks,
             shutdown: CancellationToken::new(),
             limits: Arc::default(),
+            watchlist: Arc::new(WatchlistConfig::disabled()),
+            clock: Arc::new(SystemClock),
+            power: Arc::new(SystemPower::default()),
         }
     }
 
     pub fn with_models(mut self, models: Arc<dyn ModelService>) -> Self {
         self.models = models;
+        self
+    }
+
+    pub fn with_watchlist(mut self, cfg: WatchlistConfig, clock: Arc<dyn Clock>) -> Self {
+        self.watchlist = Arc::new(cfg);
+        self.clock = clock;
+        self
+    }
+
+    pub fn with_power(mut self, power: Arc<dyn PowerProbe>) -> Self {
+        self.power = power;
         self
     }
 

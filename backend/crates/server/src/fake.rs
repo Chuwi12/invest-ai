@@ -345,6 +345,15 @@ pub struct FakeAnalyst {
     pub seen_depths: Mutex<Vec<Option<domain::AnalysisDepth>>>,
     /// Si es `true`, `analyze_stream` hace panic (simula un fallo inesperado del analista).
     pub panic_on_analyze: std::sync::atomic::AtomicBool,
+    /// Fallos simulados por símbolo: `(intentos que aún fallan, código de error)`; `u32::MAX` = siempre.
+    pub fail_symbols: Mutex<std::collections::HashMap<String, (u32, String)>>,
+    /// Hace fallar con `unavailable` las N primeras generaciones (Ollama caído que luego vuelve).
+    pub fail_first_calls: AtomicUsize,
+    /// Activos en el orden en que empezó su análisis.
+    pub started: Mutex<Vec<AssetId>>,
+    /// Análisis en curso ahora mismo y máximo simultáneo observado (para comprobar «de uno en uno»).
+    pub running_now: AtomicUsize,
+    pub max_running: AtomicUsize,
 }
 
 impl FakeAnalyst {
@@ -425,6 +434,7 @@ impl Analyst for FakeAnalyst {
     ) -> BoxStream<'static, domain::AnalysisEvent> {
         use domain::AnalysisEvent;
         self.seen_depths.lock().unwrap().push(depth);
+        self.started.lock().unwrap().push(snapshot.summary.id.clone());
         assert!(!self.panic_on_analyze.load(Ordering::SeqCst), "panic simulado del analista");
         const STAGES: [(&str, &str); 4] = [
             ("snapshot", "Preparando datos, puntuación y niveles"),
@@ -435,6 +445,37 @@ impl Analyst for FakeAnalyst {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(async move {
             self.analyze_calls.fetch_add(1, Ordering::SeqCst);
+            let now = self.running_now.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_running.fetch_max(now, Ordering::SeqCst);
+            // El contador baja ANTES de emitir el evento final: quien lo recibe puede lanzar otro.
+            struct Running(std::sync::Arc<FakeAnalyst>);
+            impl Drop for Running {
+                fn drop(&mut self) {
+                    self.0.running_now.fetch_sub(1, Ordering::SeqCst);
+                }
+            }
+            let running = Running(self.clone());
+            let planned_failure = {
+                let first = self
+                    .fail_first_calls
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                    .is_ok();
+                let mut map = self.fail_symbols.lock().unwrap();
+                let by_symbol = map.get_mut(&snapshot.summary.id.to_string()).and_then(|(left, code)| {
+                    (*left > 0).then(|| {
+                        if *left != u32::MAX {
+                            *left -= 1;
+                        }
+                        code.clone()
+                    })
+                });
+                by_symbol.or_else(|| first.then(|| "unavailable".to_string()))
+            };
+            if let Some(code) = planned_failure {
+                drop(running);
+                let _ = tx.send(AnalysisEvent::Error { code, message: "fallo simulado del analista".into() });
+                return;
+            }
             let delay = *self.analyze_delay.lock().unwrap() / STAGES.len() as u32;
             for (i, (stage, label)) in STAGES.iter().enumerate() {
                 let ev = AnalysisEvent::Stage {
@@ -450,6 +491,7 @@ impl Analyst for FakeAnalyst {
                     tokio::time::sleep(delay).await;
                 }
             }
+            drop(running);
             let _ = tx.send(AnalysisEvent::Done { analysis: Self::build_analysis(&snapshot) });
         });
         tokio_stream::wrappers::UnboundedReceiverStream::new(rx).boxed()

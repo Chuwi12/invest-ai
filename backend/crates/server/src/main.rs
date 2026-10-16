@@ -39,9 +39,30 @@ async fn main() -> anyhow::Result<()> {
         state = state.with_models(models);
     }
 
+    // Aprendizaje: instala los pesos vigentes en `ai::scoring` antes de aceptar peticiones.
+    // El aprendizaje es opcional: si falla, la app arranca igual con los pesos por defecto.
+    server::watchlist::activate_learned_weights(&pool).await;
+    // Con datos simulados no se mide nada: mezclarlos con el historial real lo falsearía.
+    let mut watchlist = config.watchlist.clone();
+    if config.fake {
+        if watchlist.enabled {
+            tracing::warn!("INVEST_AI_FAKE activo: la lista de seguimiento y el ciclo de aprendizaje se desactivan");
+        }
+        watchlist.enabled = false;
+    }
+    state = state.with_watchlist(watchlist, Arc::new(server::watchlist::SystemClock));
+
     match &config.static_dir {
         Some(dir) => tracing::info!(dir = %dir.display(), "sirviendo el frontend compilado"),
         None => tracing::info!("sin frontend/dist: solo API (usa el servidor de desarrollo de Vite)"),
+    }
+    state.tasks.spawn(server::watchlist::run_scheduler(state.clone(), state.watchlist.clone(), state.clock.clone()));
+    if !config.fake {
+        state.tasks.spawn(server::watchlist::run_learning_loop(
+            state.clone(),
+            server::watchlist::LEARNING_EVERY,
+            server::watchlist::LEARNING_FIRST_DELAY,
+        ));
     }
     let app = server::app(state.clone(), config.static_dir.clone());
 
@@ -74,6 +95,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Aunque el servidor haya caído solo, las tareas periódicas deben parar.
+    shutdown.cancel();
     // Deja terminar de guardar los chats y análisis que estuvieran en marcha.
     state.tasks.close();
     if tokio::time::timeout(SHUTDOWN_GRACE, state.tasks.wait()).await.is_err() {

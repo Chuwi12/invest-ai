@@ -131,6 +131,53 @@ suficientes (≥ 8 bloques de 4 semanas ≈ 30 semanas) la puerta no se mueve. U
 El humo con red real (`cargo test -p learning --test live -- --ignored --nocapture`, 3 peticiones) comprobó AAPL/SPY/BTC a
 1 y 4 semanas con velas reales (la última vela de AAPL era la sesión en curso y no se usó).
 
+## Lista de seguimiento (análisis diarios) y cableado en `server`
+
+**Por qué existe**: con el uso normal (unos pocos análisis a la semana) el historial tardaría años. La app analiza sola, cada día,
+una lista fija de activos y `learning` los resuelve a 1, 4 y 12 semanas. Código: `server/src/watchlist.rs`, tablas
+`watchlist_runs` / `watchlist_results` (migración `0006_watchlist.sql`), `analyses.origin = 'watchlist'`.
+
+**Lista por defecto (20 activos), decidida A PRIORI** (antes de ver ningún resultado; `watchlist::DEFAULT_WATCHLIST`):
+
+| Grupo | Activos | Motivo |
+|---|---|---|
+| Grandes de EE. UU., 8 sectores (12) | AAPL, MSFT, NVDA (tecnología), AMZN, TSLA (consumo discrecional), JPM (finanzas), XOM (energía), JNJ (salud), KO, WMT (consumo básico), CAT (industriales), NEE (utilities) | Liquidez y datos limpios; varios sectores para que el aprendizaje de pesos no dependa de uno; benchmark SPY bien definido |
+| ADR europeos (2) | ASML, SAP | Exposición a Europa sin sufijo de bolsa: `rules::benchmark_for` NO resuelve `.MC`, `.L`, `.DE`… y esos análisis se descartarían |
+| ETF (4) | QQQ, IWM, GLD, TLT | Otras clases de activo: crecimiento, pequeñas empresas, oro y bonos largos. Ojo: su exceso es frente a SPY, así que GLD/TLT miden sobre todo rotación entre activos |
+| Cripto (2) | ETH, SOL | Benchmark BTC; volatilidad muy distinta |
+
+Excluidos a propósito: **SPY** y **BTC** (son su propio índice: `bench_kind = absolute`, no entran en el aprendizaje de pesos) y
+cualquier valor con sufijo de bolsa extranjera. Limitaciones asumidas: 20 activos de gran capitalización y muy correlacionados
+entre sí (un solo régimen de mercado), sesgo hacia EE. UU. y hacia nombres conocidos para el LLM (que los «conoce» de su
+entrenamiento: puede haber filtración de información posterior a su fecha de corte en los análisis). **Cambiar la lista según los
+resultados invalida la medición** (sesgo de selección y de comparaciones múltiples): si hay que cambiarla, se anota la fecha y se
+mide por separado. `WATCHLIST=` en `.env` la sustituye; `/watchlist` indica si es la de por defecto (`defaultList`).
+
+**Programador** (tarea Tokio cancelable con `state.shutdown`):
+1. Una pasada al día a `WATCHLIST_TIME` (hora **local** del sistema). 23:00 en Madrid es posterior al cierre de EE. UU., así que el
+   análisis ve el cierre del día; la entrada del benchmark es el cierre de la sesión (`rules`).
+2. **Recuperación**: al arrancar, si ya pasó la hora de hoy y a algún activo de la lista le falta un análisis válido ese día
+   (`watchlist_results`), se lanza de inmediato con `trigger = recovery`. Se guardan la hora prevista (`scheduledFor`) y la real
+   (`startedAt`). Una pasada que quedó `running` por un apagado o caída se marca `interrupted` y sus activos sin `ok` se rehacen.
+   Solo se recupera el día en curso (un día entero sin servidor se pierde y queda constancia por la ausencia de pasada).
+3. **De uno en uno** y por el mismo camino que la API (`routes::analysis::run_to_completion`: single-flight, límite de generaciones,
+   guardado en BD), con `WATCHLIST_DEPTH` y el modelo activo. Si ya había un análisis del activo en curso por la API, se suma a él.
+4. **Fallos**: un activo que falla no detiene la lista y queda registrado con código y mensaje. Los transitorios (Ollama caído,
+   límites, red) se reintentan 3 veces con espera de 1 y 5 min; con 2 activos seguidos agotados se aborta la pasada (el resto queda
+   `skipped`, visible) y se hacen hasta 3 rondas más el mismo día, cada 30 min. Los permanentes (activo inexistente) no se reintentan.
+5. **Batería**: si `/sys/class/power_supply` indica que el equipo va con batería (fuentes `Mains`/`USB*` desconectadas), la pasada
+   espera a que se enchufe, con tope `WATCHLIST_BATTERY_MAX_DELAY_HOURS` (3 h; 0 = no esperar). Con la GPU limitada a ~30 W cada
+   análisis tarda el doble. Se anota en `watchlist_runs.power` (`ac`/`battery`/`unknown`) y `power_wait_secs`. Sin dato de energía no espera.
+6. Con `INVEST_AI_FAKE=1` la lista y el ciclo de aprendizaje se desactivan (datos simulados no pueden entrar en el historial).
+
+**Aprendizaje cableado** (`main.rs`): `activate_learned_weights` al arrancar (si falla, se registra y rigen los pesos por defecto: nunca
+impide arrancar) y `run_learning_loop`: primer `run_cycle` a los 2 min y luego cada 6 h; un fallo o un panic de un ciclo se registra y se
+reintenta en el siguiente.
+
+**Rutas** (`docs/API.md`): `GET /api/learning/performance`, `GET /api/learning/weights`, `POST /api/learning/weights/rollback`,
+`GET /api/learning/calibrated-confidence` (la usa el informe de análisis: sale la calibrada solo con calibración aplicable) y
+`GET /api/watchlist`. Vista `/performance` en el frontend.
+
 ## Datos reales hoy (15-oct-2026)
 
 `data/invest-ai.db` (copiada al scratchpad, solo lectura): **0 análisis** (`analyses` vacía; también 0 mensajes). Resolubles:

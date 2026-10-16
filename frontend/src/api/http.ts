@@ -89,4 +89,11 @@ export const httpApi: Api = {
   setActiveModel: (id) => request('/models/active', { method: 'PUT', body: { id } }),
   pullModel: (id, signal) => streamPullEvents(`/models/${encodeURIComponent(id)}/pull`, signal),
   deleteModel: (id) => request(`/models/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  performance: (signal) => request('/learning/performance', { signal }),
+  learningWeights: (signal) => request('/learning/weights', { signal }),
+  rollbackWeights: (version) => request('/learning/weights/rollback', { method: 'POST', body: { version } }),
+  calibratedConfidence: (confidence, horizon = 4, signal) =>
+    request(`/learning/calibrated-confidence?confidence=${encodeURIComponent(String(confidence))}&horizon=${horizon}`, { signal }),
+  watchlist: (signal) => request('/watchlist', { signal }),
 }

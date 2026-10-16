@@ -27,10 +27,12 @@ pub mod conversations;
 pub mod dashboard;
 pub mod favorites;
 pub mod history;
+pub mod learning;
 pub mod market;
 pub mod models;
 pub mod static_files;
 pub mod system;
+pub mod watchlist;
 pub mod ws;
 
 /// Tiempo máximo de las rutas REST normales (no SSE, WebSocket ni generación de análisis).
@@ -84,6 +86,11 @@ fn api(state: AppState) -> Router {
         .route("/history/searches", get(history::searches).post(history::record_selection).delete(history::clear_searches))
         .route("/history/views", get(history::views))
         .route("/dashboard", get(dashboard::dashboard))
+        .route("/learning/performance", get(learning::performance))
+        .route("/learning/weights", get(learning::weights))
+        .route("/learning/weights/rollback", post(learning::rollback))
+        .route("/learning/calibrated-confidence", get(learning::calibrated_confidence))
+        .route("/watchlist", get(watchlist::status))
         .route("/models", get(models::list))
         .route("/models/active", put(models::set_active))
         .route("/models/{id}", axum::routing::delete(models::delete))

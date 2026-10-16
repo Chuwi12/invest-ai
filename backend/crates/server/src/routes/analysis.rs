@@ -110,7 +110,7 @@ fn is_terminal(ev: &AnalysisEvent) -> bool {
 
 /// Engancha al análisis en curso de `id` o lo lanza. El trabajo sigue aunque todos los clientes
 /// se desconecten, guarda en BD y se cancela con el apagado.
-fn join_or_start(state: &AppState, id: &AssetId, depth: Option<AnalysisDepth>) -> Arc<Entry> {
+fn join_or_start(state: &AppState, id: &AssetId, depth: Option<AnalysisDepth>, origin: &'static str) -> Arc<Entry> {
     let key = hub_key(state, id);
     let mut hub = HUB.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(e) = hub.get(&key) {
@@ -125,7 +125,7 @@ fn join_or_start(state: &AppState, id: &AssetId, depth: Option<AnalysisDepth>) -
     state.tasks.spawn(async move {
         let flights = job_state.analysis_flights.clone();
         let (st, jid, je) = (job_state.clone(), job_id.clone(), job_entry.clone());
-        let (result, _) = flights.run(job_id.clone(), move || async move { run_analysis(st, jid, depth, je).await.map(Arc::new) }).await;
+        let (result, _) = flights.run(job_id.clone(), move || async move { run_analysis(st, jid, depth, je, origin).await.map(Arc::new) }).await;
         job_entry.publish(match result {
             Ok(a) => AnalysisEvent::Done { analysis: Analysis::clone(&a) },
             Err(e) => AnalysisEvent::Error { code: e.code().to_string(), message: e.to_string() },
@@ -139,6 +139,37 @@ fn join_or_start(state: &AppState, id: &AssetId, depth: Option<AnalysisDepth>) -
     entry
 }
 
+/// Genera un análisis por el mismo camino que la API (single-flight por activo, límite de
+/// generaciones simultáneas, guardado en BD) y espera al resultado. Lo usa la lista de seguimiento
+/// con `origin = "watchlist"`. Si ya había uno en curso para el activo, se suma a ese (y se guarda
+/// con el origen de quien lo lanzó).
+pub async fn run_to_completion(
+    state: &AppState,
+    id: &AssetId,
+    depth: Option<AnalysisDepth>,
+    origin: &'static str,
+) -> Result<Analysis, DomainError> {
+    let entry = join_or_start(state, id, depth, origin);
+    let (mut initial, mut rx) = entry.subscribe();
+    loop {
+        let ev = match initial.pop_front() {
+            Some(ev) => ev,
+            None => match rx.recv().await {
+                Ok(ev) => ev,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => {
+                    return Err(DomainError::Internal("el análisis terminó sin resultado".into()));
+                }
+            },
+        };
+        match ev {
+            AnalysisEvent::Done { analysis } => return Ok(analysis),
+            AnalysisEvent::Error { code, message } => return Err(DomainError::from_code(&code, message)),
+            AnalysisEvent::Stage { .. } => {}
+        }
+    }
+}
+
 /// Genera un análisis nuevo. Single-flight por activo: si ya hay uno en curso, espera a ese.
 pub async fn generate(
     State(state): State<AppState>,
@@ -146,7 +177,7 @@ pub async fn generate(
     AppQuery(q): AppQuery<GenerateQuery>,
 ) -> ApiResult<Json<Analysis>> {
     let depth: Option<AnalysisDepth> = q.depth.as_deref().map(str::parse).transpose()?;
-    let entry = join_or_start(&state, &id, depth);
+    let entry = join_or_start(&state, &id, depth, "analyze");
     let (mut initial, mut rx) = entry.subscribe();
     loop {
         let ev = match initial.pop_front() {
@@ -177,7 +208,7 @@ pub async fn generate_stream(
     AppQuery(q): AppQuery<GenerateQuery>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let depth: Option<AnalysisDepth> = q.depth.as_deref().map(str::parse).transpose()?;
-    let entry = join_or_start(&state, &id, depth);
+    let entry = join_or_start(&state, &id, depth, "analyze");
     let (initial, rx) = entry.subscribe();
     let shutdown = state.shutdown.clone();
     // (eventos pendientes, receptor, terminado)
@@ -214,6 +245,7 @@ async fn run_analysis(
     id: AssetId,
     depth: Option<AnalysisDepth>,
     entry: Arc<Entry>,
+    origin: &'static str,
 ) -> Result<Analysis, DomainError> {
     // Límite de análisis simultáneos: solo lo consume quien lanza la generación (el líder del
     // single-flight); los que se suman no. El permiso vive hasta terminar, aunque el cliente se vaya.
@@ -246,7 +278,7 @@ async fn run_analysis(
         analysis.id = new_id();
     }
     // Si guardar falla, el análisis (caro de generar) se devuelve igualmente.
-    if let Err(e) = repo::analyses::insert(&state.db, &analysis, "analyze").await {
+    if let Err(e) = repo::analyses::insert(&state.db, &analysis, origin).await {
         tracing::error!(%id, error = %e, "no se pudo guardar el análisis");
     }
     Ok(analysis)

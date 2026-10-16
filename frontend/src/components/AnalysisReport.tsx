@@ -1,6 +1,6 @@
 import { AlertTriangle } from 'lucide-react'
 import { memo, useState } from 'react'
-import { useSnapshot } from '@/api/hooks'
+import { useCalibratedConfidence, useSnapshot } from '@/api/hooks'
 import type { Analysis, Catalyst, ScoreBreakdown } from '@/api/types'
 import { VERDICTS } from '@/api/types'
 import { ExternalLink } from '@/components/ExternalLink'
@@ -100,6 +100,22 @@ function Snapshot({ a }: { a: Analysis }) {
   )
 }
 
+/** Confianza calibrada con el historial real de aciertos. No sale nada si no hay calibración aplicable. */
+function CalibratedConfidence({ confidence }: { confidence: number }) {
+  const q = useCalibratedConfidence(confidence)
+  const c = q.data
+  if (!c || c.calibrated === null) return null
+  return (
+    <span
+      className="calibrated"
+      title={`Corregida con ${c.n} análisis pasados ya resueltos a ${c.horizonWeeks} semanas: de los que declararon una confianza parecida, acertó este porcentaje (medido fuera de muestra).`}
+    >
+      · Calibrada con el historial <strong className="num">{formatPercent(c.calibrated, 0)}</strong>{' '}
+      <span className="muted">(declarada {formatPercent(c.raw, 0)}, n={c.n})</span>
+    </span>
+  )
+}
+
 interface Props {
   analysis: Analysis
   quote?: Quote | null | undefined
@@ -124,8 +140,9 @@ export const AnalysisReport = memo(function AnalysisReport({ analysis: a, quote,
           <VerdictScale verdict={a.verdict} />
           <div className="row wrap small">
             <span title="Confianza del modelo en su veredicto, de 0 a 100 %. No es una probabilidad de acierto.">
-              Confianza <strong className="num">{formatPercent(a.confidence, 0)}</strong>
+              Confianza declarada <strong className="num">{formatPercent(a.confidence, 0)}</strong>
             </span>
+            <CalibratedConfidence confidence={a.confidence} />
             <span>· Horizonte <strong>{HORIZON_LABEL[a.horizon]}</strong> <span className="muted">({HORIZON_HINT[a.horizon]})</span></span>
             <span>· Puntuación global <strong className="num">{Math.round(a.scores.overall)}</strong>/100</span>
           </div>

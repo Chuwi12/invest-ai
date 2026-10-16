@@ -141,6 +141,63 @@ cerrado/pre/post y no hay cambios). Con `FINNHUB_API_KEY` las acciones/ETF de EE
 | GET  | `/assets/{id}/analyses` | `Analysis[]`: histórico de análisis del activo (máx. 20, más reciente primero) |
 | GET  | `/assets/{id}/snapshot` | `AssetSnapshot`: el contexto exacto que ve el LLM (transparencia) |
 
+## Rendimiento medido y lista de seguimiento
+
+Resultados reales de los análisis (crate `learning`, ver `docs/notes/learning.md`) y los análisis diarios automáticos que los alimentan.
+
+| Método | Ruta | Respuesta |
+|--------|------|-----------|
+| GET  | `/learning/performance` | `PerformanceReport` (camelCase; tal cual lo devuelve `learning::performance_report` con el modelo activo) |
+| GET  | `/learning/weights` | `{ active: WeightVersion \| null, versions: WeightVersion[] }` (más reciente primero) |
+| POST | `/learning/weights/rollback` | Cuerpo `{ "version": 3 }` o `{ "version": null }` (pesos por defecto). Crea una versión nueva `rollback` y la activa; devuelve `WeightVersion`. 404 `not_found` si la versión no existe. Método no seguro: pasa por el guard de `Origin` |
+| GET  | `/learning/calibrated-confidence?confidence=0.7&horizon=4` | `{ raw, calibrated \| null, horizonWeeks, n, minRequired, reason }`. `calibrated` solo existe con calibración aplicable (>= 200 análisis independientes y mejora fuera de muestra); `horizon` en {1, 4, 12} (por defecto 4) |
+| GET  | `/watchlist` | `WatchlistStatus` |
+
+```ts
+type PerformanceReport = {
+  generatedAt: string; ruleVersion: number; analysesTotal: number
+  horizons: {                       // 3 elementos: 1, 4 y 12 semanas
+    horizonWeeks: 1 | 4 | 12
+    analysesTotal: number; resolved: number; resolvedIndependent: number
+    pending: number; notMatured: number; skipped: number
+    baseRateOutperform: number | null           // tasa base de superar al índice
+    overall: VerdictStats; byVerdict: VerdictStats[]   // verdict "all" en overall
+    calibration: { horizonWeeks: number; n: number; minRequired: number; applied: boolean; reason: string
+      brierRaw: number | null; brierHoldoutRaw: number | null; brierHoldoutCalibrated: number | null
+      reliability: { lo: number; hi: number; n: number; meanConfidence: number; hitRate: number; ciLow: number; ciHigh: number }[] }
+  }[]
+  activeWeights: WeightVersion | null; weightHistory: WeightVersion[]
+  caveats: string[]
+}
+type VerdictStats = { verdict: string; n: number; hits: number; hitRate: number | null; hitRateCi: [number, number] | null
+  meanExcess: number | null; meanExcessCi: [number, number] | null; clusters: number }
+type WeightVersion = { version: number; kind: "learned" | "rollback" | "decay" | "manual"; status: "active" | "retired"
+  multipliers: number[]; factorNames: string[]; createdAtMs: number; horizonWeeks: number | null
+  trainedToMs: number | null; validatedFromMs: number | null; validatedToMs: number | null
+  nTrain: number | null; nVal: number | null; metrics: object; parentVersion: number | null; note: string | null }
+
+type WatchlistStatus = {
+  enabled: boolean; defaultList: boolean      // defaultList: la lista a priori (WATCHLIST vacío)
+  time: string; depth: AnalysisDepth          // hora local "HH:MM"
+  nextRun: string | null                      // próxima pasada programada
+  running: boolean                            // hay una pasada en marcha
+  assets: { id: AssetId; last: WatchlistResult | null; lastOkAt: string | null }[]   // último intento de cada activo
+  lastRun: WatchlistRun | null; lastRunResults: WatchlistResult[]
+  recentRuns: WatchlistRun[]                  // las 7 últimas, más reciente primero
+  analysesTotal: number                       // análisis guardados con origin = "watchlist"
+}
+type WatchlistRun = { id: number; localDate: string; scheduledFor: string; startedAt: string; finishedAt: string | null
+  trigger: "schedule" | "recovery" | "retry"  // recovery: el servidor arrancó tarde; startedAt dice cuándo fue de verdad
+  status: "running" | "completed" | "aborted" | "interrupted"; depth: string; model: string | null
+  planned: number; power: "ac" | "battery" | "unknown"; powerWaitSecs: number; ok: number; failed: number }
+type WatchlistResult = { id: number; runId: number; localDate: string; assetId: AssetId
+  status: "ok" | "failed" | "skipped"         // skipped: no se intentó porque la pasada se abortó
+  transient: boolean; attempts: number; analysisId: string | null; verdict: string | null
+  errorCode: string | null; error: string | null; startedAt: string; finishedAt: string }
+```
+
+Con `INVEST_AI_FAKE=1` la lista de seguimiento queda desactivada (`enabled: false`).
+
 ## Conversaciones (persistentes)
 
 | Método | Ruta | Body | Respuesta |

@@ -13,7 +13,7 @@ fn verdict_str(a: &Analysis) -> String {
         .unwrap_or_default()
 }
 
-/// Inserta (o reemplaza, si el id ya existía) un análisis. `origin`: `analyze` o `chat`.
+/// Inserta (o reemplaza, si el id ya existía) un análisis. `origin`: `analyze`, `chat` o `watchlist`.
 pub async fn insert(db: &SqlitePool, a: &Analysis, origin: &str) -> ApiResult<()> {
     sqlx::query(
         "INSERT INTO analyses (id, asset_id, verdict, confidence, price_at_analysis, model, origin, generated_at, json)

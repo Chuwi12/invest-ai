@@ -2129,6 +2129,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "http-body-util",
+ "learning",
  "market",
  "serde",
  "serde_json",

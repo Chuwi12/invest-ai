@@ -712,3 +712,155 @@ export interface AnalysisProgress {
   index: number
   total: number
 }
+
+// --- Rendimiento medido y lista de seguimiento (docs/API.md, «Rendimiento medido…») ------------
+
+export type LearningHorizon = 1 | 4 | 12
+
+export interface VerdictStats {
+  /** `all` en `overall`; en `byVerdict`, un `Verdict`. */
+  verdict: string
+  n: number
+  hits: number
+  hitRate: number | null
+  /** Wilson 95 % sobre la muestra independiente. */
+  hitRateCi: [number, number] | null
+  meanExcess: number | null
+  /** Bootstrap por bloques temporales 95 %; null con menos de 5 bloques. */
+  meanExcessCi: [number, number] | null
+  clusters: number
+}
+
+export interface ReliabilityBin {
+  lo: number
+  hi: number
+  n: number
+  meanConfidence: number
+  hitRate: number
+  ciLow: number
+  ciHigh: number
+}
+
+export interface CalibrationStatus {
+  horizonWeeks: number
+  n: number
+  minRequired: number
+  applied: boolean
+  reason: string
+  brierRaw: number | null
+  brierHoldoutRaw: number | null
+  brierHoldoutCalibrated: number | null
+  reliability: ReliabilityBin[]
+}
+
+export interface HorizonReport {
+  horizonWeeks: LearningHorizon
+  analysesTotal: number
+  resolved: number
+  resolvedIndependent: number
+  pending: number
+  notMatured: number
+  skipped: number
+  baseRateOutperform: number | null
+  overall: VerdictStats
+  byVerdict: VerdictStats[]
+  calibration: CalibrationStatus
+}
+
+export interface WeightVersion {
+  version: number
+  kind: 'learned' | 'rollback' | 'decay' | 'manual'
+  status: 'active' | 'retired'
+  multipliers: number[]
+  factorNames: string[]
+  createdAtMs: number
+  horizonWeeks: number | null
+  trainedToMs: number | null
+  validatedFromMs: number | null
+  validatedToMs: number | null
+  nTrain: number | null
+  nVal: number | null
+  /** Informe de la puerta de validación (`deltaIc`, `pValue`, `icCandidate`…); puede venir vacío. */
+  metrics: Record<string, unknown>
+  parentVersion: number | null
+  note: string | null
+}
+
+export interface PerformanceReport {
+  generatedAt: string
+  ruleVersion: number
+  analysesTotal: number
+  horizons: HorizonReport[]
+  activeWeights: WeightVersion | null
+  weightHistory: WeightVersion[]
+  caveats: string[]
+}
+
+export interface WeightsResponse {
+  active: WeightVersion | null
+  versions: WeightVersion[]
+}
+
+export interface CalibratedConfidence {
+  raw: number
+  /** null = sin calibración aplicable. */
+  calibrated: number | null
+  horizonWeeks: number
+  n: number
+  minRequired: number
+  reason: string
+}
+
+export interface WatchlistRun {
+  id: number
+  localDate: string
+  scheduledFor: string
+  startedAt: string
+  finishedAt: string | null
+  trigger: 'schedule' | 'recovery' | 'retry'
+  status: 'running' | 'completed' | 'aborted' | 'interrupted'
+  depth: string
+  model: string | null
+  planned: number
+  power: 'ac' | 'battery' | 'unknown'
+  powerWaitSecs: number
+  ok: number
+  failed: number
+}
+
+export interface WatchlistResult {
+  id: number
+  runId: number
+  localDate: string
+  assetId: AssetId
+  status: 'ok' | 'failed' | 'skipped'
+  transient: boolean
+  attempts: number
+  analysisId: string | null
+  verdict: string | null
+  errorCode: string | null
+  error: string | null
+  startedAt: string
+  finishedAt: string
+}
+
+export interface WatchlistAsset {
+  id: AssetId
+  last: WatchlistResult | null
+  lastOkAt: string | null
+}
+
+export interface WatchlistStatus {
+  enabled: boolean
+  defaultList: boolean
+  /** Hora local de la pasada diaria, `HH:MM`. */
+  time: string
+  depth: AnalysisDepth
+  nextRun: string | null
+  running: boolean
+  assets: WatchlistAsset[]
+  lastRun: WatchlistRun | null
+  lastRunResults: WatchlistResult[]
+  recentRuns: WatchlistRun[]
+  analysesTotal: number
+}

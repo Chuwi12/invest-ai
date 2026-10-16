@@ -7,6 +7,7 @@ import type {
   AssetId,
   AssetSnapshot,
   AssetSummary,
+  CalibratedConfidence,
   ChatEvent,
   Conversation,
   ConversationWithMessages,
@@ -20,6 +21,7 @@ import type {
   Interval,
   MacroContext,
   ModelsResponse,
+  PerformanceReport,
   PullEvent,
   NewsItem,
   Quote,
@@ -29,6 +31,9 @@ import type {
   ServiceStatus,
   UpdateConversationBody,
   ViewStat,
+  WatchlistStatus,
+  WeightsResponse,
+  WeightVersion,
 } from './types'
 
 /**
@@ -90,4 +95,13 @@ export interface Api {
   /** SSE: itera los `PullEvent` hasta `done`/`error`. Abortable. */
   pullModel(id: string, signal?: AbortSignal): AsyncGenerator<PullEvent>
   deleteModel(id: string): Promise<void>
+
+  // Rendimiento medido (crate `learning`) y lista de seguimiento.
+  performance(signal?: AbortSignal): Promise<PerformanceReport>
+  learningWeights(signal?: AbortSignal): Promise<WeightsResponse>
+  /** `version: null` = volver a los pesos por defecto. Crea una versión nueva (no borra historia). */
+  rollbackWeights(version: number | null): Promise<WeightVersion>
+  /** Confianza declarada junto a la calibrada (si hay calibración aplicable). */
+  calibratedConfidence(confidence: number, horizon?: number, signal?: AbortSignal): Promise<CalibratedConfidence>
+  watchlist(signal?: AbortSignal): Promise<WatchlistStatus>
 }

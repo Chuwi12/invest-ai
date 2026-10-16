@@ -17,6 +17,7 @@ pub mod routes;
 pub mod security_headers;
 pub mod singleflight;
 pub mod state;
+pub mod watchlist;
 
 pub use routes::app;
 pub use state::{AppState, Settings};

@@ -1,4 +1,4 @@
-import { History, LayoutDashboard, MessageSquare, Monitor, Moon, Search, Settings, Star, Sun } from 'lucide-react'
+import { Gauge, History, LayoutDashboard, MessageSquare, Monitor, Moon, Search, Settings, Star, Sun } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { SkeletonRows } from '@/components/states'
@@ -13,6 +13,7 @@ const NAV = [
   { to: '/chat', label: 'Chat', Icon: MessageSquare },
   { to: '/favorites', label: 'Favoritos', Icon: Star },
   { to: '/history', label: 'Historial', Icon: History },
+  { to: '/performance', label: 'Rendimiento', Icon: Gauge },
   { to: '/settings/models', label: 'Modelos de IA', Icon: Settings },
 ] as const
 

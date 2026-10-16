@@ -55,6 +55,9 @@ export const qk = {
   searchHistory: ['history', 'searches'] as const,
   views: ['history', 'views'] as const,
   dashboard: ['dashboard'] as const,
+  performance: ['learning', 'performance'] as const,
+  calibrated: (confidence: number, horizon: number) => ['learning', 'calibrated', confidence, horizon] as const,
+  watchlist: ['watchlist'] as const,
 }
 
 /** Vigencia por tipo de dato. */
@@ -636,5 +639,45 @@ export function useQuotes(ids: readonly AssetId[]) {
     enabled: ids.length > 0,
     staleTime: STALE.quote,
     refetchInterval: 30 * SEC,
+  })
+}
+
+// --- Rendimiento medido y lista de seguimiento ------------------------------------------------
+
+export function usePerformance() {
+  return useQuery({
+    queryKey: qk.performance,
+    queryFn: ({ signal }) => api.performance(signal),
+    staleTime: 30 * SEC,
+    refetchOnWindowFocus: true,
+  })
+}
+
+export function useWatchlist() {
+  return useQuery({
+    queryKey: qk.watchlist,
+    queryFn: ({ signal }) => api.watchlist(signal),
+    staleTime: 15 * SEC,
+    // Una pasada en marcha cambia sola: se sigue de cerca mientras dura.
+    refetchInterval: (q) => (q.state.data?.running ? 10 * SEC : false),
+  })
+}
+
+export function useRollbackWeights() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (version: number | null) => api.rollbackWeights(version),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.performance }),
+  })
+}
+
+/** Confianza calibrada de un análisis; `null` mientras carga, si falla o si no hay calibración. */
+export function useCalibratedConfidence(confidence: number | undefined, horizon = 4) {
+  return useQuery({
+    queryKey: qk.calibrated(confidence ?? -1, horizon),
+    queryFn: ({ signal }) => api.calibratedConfidence(confidence as number, horizon, signal),
+    enabled: confidence !== undefined,
+    staleTime: 5 * MIN,
+    retry: false,
   })
 }
