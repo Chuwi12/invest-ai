@@ -27,6 +27,22 @@ export LLM_NUM_CTX=${LLM_NUM_CTX:-16384} LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.2}
 
 foreign() { nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null | grep -v -E 'llama-server|kwin_wayland|Xorg|Xwayland|plasmashell' | tr -d ' "' | tr ',' ':' | paste -sd';' -; }
 
+# Tipo de caché KV REAL del llama-server en marcha (argumentos -ctk/--cache-type-k y -ctv/--cache-type-v; f16 si no aparecen).
+# Si cambia a mitad de una medición, las ejecuciones de antes y de después no son comparables.
+kvtype() {
+  local pid args k v env since
+  pid=$(pgrep -x llama-server | head -1)
+  if [ -z "$pid" ]; then k="sin-llama-server"; v=""; else
+    args=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null)
+    k=$(echo "$args" | grep -oE -- '(-ctk|--cache-type-k) [a-z0-9_]+' | awk '{print $2}' | head -1)
+    v=$(echo "$args" | grep -oE -- '(-ctv|--cache-type-v) [a-z0-9_]+' | awk '{print $2}' | head -1)
+    k="k=${k:-f16}"; v="v=${v:-f16}"
+  fi
+  env=$(systemctl show ollama -p Environment 2>/dev/null | grep -oE 'OLLAMA_KV_CACHE_TYPE=[a-z0-9_]+' | head -1)
+  since=$(systemctl show ollama -p ActiveEnterTimestamp 2>/dev/null | cut -d= -f2)
+  echo "runner:$k,$v;servicio:${env:-OLLAMA_KV_CACHE_TYPE=sin-definir};arranque:$since"
+}
+
 cell=0
 for r in $(seq 1 "$REPS"); do
   for a in $ASSETS; do
@@ -40,13 +56,14 @@ for r in $(seq 1 "$REPS"); do
         if [ "$(cat $AC)" != 1 ] && [ "${ALLOW_BATTERY:-0}" != 1 ]; then echo "SIN CORRIENTE antes de $label/$name: me detengo" >&2; exit 3; fi
         waited=0
         while [ "$WAIT" -gt 0 ] && [ -n "$(foreign)" ] && [ "$waited" -lt "$WAIT" ]; do sleep 10; waited=$((waited + 10)); done
+        kv0=$(kvtype)
         samples=$(mktemp)
         ( while true; do fg=$(foreign); echo "$(cat $AC) $(nvidia-smi --query-gpu=clocks.sm,power.draw --format=csv,noheader,nounits | tr -d ',') $(cut -d' ' -f1 /proc/loadavg) ${fg:--}" >> "$samples"; sleep 3; done ) &
         sp=$!
         t0=$(date -Is)
         echo -n "$label "; "$bin" "$FIX/$a.json" "$MODEL" "$d" "$f" 2>&1 | tail -1
         kill $sp 2>/dev/null; wait $sp 2>/dev/null
-        t1=$(date -Is); acafter=$(cat $AC)
+        t1=$(date -Is); acafter=$(cat $AC); kv1=$(kvtype)
         stats=$(awk '{if(NR==1||$1<m)m=$1; c+=$2; p+=$3; l+=$4; n++; if($5!="-"){split($5,xs,";"); for(i in xs) seen[xs[i]]=1}} END {fg=""; for(k in seen) fg=fg (fg==""?"":"|") k; if(n) printf "\"acMin\":%d,\"clockMeanMHz\":%.0f,\"powerMeanW\":%.1f,\"loadMean\":%.1f,\"samples\":%d,\"gpuForeign\":\"%s\"", m, c/n, p/n, l/n, n, fg; else printf "\"acMin\":-1,\"samples\":0,\"gpuForeign\":\"\""}' "$samples")
         rm -f "$samples"
         reason=""
@@ -54,7 +71,7 @@ for r in $(seq 1 "$REPS"); do
         [ "$acafter" != 1 ] && reason="battery"
         if [ -z "$reason" ]; then case "$stats" in *'"gpuForeign":""'*) ;; *) reason="gpu_shared";; esac; fi
         ok=true; [ -n "$reason" ] && ok=false
-        echo "{\"file\":\"$name\",\"start\":\"$t0\",\"end\":\"$t1\",\"acAfter\":$acafter,$stats,\"timingValid\":$ok,\"invalidReason\":\"$reason\"}" >> "$OUT/$label/_env.jsonl"
+        echo "{\"file\":\"$name\",\"start\":\"$t0\",\"end\":\"$t1\",\"acAfter\":$acafter,$stats,\"timingValid\":$ok,\"invalidReason\":\"$reason\",\"kvCache\":\"$kv0\",\"kvCacheAfter\":\"$kv1\",\"kvChanged\":$([ "$kv0" = "$kv1" ] && echo false || echo true)}" >> "$OUT/$label/_env.jsonl"
         if [ "$reason" = battery ] && [ "${ALLOW_BATTERY:-0}" != 1 ]; then
           mv "$f" "$OUT/$label/$name.battery.json" 2>/dev/null
           echo "PASO A BATERIA durante $label/$name: salida guardada como $name.battery.json; me detengo" >&2

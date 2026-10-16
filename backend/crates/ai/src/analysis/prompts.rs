@@ -2,9 +2,9 @@
 //! bloque `<market_data>` son idénticos en todas las etapas de un análisis (prefijo común); lo
 //! que cambia —la tarea— va al final del mensaje de usuario.
 
-use domain::Verdict;
+use domain::{AssetClass, AssetSnapshot, Verdict};
 
-use crate::{lang::Lang, scoring::verdict_name};
+use crate::{fmt, lang::Lang, scoring::verdict_name};
 
 pub fn language_name(code: &str) -> String {
     match code {
@@ -119,34 +119,237 @@ or the macro environment. If an area has no data, say it in that finding. {QUICK
     )
 }
 
+/// Lo que el juez de `quick` puede citar de ESTE activo, sacado de los datos (nunca magnitudes fijas):
+/// las evaluaciones (docs/notes/ablation.md) mostraron que un ejemplo con PER, margen y flujo de caja
+/// libre se copiaba en cripto y ETF («El PER 64.9…», con 64,9 = % del máximo histórico) y que los
+/// umbrales de «qué cambiaría» salían inventados (⚠) por no tener niveles a mano.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QuickHints {
+    /// Magnitudes de valoración/fundamentales/estructura que el activo SÍ tiene (con artículo), por orden de relevancia.
+    pub valuation: Vec<String>,
+    /// Magnitudes técnicas que el activo SÍ tiene.
+    pub technical: Vec<String>,
+    /// Magnitudes de empresa que el activo NO tiene (no deben aparecer en el texto).
+    pub absent: Vec<String>,
+    /// ¿Tiene fundamentales de empresa (PER, márgenes, crecimiento, flujo de caja)?
+    pub company: bool,
+    /// Niveles de los datos «etiqueta valor» que sirven de umbral en «qué cambiaría».
+    pub anchors: Vec<String>,
+}
+
+fn fin(x: Option<f64>) -> bool {
+    x.is_some_and(f64::is_finite)
+}
+
+fn posv(x: Option<f64>) -> bool {
+    x.is_some_and(|v| v.is_finite() && v > 0.0)
+}
+
+pub fn quick_hints(snap: &AssetSnapshot, lang: Lang) -> QuickHints {
+    let f = snap.fundamentals.as_ref();
+    let i = snap.indicators.as_ref();
+    let price = snap.quote.as_ref().map(|q| q.price).filter(|p| p.is_finite() && *p > 0.0).or_else(|| i.and_then(|i| i.last_close));
+    let t = |es: &'static str, en: &'static str| lang.t(es, en).to_string();
+
+    let has_per = f.is_some_and(|f| posv(f.pe_forward) || posv(f.pe_trailing));
+    let has_rev = f.is_some_and(|f| fin(f.revenue_growth_yoy));
+    let has_margin = f.is_some_and(|f| fin(f.operating_margin));
+    let has_fcf = f.is_some_and(|f| fin(f.free_cash_flow));
+    let has_eps = f.is_some_and(|f| fin(f.eps_trailing) || fin(f.eps_forward));
+    let company = has_per || has_rev || has_margin || has_fcf;
+
+    // (clave, ¿lo tiene?, es, en)
+    let cand = |key: &str| -> (bool, String) {
+        match key {
+            "per" => (has_per, t("el PER", "the P/E")),
+            "rev" => (has_rev, t("el crecimiento de ingresos", "revenue growth")),
+            "margin" => (has_margin, t("el margen operativo", "the operating margin")),
+            "fcf" => (has_fcf, t("el flujo de caja libre", "free cash flow")),
+            "earn" => (f.is_some_and(|f| fin(f.earnings_growth_yoy)), t("el crecimiento de beneficios", "earnings growth")),
+            "div" => (f.is_some_and(|f| posv(f.dividend_yield)), t("la rentabilidad por dividendo", "the dividend yield")),
+            "analyst" => (
+                f.is_some_and(|f| posv(f.analyst_target_mean) && f.analyst_count != Some(0)),
+                t("el precio objetivo medio de los analistas", "the mean analyst target"),
+            ),
+            "ath" => (f.is_some_and(|f| posv(f.all_time_high)), t("el máximo histórico", "the all-time high")),
+            "ret1y" => (i.is_some_and(|i| fin(i.return1y)), t("la rentabilidad a 1 año", "the 1-year return")),
+            "dd" => (i.is_some_and(|i| fin(i.max_drawdown1y)), t("la caída máxima a 1 año", "the 1-year maximum drawdown")),
+            "vol" => (i.is_some_and(|i| posv(i.volatility30d)), t("la volatilidad a 30 días", "30-day volatility")),
+            "supply" => (
+                f.is_some_and(|f| posv(f.circulating_supply) && posv(f.max_supply)),
+                t("la oferta circulante sobre la máxima", "circulating over max supply"),
+            ),
+            "rsi" => (i.is_some_and(|i| fin(i.rsi14)), t("el RSI14", "the RSI14")),
+            "sma200" => (i.is_some_and(|i| posv(i.sma200)), t("la SMA200", "the SMA200")),
+            "sma50" => (i.is_some_and(|i| posv(i.sma50)), t("la SMA50", "the SMA50")),
+            "macd" => (i.is_some_and(|i| fin(i.macd_hist)), t("el histograma del MACD", "the MACD histogram")),
+            "atr" => (i.is_some_and(|i| posv(i.atr14)), t("el ATR14", "the ATR14")),
+            _ => (false, String::new()),
+        }
+    };
+    let order: &[&str] = match snap.summary.class {
+        AssetClass::Crypto => &["ath", "ret1y", "dd", "vol", "supply"],
+        AssetClass::Etf | AssetClass::Fund | AssetClass::Index => &["per", "div", "ret1y", "dd", "vol", "ath"],
+        _ => &["per", "rev", "margin", "fcf", "earn", "div", "analyst", "ath", "ret1y", "dd"],
+    };
+    let present = |keys: &[&str]| -> Vec<String> {
+        keys.iter().map(|k| cand(k)).filter(|(has, _)| *has).map(|(_, l)| l).collect()
+    };
+    let valuation = present(order);
+    let technical = present(&["rsi", "sma200", "sma50", "macd", "atr"]);
+
+    let absent: Vec<String> = [("per", !has_per), ("eps", !has_eps), ("margin", !has_margin), ("fcf", !has_fcf), ("rev", !has_rev)]
+        .into_iter()
+        .filter(|(_, missing)| *missing)
+        .map(|(k, _)| match k {
+            "per" => t("el PER", "the P/E"),
+            "eps" => t("el BPA", "EPS"),
+            "margin" => t("el margen operativo", "the operating margin"),
+            "fcf" => t("el flujo de caja libre", "free cash flow"),
+            _ => t("el crecimiento de ingresos", "revenue growth"),
+        })
+        .collect();
+
+    // Niveles que sirven de umbral: el verificador los encuentra en el contexto (indicadores, fundamentales, niveles).
+    let mut anchors: Vec<String> = Vec::new();
+    if let Some(i) = i {
+        let nearest = |v: &[f64], below: bool| -> Option<f64> {
+            let p = price?;
+            v.iter().copied().filter(|x| x.is_finite() && *x > 0.0 && if below { *x < p * 0.999 } else { *x > p * 1.001 }).min_by(|a, b| {
+                if below { (p - a).total_cmp(&(p - b)) } else { (a - p).total_cmp(&(b - p)) }
+            })
+        };
+        if let Some(x) = i.sma200.filter(|x| *x > 0.0) {
+            anchors.push(format!("SMA200 {}", fmt::price(x)));
+        }
+        if let Some(x) = i.sma50.filter(|x| *x > 0.0) {
+            anchors.push(format!("SMA50 {}", fmt::price(x)));
+        }
+        if let Some(x) = nearest(&i.supports, true) {
+            anchors.push(format!("{} {}", lang.t("soporte", "support"), fmt::price(x)));
+        }
+        if let Some(x) = nearest(&i.resistances, false) {
+            anchors.push(format!("{} {}", lang.t("resistencia", "resistance"), fmt::price(x)));
+        }
+        if let Some(x) = i.high52w.filter(|x| *x > 0.0) {
+            anchors.push(format!("{} {}", lang.t("máximo de 52 semanas", "52-week high"), fmt::price(x)));
+        }
+        if let Some(x) = i.low52w.filter(|x| *x > 0.0) {
+            anchors.push(format!("{} {}", lang.t("mínimo de 52 semanas", "52-week low"), fmt::price(x)));
+        }
+    }
+    if let Some(f) = f {
+        if let Some(x) = f.all_time_high.filter(|x| *x > 0.0) {
+            anchors.push(format!("{} {}", lang.t("máximo histórico", "all-time high"), fmt::price(x)));
+        }
+        if let Some(x) = f.pe_forward.or(f.pe_trailing).filter(|x| *x > 0.0) {
+            anchors.push(format!("{} {}", lang.t("PER", "P/E"), fmt::num(x)));
+        }
+        if let Some(x) = f.analyst_target_mean.filter(|x| *x > 0.0 && f.analyst_count != Some(0)) {
+            anchors.push(format!("{} {}", lang.t("objetivo medio de analistas", "mean analyst target"), fmt::price(x)));
+        }
+    }
+    if i.is_some_and(|i| fin(i.rsi14)) {
+        anchors.push(lang.t("RSI14 sobrecompra 70 / sobreventa 30", "RSI14 overbought 70 / oversold 30").to_string());
+    }
+    anchors.truncate(8);
+    QuickHints { valuation, technical, absent, company, anchors }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+}
+
+/// Ejemplo de estilo del juez de `quick` con las etiquetas que el activo SÍ tiene (2–3 de cada área).
+/// Los marcadores `<…>` son huecos para las cifras, no cifras.
+fn quick_example(h: &QuickHints, lang: Lang) -> String {
+    let es = lang == Lang::Es;
+    let pick = |v: &[String], n: usize| -> Vec<String> { v.iter().take(n).cloned().collect() };
+    let v = pick(&h.valuation, 3);
+    let tch = pick(&h.technical, 2);
+    let value = lang.t("<valor>", "<value>");
+    let reading = if h.company { lang.t("<exigente|razonable|barata>", "<demanding|fair|cheap>") } else { lang.t("<alta|moderada|baja>", "<high|moderate|low>") };
+    let topic = if h.company { lang.t("la valoración", "the valuation") } else { lang.t("el perfil de riesgo", "the risk profile") };
+    let and = lang.t("y", "and");
+    let of = lang.t("de", "of");
+    let implies = lang.t("implica", "means");
+    let consequence = lang.t("<qué implica>", "<implication>");
+    let mut first = match v.as_slice() {
+        [] => format!("<{}> {of} {value}", lang.t("magnitud de los datos", "figure from the data")),
+        [a] => format!("{} {of} {value}", capitalize(a)),
+        [a, b, ..] => format!("{} {of} {value} {and} {} {of} {value}", capitalize(a), b),
+    };
+    first.push_str(&format!(
+        " {} {topic} {} {reading}.",
+        if v.len() >= 2 { lang.t("dejan", "put") } else { lang.t("deja", "puts") },
+        lang.t("en zona", "in")
+    ));
+    if let Some(c) = v.get(2) {
+        first.push_str(&format!(" {} {of} {value} {implies} {consequence}.", capitalize(c)));
+    }
+    let second = match tch.as_slice() {
+        [a, b] => format!("{} {of} {value} {and} {} {of} {value} {} {}.", capitalize(a), b, lang.t("indican", "show"), lang.t("<tendencia y momentum>", "<trend and momentum>")),
+        [a] => format!("{} {of} {value} {} {}.", capitalize(a), lang.t("indica", "shows"), lang.t("<tendencia>", "<trend>")),
+        _ => String::new(),
+    };
+    let bad = lang.t("Los fundamentales son sólidos y podría indicar una oportunidad.", "Fundamentals are solid and may indicate an opportunity.");
+    let q = if es { ("«", "»") } else { ("\"", "\"") };
+    let second = if second.is_empty() { String::new() } else { format!(" {}{second}{}", q.0, q.1) };
+    format!(
+        "\n\nGOOD paragraph shapes (angle brackets are placeholders for figures of THIS asset's data; use only magnitudes that appear in the data, never copy the placeholders): \
+{}{first}{}{second} BAD: {}{bad}{}",
+        q.0, q.1, q.0, q.1
+    )
+}
+
 /// `quick`, juez breve: el digest ya trae las cifras; sin escenarios, estrategia ni catalizadores
-/// (niveles y tamaño de posición los calcula Rust). Lleva un ejemplo de estilo con marcadores
-/// (no cifras) para evitar tesis genéricas sin gastar un reintento.
-pub fn quick_judge_task(lang: Lang, digest: &str, provisional: Verdict, language: &str) -> String {
-    let example = if language == "es" {
-        "\n\nGOOD paragraph shape (angle brackets are placeholders for figures of THIS asset's data; never copy them): \
-«El PER <PER> con margen operativo de <margen> y un crecimiento de ingresos de <crecimiento> deja la valoración en zona <exigente|razonable|barata>. \
-El flujo de caja libre de <FCF> cubre <qué implica>.» BAD: «Los fundamentales son sólidos y podría indicar una oportunidad.»"
+/// (niveles y tamaño de posición los calcula Rust). Lleva un ejemplo de estilo construido con las
+/// magnitudes que ESTE activo tiene (para evitar tesis genéricas sin gastar un reintento y sin
+/// sembrar PER/FCF en cripto o ETF) y los niveles de los datos que sirven de umbral.
+pub fn quick_judge_task(lang: Lang, digest: &str, provisional: Verdict, language: &str, hints: &QuickHints) -> String {
+    let example = quick_example(hints, lang);
+    let area1 = if hints.company {
+        "valuation and fundamentals"
     } else {
-        "\n\nGOOD paragraph shape (angle brackets are placeholders for figures of THIS asset's data; never copy them): \
-\"The P/E of <P/E> with an operating margin of <margin> and revenue growth of <growth> puts the valuation in <demanding|fair|cheap> territory. \
-Free cash flow of <FCF> means <implication>.\" BAD: \"Fundamentals are solid and may indicate an opportunity.\""
+        "how the asset sits within its range and its risk profile (returns, drawdown, distance to highs, supply), using only the magnitudes listed below"
+    };
+    let available = {
+        let mut all: Vec<&str> = hints.valuation.iter().chain(&hints.technical).map(String::as_str).collect();
+        all.dedup();
+        if all.is_empty() { String::new() } else { format!("\nMagnitudes this asset HAS (quote them only with their real value): {}.", all.join("; ")) }
+    };
+    let absent = if hints.absent.is_empty() {
+        String::new()
+    } else {
+        let bare: Vec<&str> = hints.absent.iter().map(|a| a.trim_start_matches("el ").trim_start_matches("la ").trim_start_matches("the ")).collect();
+        format!("\nThis asset has NO {}: never mention them, not even as an example.", bare.join(", "))
+    };
+    let wci = if hints.anchors.is_empty() {
+        "- would_change_if: 2 conditions (max 16 words), each with a measurable threshold taken from the data.\n".to_string()
+    } else {
+        format!(
+            "- would_change_if: 2 conditions (max 16 words). Each hinges on ONE level from the reference list below: name it AND copy its value (e.g. «{} {}»); never invent a threshold that is not in the list.\nReference levels: {}.\n",
+            lang.t("el precio cierra por debajo de", "price closes below"),
+            hints.anchors.first().map_or("<level>", String::as_str),
+            hints.anchors.join("; ")
+        )
     };
     format!(
         "ROLE: chief investment judge. Final decision on whether to invest in this asset, in short form.\n\n\
 Analysts' digest (already fact-checked against the data):\n{digest}\n\n\
 The provisional quantitative verdict (computed in code) is «{}»; you may differ, but say why in the thesis and \
 lower your confidence if you do. Entry zone, stop, targets, scenarios and position size are computed by the system: \
-do not write price levels of your own.\n\n\
+do not write price levels of your own.{available}{absent}\n\n\
 Produce the final analysis as brief JSON:\n\
 - verdict: buy, accumulate, hold, wait, reduce, avoid.\n\
 - confidence: 0-1, CALIBRATED: 0.5 is a coin flip; at most the provisional confidence plus 0.15; lower when data is missing or signals contradict.\n\
 - horizon: short (days-weeks), medium (months), long (years).\n\
 - summary: 2 short sentences (max 35 words): the verdict and the two strongest figures behind it.\n\
-- thesis_valuation, thesis_technical, thesis_balance: three paragraphs of 2 short sentences each (max 35 words per paragraph): (1) valuation and fundamentals, (2) trend, momentum and nearest levels, (3) risks, macro, news and what tips the balance. EVERY paragraph cites at least two different figures (six in total) copied from the data or the digest and says what they imply; never repeat an idea.\n\
+- thesis_valuation, thesis_technical, thesis_balance: three paragraphs of 2 short sentences each (max 35 words per paragraph): (1) {area1}, (2) trend, momentum and nearest levels, (3) risks, macro, news and what tips the balance. EVERY paragraph cites at least two different figures (six in total) copied from the data or the digest and says what they imply; never repeat an idea.\n\
 - bull_case, bear_case: ONE item each, ONE sentence (max 16 words) with a figure.\n\
 - risks: 3 items, ONE sentence each (max 16 words) with a figure; cite news as [N#].\n\
-- would_change_if: 2 conditions (max 16 words), each with a measurable threshold taken from the data.\n\
+{wci}\
 - uncertainty: one honest sentence (max 20 words).{example}\n\
 Never promise returns. Do not give personalised financial advice.{}",
         verdict_name(lang, provisional),
@@ -259,3 +462,96 @@ pub fn repair_request(error: &str) -> String {
         "Your previous reply is not valid: {error}\nReply again with ONLY the corrected JSON object that follows the schema (no markdown, no commentary). Be shorter if the reply was cut off."
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixture;
+
+    fn eval_fixture(name: &str) -> AssetSnapshot {
+        let p = format!("{}/tests/fixtures/eval/{name}.json", env!("CARGO_MANIFEST_DIR"));
+        serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+    }
+
+    fn task(snap: &AssetSnapshot, lang: Lang) -> String {
+        quick_judge_task(lang, "digest", Verdict::Hold, lang.t("es", "en"), &quick_hints(snap, lang))
+    }
+
+    /// Solo la parte propia del ejemplo y de las listas (no la guía de estilo, que fija vocabulario).
+    fn own(t: &str) -> &str {
+        t.split("SPANISH STYLE").next().unwrap()
+    }
+
+    #[test]
+    fn crypto_example_has_no_company_magnitudes() {
+        let snap = eval_fixture("crypto_btc");
+        let h = quick_hints(&snap, Lang::Es);
+        assert!(!h.company);
+        assert!(h.valuation.iter().all(|l| !l.contains("PER") && !l.contains("margen") && !l.contains("flujo")), "{h:?}");
+        assert!(h.valuation.contains(&"el máximo histórico".to_string()), "{h:?}");
+        let t = task(&snap, Lang::Es);
+        let t = own(&t);
+        let example = &t[t.find("GOOD paragraph").unwrap()..];
+        for bad in ["PER", "margen operativo", "flujo de caja", "BPA", "crecimiento de ingresos"] {
+            assert!(!example.contains(bad), "{bad} en el ejemplo de cripto: {example}");
+        }
+        assert!(t.contains("This asset has NO PER, BPA, margen operativo, flujo de caja libre, crecimiento de ingresos:"), "{t}");
+        assert!(t.contains("how the asset sits within its range"), "{t}");
+    }
+
+    #[test]
+    fn stock_example_uses_the_stock_own_labels() {
+        let snap = fixture::stock_snapshot();
+        let h = quick_hints(&snap, Lang::Es);
+        assert!(h.company);
+        assert_eq!(h.valuation.first().map(String::as_str), Some("el PER"));
+        let t = task(&snap, Lang::Es);
+        assert!(t.contains("El PER de <valor>"), "{t}");
+        assert!(t.contains("valuation and fundamentals"));
+        assert!(!t.contains("This asset has NO"));
+    }
+
+    #[test]
+    fn etf_example_only_names_magnitudes_the_etf_has() {
+        let snap = eval_fixture("etf_spy");
+        let h = quick_hints(&snap, Lang::Es);
+        let f = snap.fundamentals.as_ref().unwrap();
+        let t = task(&snap, Lang::Es);
+        let t = own(&t);
+        let example = &t[t.find("GOOD paragraph").unwrap()..];
+        // Cada etiqueta de empresa que aparece en el ejemplo está respaldada por un dato del snapshot.
+        assert_eq!(example.contains("margen operativo"), f.operating_margin.is_some());
+        assert_eq!(example.contains("flujo de caja"), f.free_cash_flow.is_some());
+        assert_eq!(example.contains("crecimiento de ingresos"), f.revenue_growth_yoy.is_some());
+        assert_eq!(example.contains("PER"), f.pe_forward.or(f.pe_trailing).is_some());
+        assert!(!h.valuation.is_empty() && !h.technical.is_empty(), "{h:?}");
+    }
+
+    #[test]
+    fn would_change_if_thresholds_come_from_the_data_levels() {
+        let snap = fixture::stock_snapshot();
+        let ind = snap.indicators.as_ref().unwrap();
+        let h = quick_hints(&snap, Lang::Es);
+        assert!(h.anchors.iter().any(|a| a == &format!("SMA200 {}", fmt::price(ind.sma200.unwrap()))), "{:?}", h.anchors);
+        assert!(h.anchors.iter().any(|a| a.starts_with("soporte ")), "{:?}", h.anchors);
+        assert!(h.anchors.len() <= 8);
+        let t = task(&snap, Lang::Es);
+        assert!(t.contains("Reference levels: "), "{t}");
+        assert!(t.contains("never invent a threshold that is not in the list"));
+        // Sin niveles (sin indicadores ni fundamentales) cae al texto genérico, sin lista vacía.
+        let bare = fixture::sparse_snapshot();
+        let tb = task(&bare, Lang::Es);
+        if quick_hints(&bare, Lang::Es).anchors.is_empty() {
+            assert!(!tb.contains("Reference levels"));
+        }
+    }
+
+    #[test]
+    fn english_example_is_built_the_same_way() {
+        let snap = eval_fixture("crypto_btc");
+        let t = task(&snap, Lang::En);
+        assert!(t.contains("GOOD paragraph shapes"));
+        assert!(!own(&t)[own(&t).find("GOOD paragraph").unwrap()..].contains("P/E"), "{t}");
+    }
+}
+

@@ -1,0 +1,185 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El precio está a 29.7% del máximo de 52 semanas. (fuente: indicadores técnicos 2026-10-14 00:00 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)"
+    ],
+    "bullCase": [
+      "La tendencia alcista fuerte con SMA20 +13.2%."
+    ],
+    "catalysts": [],
+    "completionTokens": 737,
+    "confidence": 0.7200000286102295,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 16785,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T11:32:01.934719133Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a1447b-bb0e-7755-8154-36fffb3a330a",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 3,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 3 llamadas, 6664 tokens de entrada y 737 de salida, 17 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 6664,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «resumen»: 64.9 (en los datos es «ATH / máximo histórico», no «PER»)",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «tesis»: 64.9 (en los datos es «ATH / máximo histórico», no «PER»)",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 79.7"
+    ],
+    "risks": [
+      "La caída máxima a 1 año del 48.8%. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El sentimiento negativo de 6 noticias recientes.",
+      "La volatilidad alta de 39.4% en 30 días. (fuente: indicadores técnicos 2026-10-14 00:00 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Puntuación cuantitativa determinista crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "Mantener. La tendencia alcista fuerte y la valoración justa. El precio +13.2% respecto a la SMA20 y el PER 64.9%⚠ del máximo histórico.",
+    "thesis": "El PER 64.9%⚠ del máximo histórico y la FDV/mcap 1.00x sugieren un precio justo. La capitalización 1.64T y el precio al 64.9% del máximo histórico indican valoración razonable. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC)\n\nLa tendencia alcista fuerte con SMA20 +13.2% y SMA50 +0.7% respecto al precio. El RSI14 = 47.1 en zona neutra y el ATR14 = 2.7% del precio indican volatilidad baja. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)\n\nEl precio está a 29.7% del máximo de 52 semanas, lo que sugiere un recorrido al alza. El sentimiento negativo de 6 noticias recientes pesa, pero la tendencia alcista fuerte y la valoración justa apoyan la decisión. (fuente: indicadores técnicos 2026-10-14 00:00 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)\n\nIncertidumbre: El sentimiento negativo y la caída máxima a 1 año son inciertos.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "Si el sentimiento negativo aumenta a 8 noticias.",
+      "Si el precio cae a 79.7%⚠ del máximo de 52 semanas."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 737,
+      "confidence": 0.7200000286102295,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 13,
+      "figuresAllTotal": 20,
+      "figuresThesisDistinct": 9,
+      "figuresThesisTotal": 10,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 9,
+      "llmCalls": 3,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 6664,
+      "qualityNotesCount": 3,
+      "thesisLabeledOk": 6,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 3,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 8,
+      "unverifiedNotes": 3,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 6,
+      "wrongLabel": 2,
+      "wrongLabelExamples": [
+        {
+          "actual": "ATH / máximo histórico",
+          "figure": "64.9",
+          "said": "PER",
+          "snippet": "y la valoración justa. El precio +13.2% respecto a la SMA20 y el PER 64.9% del máximo histórico."
+        },
+        {
+          "actual": "ATH / máximo histórico",
+          "figure": "64.9",
+          "said": "PER",
+          "snippet": "El PER 64.9% del máximo histórico y la FDV/mcap 1.00x s"
+        }
+      ]
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 16.786663476,
+    "wordingFixCalls": 0
+  }
+}

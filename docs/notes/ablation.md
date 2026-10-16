@@ -287,3 +287,123 @@ Sensibilidad: con el umbral «2 × mediana» (13,4) hay solo dos ejecuciones con
 - Tiempos con carga de CPU de otros agentes (declarada arriba); 1 ejecución de la matriz es del 14-oct por la noche; los tiempos del 15-oct (GPU compartida) y los hechos con batería no se usan.
 - El lint de castellano y la verificación son los de cada variante en el momento de la ejecución para lo que genera el pipeline, pero la auditoría de cifras (`audit_figures`) usa el contexto de la variante medida: cada una se evalúa con su propio contexto.
 - No se leyó a mano cada salida; los extractos citados son ilustrativos.
+
+## Arreglo de las regresiones de A
+
+Fecha: 2026-10-16. Cambio de código (sin commitear): `backend/crates/ai/src/analysis/prompts.rs` (+312/−16) y una línea en `mod.rs`.
+**Esta medición es con la caché KV en `q8_0`** (ver «Caché KV» más abajo); no es comparable en condiciones con la ablación anterior (f16).
+
+### Qué se cambió
+
+1. **Ejemplo de estilo del juez de `quick` construido con los datos del activo** (`quick_hints` / `quick_example`). Antes el ejemplo llevaba PER, margen operativo, crecimiento de
+   ingresos y flujo de caja libre para todos los activos. Ahora se sacan de los snapshots las magnitudes que el activo SÍ tiene (por clase de activo, en orden de relevancia; 2–3 en el
+   ejemplo de valoración y 2 en el técnico) y se añade al prompt: «Magnitudes this asset HAS» y «This asset has NO PER, BPA, margen operativo… never mention them». El párrafo (1) deja de
+   decir «valuation and fundamentals» cuando el activo no tiene fundamentales de empresa (cripto: «cómo se sitúa en su rango y su perfil de riesgo»). Cripto sin PER/BPA/FCF/margen;
+   ETF solo con lo que traiga (SPY sí trae PER y rentabilidad por dividendo). `standard` y `deep` no tienen ese patrón (su juez no lleva ejemplo con magnitudes fijas; solo la guía de
+   vocabulario en español, que no se tocó) y no cambian: **no se midieron**.
+2. **Umbrales de «qué cambiaría» anclados a niveles de los datos.** El juez de `quick` recibe una lista «Reference levels» (hasta 8) con valores copiables: SMA200, SMA50, soporte y
+   resistencia más cercanos, máximo/mínimo de 52 semanas, máximo histórico (cripto), PER actual, objetivo medio de analistas, y los umbrales RSI 70/30 que el verificador ya conoce. Se le pide que cada
+   condición se apoye en UNA de esas magnitudes, la nombre y copie su valor. **El verificador no se tocó.**
+3. Tests (`prompts.rs::tests`, 5 nuevos): el ejemplo de cripto no contiene PER/margen/flujo de caja/BPA/crecimiento de ingresos; el de la acción empieza por «El PER de <valor>»; el del ETF (snapshot real
+   de SPY) solo nombra magnitudes que el snapshot tiene; los umbrales salen de niveles reales (SMA200 con su valor, soporte) y caen al texto genérico si no hay niveles; el constructor en inglés. `cargo test --workspace`
+   y `cargo clippy --workspace --all-targets -- -D warnings` (con `systemd-run`, 8 GB): **limpios** (`ai`: 261 tests ok, 1 ignorado).
+
+### Medición
+
+- HEAD `5dfd095` (+A+B) frente a HEAD + arreglo; solo `quick`; los 4 snapshots congelados; **5 repeticiones por activo (n = 20 por variante; se pidieron 3 y se ampliaron a 5 antes de ver
+  resultados porque cada ejecución dura ~17 s)**; variantes intercaladas con orden rotatorio; `qwen2.5:7b`, `num_ctx` 16384, enchufado, GPU sin procesos ajenos, Ollama con KV `q8_0`.
+  Las 40 ejecuciones tienen `timingValid=true`. Los worktrees están en `~/.cache/invest-ai/eval/{head,fix}`; salidas en `docs/notes/eval-data/fix-quick/`.
+- Hubo un corte (apagado del equipo, 13:41) en mitad de la matriz; se reanudó (el script salta lo hecho). Una ejecución con batería (`etf_spy_quick_3` de `fix`) se descartó y se rehízo
+  (queda en `fix-quick/_battery/`); su línea antigua de `_env.jsonl` queda sustituida por la de la repetición.
+- Media [mín–máx] por variante; `*` = IC 95 % bootstrap de la diferencia con HEAD excluye 0 (como en el resto del documento).
+
+| métrica | n (head/fix) | HEAD 5dfd095 (+A+B) | HEAD + arreglo |
+|---|---|---|---|
+| llamadas LLM | 20/20 | 3.2 [3.0–4.0] | 3.1 [3.0–4.0] |
+| tokens in | 20/20 | 7230 [6506–8242] | 7503 [6795–8547] |
+| tokens out | 20/20 | 749 [662–902] | 813 [680–1072]* |
+| cifras en tesis | 20/20 | 10.2 [6.0–15.0] | 10.4 [6.0–15.0] |
+| cifras distintas en tesis | 20/20 | 8.4 [4.0–14.0] | 8.2 [5.0–11.0] |
+| cifras (todo el texto) | 20/20 | 17.5 [11.0–22.0] | 19.5 [13.0–25.0]* |
+| verificadas por etiqueta | 20/20 | 14.2 [8.0–20.0] | 17.8 [11.0–24.0]* |
+| verificadas solo por valor | 20/20 | 1.8 [0.0–8.0] | 1.5 [0.0–4.0] |
+| no verificadas (⚠) | 20/20 | 0.45 [0.00–1.00] | 0.05 [0.00–1.00]* |
+| ⚠ en resumen/tesis/viñetas/riesgos/catalizadores | 20/20 | 0.60 [0.00–3.00] | 0.00 [0.00–0.00]* |
+| ⚠ en «qué cambiaría» (umbrales hipotéticos) | 20/20 | 1.00 [0.00–2.00] | 0.20 [0.00–1.00]* |
+| % verificadas por etiqueta | 20/20 | 86.9 [50.0–100.0] | 92.1 [78.9–100.0] |
+| % no verificadas | 20/20 | 2.69 [0.00–6.67] | 0.23 [0.00–4.55]* |
+| etiqueta errónea | 20/20 | 1.15 [0.00–4.00] | 0.15 [0.00–1.00]* |
+| descartes (afirm.+frases) | 20/20 | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| cifras inventadas atrapadas | 20/20 | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| tesis genérica detectada | 20/20 | 0.15 [0.00–1.00] | 0.05 [0.00–1.00] |
+| reintentos por tesis genérica (llamada extra) | 20/20 | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| tesis genérica que queda (confianza −0,05) | 20/20 | 0.15 [0.00–1.00] | 0.05 [0.00–1.00] |
+| correcciones de redacción | 20/20 | 0.20 [0.00–1.00] | 0.15 [0.00–1.00] |
+| errores lint finales | 20/20 | 0.20 [0.00–3.00] | 0.10 [0.00–2.00] |
+| veredicto = umbral de puntuación | 20/20 | 1.00 [1.00–1.00] | 1.00 [1.00–1.00] |
+| confianza | 20/20 | 0.74 [0.64–0.80] | 0.77 [0.72–0.81]* |
+| palabras de la tesis | 20/20 | 120 [91–171] | 128 [90–179] |
+| palabras del resumen | 20/20 | 14 [6–27] | 22 [14–30]* |
+| viñetas alcistas | 20/20 | 1.0 [1.0–1.0] | 1.0 [1.0–1.0] |
+| viñetas bajistas | 20/20 | 1.0 [1.0–1.0] | 1.0 [1.0–1.0] |
+| riesgos | 20/20 | 2.9 [2.0–3.0] | 3.0 [2.0–3.0] |
+| «qué cambiaría» | 20/20 | 2.0 [2.0–2.0] | 2.0 [2.0–2.0] |
+| catalizadores | 20/20 | 0.0 [0.0–0.0] | 0.0 [0.0–0.0] |
+| segundos (solo tiempos válidos) | 20/20 | 16.9 [14.5–20.9] | 18.4 [15.6–23.5]* |
+
+
+### Lectura
+
+- **Etiquetas erróneas:** 1,15 → 0,15 por análisis* (23 → 3 en 20 análisis). En `crypto:BTC` 10 → 2 en 5 análisis; las que quedan son umbrales de «caída máxima supera el 50 %» y «P/S a 12,0».
+  En BTC, PER/FCF/BPA/margen en la tesis o el resumen: **5 de 5 → 0 de 5**. (En SPY el PER es un dato real y se sigue citando, por eso «5 de 10» en BTC+SPY.)
+- **⚠ en prosa** (resumen, tesis, viñetas, riesgos): 0,60 → 0,00* por análisis (BTC y SPY 12 → 0). **⚠ en «qué cambiaría»:** 1,00 → 0,20* (20 → 4 en 20 análisis). **No desaparecen**: quedan umbrales
+  redondos inventados («la caída máxima supera el 50 %», «el PER sube a 25», «el P/S se eleva a 12,0»): 4 de 20 análisis. Proporción de cifras no verificadas: 2,7 % → 0,2 %*.
+- **Cifras verificadas por etiqueta:** 14,2 → 17,8*; porcentaje 86,9 % → 92,1 % (n.s.). Cifras totales 17,5 → 19,5*.
+- **Contenido (que no se pierda):** tesis 120 → 128 palabras (n.s.); resumen 14 → 22 palabras*; viñetas 1+1 y «qué cambiaría» 2, igual; riesgos 2,9 → 3,0; catalizadores 0 y 0. Confianza 0,74 → 0,77*.
+  No se pierde contenido; el resumen se alarga porque ahora cita cifras reales (el prompt con las magnitudes disponibles le da de qué hablar).
+- **Tiempo:** 16,9 s [14,5–20,9] → 18,4 s [15,6–23,5] (+1,5 s, IC excluye 0). Es la consecuencia esperada de un prompt más largo (+~270 tokens de entrada, n.s. en bruto: 7230 → 7503) y de ~64 tokens más de salida (749 → 813*).
+  Sigue en torno a 17–18 s (frente a ~44 s del `quick` antiguo en f16, y ~40 s de `standard`).
+- Sin cambio: llamadas (3,2 → 3,1), descartes (0), reintentos por tesis genérica (0), veredicto = umbral (20/20), errores de lint (0,20 → 0,10; n.s.).
+
+**Qué se puede afirmar y qué no.** Con n = 20 por variante, el descenso de etiquetas erróneas (23 → 3), de ⚠ en prosa (12 → 0) y el cambio de cripto (5/5 → 0/5) son grandes y coherentes entre métricas: el ejemplo de estilo era la causa de la contaminación de
+BTC/SPY y el arreglo la elimina con este modelo. El descenso de ⚠ en «qué cambiaría» es real pero parcial (20 → 4). Los demás cambios (resumen +8 palabras, confianza +0,03, +1,5 s) son pequeños y deben leerse como
+tendencia. Es un único modelo, cuatro activos y un solo snapshot por activo; no se midió utilidad para decidir ni corrección financiera, solo fidelidad a los datos. En AAPL queda un caso («P/S 12,0») y en MSFT otro
+(«PER sube a 25») de umbral inventado: el modelo sigue sin copiar siempre la lista de niveles.
+
+### Caché KV (`q8_0`)
+
+`run_eval.sh` registra ahora por ejecución `kvCache` (argumentos `--cache-type-k/-v` del `llama-server` vivo + `OLLAMA_KV_CACHE_TYPE` y hora de arranque del servicio `ollama`) y `kvCacheAfter`/`kvChanged`.
+En las 40 ejecuciones: `runner:k=q8_0,v=q8_0;servicio:OLLAMA_KV_CACHE_TYPE=q8_0;arranque:2026-10-16 13:28:59`, `kvChanged=false` en todas (el servicio no se reinició a mitad; el apagado del equipo no cambió el ajuste).
+Toda la ablación A/B anterior se hizo con **f16** (`llama-server` sin `--cache-type-*`, comprobado a las 12:47; `OLLAMA_KV_CACHE_TYPE` no estaba definida entonces; esa ablación no registró el tipo por ejecución, así que
+es una comprobación puntual, no por ejecución).
+
+**Comparación indicativa (mismo código, +A+B; f16 de la ablación frente a q8_0 de HEAD en esta medición; `quick`; n = 12 frente a 20 en calidad y 10 frente a 20 en tiempo; otro momento del día y otra carga de CPU: carga media 7,6 frente a 4,7):**
+
+| métrica | f16 (ablación) | q8_0 (esta medición) | Δ q8 − f16 [IC 95 %] |
+|---|---|---|---|
+| tiempo (s) | 17,2 [14,1–21,0] | 16,9 [14,5–20,9] | −0,4 [−1,9, +1,0] |
+| tokens de entrada | 7212 | 7230 | +18 [−456, +488] |
+| tokens de salida | 758 | 749 | −9 [−60, +42] |
+| cifras en tesis | 9,2 | 10,2 | +1,0 [−0,5, +2,7] |
+| verificadas por etiqueta | 13,7 | 14,2 | +0,5 [−1,7, +2,8] |
+| no verificadas (⚠) | 0,75 | 0,45 | −0,30 [−0,8, +0,2] |
+| etiqueta errónea | 0,92 | 1,15 | +0,23 [−0,4, +0,9] |
+| ⚠ en «qué cambiaría» | 1,00 | 1,00 | 0,00 [−0,5, +0,5] |
+| palabras de tesis / resumen | 117 / 14 | 120 / 14 | n.s. |
+| confianza | 0,73 | 0,74 | +0,01 [−0,03, +0,04] |
+
+Primera lectura: **sin diferencia distinguible del ruido** en tiempo ni en calidad entre f16 y q8_0 en `quick` con este modelo (todos los IC incluyen 0). No demuestra equivalencia: con estos n solo se descartarían
+diferencias grandes (p. ej. ±2 s de tiempo, ±2 cifras). El beneficio medido por el coordinador es de memoria (5110 MiB frente a 5384 MiB de VRAM). Queda por medir `standard`/`deep` y contextos más largos.
+
+### Propuesta (no implementada): distinguir «umbral hipotético» de «cifra inventada»
+
+Hoy el ⚠ de «qué cambiaría» mezcla dos cosas: (a) un umbral que el modelo propone («si el PER sube a 25») y (b) una cifra que presenta como dato. Para quien lee, (a) es una condición legítima aunque 25 no esté en los datos;
+llamarla «Cifras no verificables en los datos» sugiere un fallo. Propuesta: en el campo `would_change_if` (solo ahí), si el número aparece tras un verbo de umbral («sube a», «supera», «cae por debajo de», «cierra por debajo de») y **la magnitud nombrada sí existe en los datos** (PER, caída máxima, RSI…), mostrar una nota distinta
+(«umbral propuesto por el modelo, no es un dato») en vez del ⚠ de cifra no verificable, sin dejar de marcarlo y sin contarlo como cifra inventada en la confianza ni en las métricas. Razones para hacerlo así y no relajar el verificador: (1) el verificador sigue marcando
+cualquier cifra suelta; (2) restringirlo a un campo y a un patrón sintáctico evita que un dato falso pase disfrazado de umbral en la tesis; (3) permite medir por separado «umbrales no anclados» de «cifras inventadas», que hoy compiten en el mismo contador (en +A+B `quick`, 1,00 de los 1,67 ⚠ por análisis
+eran de este tipo). Riesgo: un umbral absurdo (como «la caída máxima supera el 50 %») dejaría de parecer un error aunque no tenga base; mitigación: mostrarlo con un estilo distinto, no ocultarlo. No se implementó porque cambia el contrato de las notas de calidad y de la UI.
+
+### Limitaciones de esta sección
+
+n = 20 por variante, un modelo, 4 activos, un snapshot por activo, solo `quick`; muchas métricas (~30) sin corrección por comparaciones múltiples (varias estrellas aisladas, como el resumen +8 palabras o la confianza +0,03, pueden ser azar); la comparación con f16 no es
+de la misma sesión (ver arriba). El IC de los tiempos compara 20 frente a 20 ejecuciones intercaladas con carga de CPU media 4,7 frente a 4,6.

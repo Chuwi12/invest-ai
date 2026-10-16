@@ -13,6 +13,10 @@ import glob, json, os, random, re, statistics as st, sys
 
 VARS = ["base", "a", "b", "ab"]
 NAMES = {"base": "base", "a": "+A (quick nuevo)", "b": "+B (cifras derivadas)", "ab": "+A+B"}
+# Otras comparaciones: ABL_VARS="head=HEAD;fix=HEAD + arreglo" (la primera es la referencia, `base` en las tablas).
+if os.environ.get("ABL_VARS"):
+    VARS = [x.split("=")[0] for x in os.environ["ABL_VARS"].split(";")]
+    NAMES = dict(x.split("=", 1) for x in os.environ["ABL_VARS"].split(";"))
 
 def frac_label(a):
     t = a["labeledOk"] + a["unlabeledOk"] + a["notInData"]
@@ -145,12 +149,12 @@ def metric_table(data, depth, spec, time_rows=None):
         if time_rows is not None:
             rows = [r for r in rows if r["tv"]]
         xs = cell(rows, g)
-        if v == "base":
+        if v == VARS[0]:
             base = xs
         if not xs:
             lines.append("| %s | 0 | – | – | – |" % NAMES[v])
             continue
-        if v == "base":
+        if v == VARS[0]:
             lines.append("| %s | %d | %s | – | – |" % (NAMES[v], len(xs), fmt_stats(xs, fmt)))
             continue
         ci = boot_diff(base, xs) if base else None
@@ -166,7 +170,7 @@ def metric_table(data, depth, spec, time_rows=None):
 
 def summary(data, alltime, depth):
     """Tabla compacta: una fila por métrica, una columna por variante: media [mín–máx]; «*» = IC 95 % de la diferencia vs base excluye 0."""
-    out = ["| métrica | n (base/+A/+B/+A+B) | base | +A | +B | +A+B |", "|---|---|---|---|---|---|"]
+    out = ["| métrica | n (%s) | %s |" % ("/".join(VARS), " | ".join(NAMES[v] for v in VARS)), "|---" * (len(VARS) + 2) + "|"]
     for spec in QUALITY + [TIME]:
         head, g, fmt = spec
         is_time = spec is TIME
@@ -175,7 +179,7 @@ def summary(data, alltime, depth):
             rows = [r for r in (alltime if is_time else data)[v] if r["depth"] == depth and (r["tv"] or not is_time)]
             xs = cell(rows, g)
             ns.append(str(len(xs)))
-            if v == "base":
+            if v == VARS[0]:
                 base = xs
                 cols.append(fmt_stats(xs, fmt))
                 continue

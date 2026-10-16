@@ -412,7 +412,7 @@ impl AnalysisEngine {
         let quick = depth == AnalysisDepth::Quick;
         // quick: el juez no escribe estrategia ni usa los niveles (los calcula Rust y salen en `levelsNote`).
         let (judge_ctx, judge_task) = if quick {
-            (judge_text.clone(), prompts::quick_judge_task(lang, &digest, card.verdict, &lang_code))
+            (judge_text.clone(), prompts::quick_judge_task(lang, &digest, card.verdict, &lang_code, &prompts::quick_hints(&snap, lang)))
         } else {
             (format!("{judge_text}\n{levels_block}"), prompts::judge_task(lang, &digest, card.verdict, debated, deep, &lang_code))
         };
