@@ -450,6 +450,24 @@ fn words_of(s: &str) -> Vec<String> {
 /// Umbrales y periodos convencionales de los indicadores (RSI 70/30, estocástico 80/20, medias de
 /// 20/50/200 sesiones, ATR14, MACD 12/26/9, Bollinger 2σ) cuando aparecen junto a su indicador: no
 /// son datos del activo y no se exige que estén en el contexto.
+/// Ventana estándar de un indicador escrita como plazo («volatilidad a 30 días», «máximo de 52
+/// semanas», «SMA de 200 sesiones»): forma parte de la etiqueta, no es una cifra de datos. Solo las
+/// longitudes habituales, para que una duración inventada («lleva 45 días por encima») se siga
+/// comprobando.
+fn is_standard_window(text: &str, end: usize, base: f64) -> bool {
+    const WINDOWS: [f64; 13] = [14.0, 20.0, 26.0, 30.0, 50.0, 52.0, 60.0, 90.0, 100.0, 180.0, 200.0, 252.0, 365.0];
+    if !WINDOWS.contains(&base) {
+        return false;
+    }
+    let rest = text.get(end..).unwrap_or("").trim_start_matches(is_space);
+    let word: String = rest.chars().take_while(|c| c.is_alphabetic()).collect::<String>().to_lowercase();
+    matches!(
+        word.as_str(),
+        "día" | "días" | "dia" | "dias" | "semana" | "semanas" | "sesión" | "sesiones" | "sesion" | "jornadas" | "ruedas"
+            | "day" | "days" | "week" | "weeks" | "session" | "sessions"
+    )
+}
+
 fn is_conventional_threshold(text: &str, start: usize, end: usize, base: f64) -> bool {
     let before: String = text[..start].chars().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect();
     let after: String = text[end..].chars().take(14).collect();
@@ -575,7 +593,8 @@ pub fn extract_numbers(text: &str) -> Vec<Num> {
         let year = integer && body.plain && (1990.0..=2100.0).contains(&base) && !priced;
         let conventional = integer && body.plain && is_conventional_threshold(text, start, end, base);
         let index_name = integer && body.plain && is_index_name(text, start, base);
-        let exempt = attached_before || attached_after || date || word_hyphen || small_int || year || conventional || index_name;
+        let window = integer && body.plain && is_standard_window(text, end, base);
+        let exempt = attached_before || attached_after || date || word_hyphen || small_int || year || conventional || index_name || window;
         let neg_ok = !signed && mentions_decline(text, start, mark_end);
         if (base * scale).is_finite() {
             tokens.push(Token {
@@ -1308,6 +1327,16 @@ mod tests {
         assert_eq!(bad("Entrar entre 82850 y 83432.45, con stop en 80772.31. Salir si alcanza 83935.78 (SMA20)."), none);
         assert_eq!(bad("La volatilidad diaria de 2.6% del precio podría generar pérdidas."), none);
         assert_eq!(bad("La oferta circulante es de 20.1M y la máxima de 21M."), none);
+        // Un plazo dentro de la etiqueta («a 30 días», «a 1 año») no corta la búsqueda de la etiqueta
+        // de la cifra siguiente (caso real del quick del 16-oct: 38.8 se atribuía a «caída máxima»).
+        assert_eq!(bad("La volatilidad a 30 días de 38.8% y la caída máxima a 1 año de 48.8% son riesgos significativos."), none);
+        assert_eq!(bad("La caída máxima a 1 año de 48.8% y la volatilidad a 30 días de 38.8% son riesgos."), none);
+        assert_eq!(bad("la rentabilidad a 30 días de 6.7% y el RSI14 de 52.9"), none);
+        // Y una etiqueta equivocada tras el plazo se sigue detectando.
+        assert_eq!(bad("La caída máxima a 30 días de 38.8% preocupa."), ["38.8"]);
+        // Solo las ventanas habituales: una duración arbitraria sigue siendo una cifra que comprobar.
+        assert_eq!(bad("El precio lleva 45 días por encima de la SMA200."), ["45"]);
+        assert_eq!(bad("Su SMA de 200 sesiones es 72251.92 y la volatilidad de 30 días es del 38.8%."), none);
         // El fallo documentado: 6.7 es la rentabilidad a 1 mes, no la recompensa/riesgo (0.3).
         // (-0.7 y +4.6 son derivadas del modelo y no están en los datos: caían ya antes.)
         assert_eq!(bad("El precio está cerca del soporte de 82850 (-0.7%) y la resistencia de 87307.83 (+4.6%), con una recompensa/riesgo de 6.7."), ["-0.7", "+4.6", "6.7"]);
