@@ -443,20 +443,45 @@ mod tests {
         assert_eq!(items[1].sentiment.as_ref().unwrap().method, "provider:x");
     }
 
-    #[test]
-    fn is_cheap() {
-        let items: Vec<NewsItem> = (0..2000)
+    fn many_items(n: usize) -> Vec<NewsItem> {
+        (0..n)
             .map(|i| {
                 item(
                     &format!("Stocks rally {i} as inflation fears fade, no recession seen"),
                     Some("Analysts expect strong earnings growth next quarter despite tariffs"),
                 )
             })
-            .collect();
-        let mut items = items;
+            .collect()
+    }
+
+    /// Protege que el análisis léxico es barato (sin red ni modelo, y sin reconstruir el léxico por
+    /// titular) sin medir el reloj, que falla con la CPU cargada: el léxico es una única instancia
+    /// compartida, cada titular se anota exactamente una vez y el resultado no depende del volumen.
+    #[test]
+    fn is_cheap() {
+        let first = lexicon() as *const Lexicon;
+        let mut items = many_items(2000);
+        annotate_sentiment(&mut items);
+        assert!(std::ptr::eq(first, lexicon()), "el léxico se construye una sola vez");
+        assert!(items.iter().all(|i| i.sentiment.as_ref().is_some_and(|s| s.method == METHOD)));
+        // Mismo titular, mismo resultado: el coste por titular no acumula estado entre llamadas.
+        let one = sentiment_of(&many_items(1)[0]);
+        assert!(items.iter().all(|i| i.sentiment.as_ref().unwrap().score == one.score));
+        // Una segunda pasada no recalcula nada: respeta lo ya anotado.
+        let before: Vec<f32> = items.iter().map(|i| i.sentiment.as_ref().unwrap().score).collect();
+        annotate_sentiment(&mut items);
+        let after: Vec<f32> = items.iter().map(|i| i.sentiment.as_ref().unwrap().score).collect();
+        assert_eq!(before, after);
+    }
+
+    /// Versión con reloj de `is_cheap`: depende de la carga de la CPU, así que solo se lanza a mano
+    /// (`cargo test -p ai -- --ignored is_fast`) en un equipo en reposo.
+    #[test]
+    #[ignore = "mide tiempo de reloj: inestable con la CPU cargada; el control determinista es is_cheap"]
+    fn is_fast() {
+        let mut items = many_items(2000);
         let t = std::time::Instant::now();
         annotate_sentiment(&mut items);
-        // 2000 titulares muy por debajo de medio segundo incluso en debug.
         assert!(t.elapsed() < std::time::Duration::from_millis(500), "{:?}", t.elapsed());
     }
 }

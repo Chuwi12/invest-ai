@@ -56,7 +56,7 @@ export const qk = {
   views: ['history', 'views'] as const,
   dashboard: ['dashboard'] as const,
   performance: ['learning', 'performance'] as const,
-  calibrated: (confidence: number, horizon: number) => ['learning', 'calibrated', confidence, horizon] as const,
+  calibrated: (confidence: number, horizon: number, model: string | undefined) => ['learning', 'calibrated', confidence, horizon, model ?? null] as const,
   watchlist: ['watchlist'] as const,
 }
 
@@ -671,11 +671,14 @@ export function useRollbackWeights() {
   })
 }
 
-/** Confianza calibrada de un análisis; `null` mientras carga, si falla o si no hay calibración. */
-export function useCalibratedConfidence(confidence: number | undefined, horizon = 4) {
+/**
+ * Confianza calibrada de un análisis; `null` mientras carga, si falla o si no hay calibración.
+ * `model` es el que hizo el análisis (se calibra con su historial); sin él, el modelo activo.
+ */
+export function useCalibratedConfidence(confidence: number | undefined, horizon = 4, model?: string) {
   return useQuery({
-    queryKey: qk.calibrated(confidence ?? -1, horizon),
-    queryFn: ({ signal }) => api.calibratedConfidence(confidence as number, horizon, signal),
+    queryKey: qk.calibrated(confidence ?? -1, horizon, model),
+    queryFn: ({ signal }) => api.calibratedConfidence(confidence as number, horizon, model, signal),
     enabled: confidence !== undefined,
     staleTime: 5 * MIN,
     retry: false,

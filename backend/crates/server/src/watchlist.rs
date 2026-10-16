@@ -168,6 +168,18 @@ pub trait Clock: Send + Sync + 'static {
     async fn sleep_until(&self, t: DateTime<Utc>);
 }
 
+/// Resuelve una hora local a un instante UTC en la zona `tz`. Función pura (la zona entra por
+/// parámetro) para poder probar los cambios de hora sin depender de la zona del equipo.
+/// - Hora ambigua (el reloj la marca dos veces al retrasarse): la primera ocurrencia.
+/// - Hora inexistente (hueco al adelantarse): la misma hora una hora después, que sí existe.
+/// - Si ni así se resuelve (zonas con saltos raros), se toma la hora como UTC.
+pub(crate) fn resolve_local<Tz: TimeZone>(tz: &Tz, l: NaiveDateTime) -> DateTime<Utc> {
+    let resolve = |l: NaiveDateTime| tz.from_local_datetime(&l).earliest();
+    resolve(l)
+        .or_else(|| resolve(l + chrono::Duration::hours(1)))
+        .map_or_else(|| Utc.from_utc_datetime(&l), |d| d.with_timezone(&Utc))
+}
+
 /// Reloj real con la zona horaria local del sistema.
 pub struct SystemClock;
 
@@ -182,10 +194,7 @@ impl Clock for SystemClock {
     }
 
     fn local_to_utc(&self, l: NaiveDateTime) -> DateTime<Utc> {
-        let resolve = |l: NaiveDateTime| Local.from_local_datetime(&l).earliest();
-        resolve(l)
-            .or_else(|| resolve(l + chrono::Duration::hours(1))) // hueco del cambio de hora
-            .map_or_else(|| Utc.from_utc_datetime(&l), |d| d.with_timezone(&Utc))
+        resolve_local(&Local, l)
     }
 
     /// Duerme en tramos cortos y vuelve a mirar el reloj de pared: el temporizador monótono de
@@ -694,5 +703,148 @@ pub async fn run_learning_loop(state: AppState, every: Duration, first_delay: Du
             Ok(Err(e)) => tracing::error!(error = %e, "aprendizaje: el ciclo falló; se reintenta en el siguiente"),
             Err(_) => tracing::error!("aprendizaje: el ciclo hizo panic; se reintenta en el siguiente"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::LocalResult;
+
+    use super::*;
+
+    /// Zona con la regla europea de horario de verano de 2025 (como Europa/Madrid): +01:00 en
+    /// invierno y +02:00 entre el 30-mar 01:00 UTC y el 26-oct 01:00 UTC. Sin `chrono-tz`.
+    #[derive(Debug, Clone, Copy)]
+    struct Madrid;
+
+    fn utc(y: i32, m: u32, d: u32, h: u32, mi: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(y, m, d, h, mi, 0).unwrap()
+    }
+
+    fn local(y: i32, m: u32, d: u32, h: u32, mi: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, mi, 0).unwrap()
+    }
+
+    fn offset_at(t: DateTime<Utc>) -> FixedOffset {
+        let secs = if t >= utc(2025, 3, 30, 1, 0) && t < utc(2025, 10, 26, 1, 0) { 7200 } else { 3600 };
+        FixedOffset::east_opt(secs).unwrap()
+    }
+
+    impl TimeZone for Madrid {
+        type Offset = FixedOffset;
+
+        fn from_offset(_: &FixedOffset) -> Self {
+            Madrid
+        }
+
+        fn offset_from_local_date(&self, d: &NaiveDate) -> LocalResult<FixedOffset> {
+            self.offset_from_local_datetime(&d.and_hms_opt(12, 0, 0).unwrap())
+        }
+
+        fn offset_from_local_datetime(&self, l: &NaiveDateTime) -> LocalResult<FixedOffset> {
+            // Un desfase es válido si, aplicado, el instante resultante tiene ese mismo desfase.
+            let mut ok: Vec<FixedOffset> = [7200, 3600]
+                .iter()
+                .map(|s| FixedOffset::east_opt(*s).unwrap())
+                .filter(|o| offset_at(Utc.from_utc_datetime(&(*l - chrono::Duration::seconds(i64::from(o.local_minus_utc()))))) == *o)
+                .collect();
+            match ok.len() {
+                0 => LocalResult::None,
+                1 => LocalResult::Single(ok.remove(0)),
+                _ => LocalResult::Ambiguous(ok[0], ok[1]), // [+2, +1]: el +2 es el instante anterior
+            }
+        }
+
+        fn offset_from_utc_date(&self, d: &NaiveDate) -> FixedOffset {
+            self.offset_from_utc_datetime(&d.and_hms_opt(12, 0, 0).unwrap())
+        }
+
+        fn offset_from_utc_datetime(&self, u: &NaiveDateTime) -> FixedOffset {
+            offset_at(Utc.from_utc_datetime(u))
+        }
+    }
+
+    /// Reloj con la zona de prueba; la hora actual no se usa (se pasa `now` a `next_due`).
+    struct MadridClock;
+
+    #[async_trait]
+    impl Clock for MadridClock {
+        fn now(&self) -> DateTime<Utc> {
+            unreachable!("next_due recibe now")
+        }
+        fn utc_to_local(&self, t: DateTime<Utc>) -> NaiveDateTime {
+            t.with_timezone(&Madrid).naive_local()
+        }
+        fn local_to_utc(&self, l: NaiveDateTime) -> DateTime<Utc> {
+            resolve_local(&Madrid, l)
+        }
+        async fn sleep_until(&self, _t: DateTime<Utc>) {}
+    }
+
+    fn hm(h: u32, m: u32) -> NaiveTime {
+        NaiveTime::from_hms_opt(h, m, 0).unwrap()
+    }
+
+    #[test]
+    fn la_zona_de_prueba_modela_hueco_y_solape() {
+        let tz = Madrid;
+        assert!(matches!(tz.offset_from_local_datetime(&local(2025, 3, 30, 2, 30)), LocalResult::None));
+        assert!(matches!(tz.offset_from_local_datetime(&local(2025, 10, 26, 2, 30)), LocalResult::Ambiguous(..)));
+        assert!(matches!(tz.offset_from_local_datetime(&local(2025, 6, 1, 2, 30)), LocalResult::Single(_)));
+    }
+
+    #[test]
+    fn hora_local_normal() {
+        let tz = Madrid;
+        assert_eq!(resolve_local(&tz, local(2025, 1, 15, 23, 0)), utc(2025, 1, 15, 22, 0));
+        assert_eq!(resolve_local(&tz, local(2025, 7, 15, 23, 0)), utc(2025, 7, 15, 21, 0));
+    }
+
+    #[test]
+    fn hueco_de_primavera_pasa_a_la_hora_siguiente_que_existe() {
+        // 02:30 del 30-mar-2025 no existe en Madrid (02:00 CET -> 03:00 CEST): sale 03:30 CEST = 01:30 UTC.
+        let tz = Madrid;
+        let t = resolve_local(&tz, local(2025, 3, 30, 2, 30));
+        assert_eq!(t, utc(2025, 3, 30, 1, 30));
+        assert_eq!(t.with_timezone(&Madrid).naive_local(), local(2025, 3, 30, 3, 30));
+    }
+
+    #[test]
+    fn solape_de_otono_toma_la_primera_ocurrencia() {
+        // 02:30 del 26-oct-2025 ocurre dos veces (00:30 UTC en CEST y 01:30 UTC en CET): la primera.
+        let tz = Madrid;
+        assert_eq!(resolve_local(&tz, local(2025, 10, 26, 2, 30)), utc(2025, 10, 26, 0, 30));
+    }
+
+    #[test]
+    fn next_due_a_las_23_el_dia_del_cambio_de_primavera() {
+        let c = MadridClock;
+        // Víspera (13:00 CET): hoy a las 23:00 CET = 22:00 UTC.
+        assert_eq!(next_due(&c, utc(2025, 3, 29, 12, 0), hm(23, 0)), utc(2025, 3, 29, 22, 0));
+        // Ya pasó: mañana (día del cambio) a las 23:00 CEST = 21:00 UTC, no 22:00.
+        assert_eq!(next_due(&c, utc(2025, 3, 29, 22, 30), hm(23, 0)), utc(2025, 3, 30, 21, 0));
+        // El propio día del cambio, por la tarde: hoy a las 23:00 CEST.
+        assert_eq!(next_due(&c, utc(2025, 3, 30, 12, 0), hm(23, 0)), utc(2025, 3, 30, 21, 0));
+        // Y el siguiente, ya en horario de verano.
+        assert_eq!(next_due(&c, utc(2025, 3, 30, 21, 30), hm(23, 0)), utc(2025, 3, 31, 21, 0));
+    }
+
+    #[test]
+    fn next_due_a_las_23_el_dia_del_cambio_de_otono() {
+        let c = MadridClock;
+        // Víspera (14:00 CEST): 23:00 CEST = 21:00 UTC.
+        assert_eq!(next_due(&c, utc(2025, 10, 25, 12, 0), hm(23, 0)), utc(2025, 10, 25, 21, 0));
+        // Pasada la hora: el día del cambio las 23:00 ya son CET = 22:00 UTC.
+        assert_eq!(next_due(&c, utc(2025, 10, 25, 21, 30), hm(23, 0)), utc(2025, 10, 26, 22, 0));
+        // 00:30 CEST del día del cambio: sigue siendo hoy 23:00 CET.
+        assert_eq!(next_due(&c, utc(2025, 10, 25, 22, 30), hm(23, 0)), utc(2025, 10, 26, 22, 0));
+        assert_eq!(next_due(&c, utc(2025, 10, 26, 22, 30), hm(23, 0)), utc(2025, 10, 27, 22, 0));
+    }
+
+    #[test]
+    fn next_due_con_hora_en_el_hueco_o_el_solape() {
+        let c = MadridClock;
+        assert_eq!(next_due(&c, utc(2025, 3, 30, 0, 0), hm(2, 30)), utc(2025, 3, 30, 1, 30));
+        assert_eq!(next_due(&c, utc(2025, 10, 25, 23, 0), hm(2, 30)), utc(2025, 10, 26, 0, 30));
     }
 }

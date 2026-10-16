@@ -150,7 +150,7 @@ Resultados reales de los análisis (crate `learning`, ver `docs/notes/learning.m
 | GET  | `/learning/performance` | `PerformanceReport` (camelCase; tal cual lo devuelve `learning::performance_report` con el modelo activo) |
 | GET  | `/learning/weights` | `{ active: WeightVersion \| null, versions: WeightVersion[] }` (más reciente primero) |
 | POST | `/learning/weights/rollback` | Cuerpo `{ "version": 3 }` o `{ "version": null }` (pesos por defecto). Crea una versión nueva `rollback` y la activa; devuelve `WeightVersion`. 404 `not_found` si la versión no existe. Método no seguro: pasa por el guard de `Origin` |
-| GET  | `/learning/calibrated-confidence?confidence=0.7&horizon=4` | `{ raw, calibrated \| null, horizonWeeks, n, minRequired, reason }`. `calibrated` solo existe con calibración aplicable (>= 200 análisis independientes y mejora fuera de muestra); `horizon` en {1, 4, 12} (por defecto 4) |
+| GET  | `/learning/calibrated-confidence?confidence=0.7&horizon=4&model=qwen3:8b` | `{ raw, calibrated \| null, horizonWeeks, n, minRequired, reason }`. `calibrated` solo existe con calibración aplicable (>= 200 análisis independientes y mejora fuera de muestra); `horizon` en {1, 4, 12} (por defecto 4). `model` (opcional) es el modelo con cuyo historial se calibra: el que hizo el análisis, porque la confianza de otro modelo significa otra cosa; sin él, el modelo activo; vacío = 400 |
 | GET  | `/watchlist` | `WatchlistStatus` |
 
 ```ts

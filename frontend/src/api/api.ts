@@ -102,6 +102,6 @@ export interface Api {
   /** `version: null` = volver a los pesos por defecto. Crea una versión nueva (no borra historia). */
   rollbackWeights(version: number | null): Promise<WeightVersion>
   /** Confianza declarada junto a la calibrada (si hay calibración aplicable). */
-  calibratedConfidence(confidence: number, horizon?: number, signal?: AbortSignal): Promise<CalibratedConfidence>
+  calibratedConfidence(confidence: number, horizon?: number, model?: string, signal?: AbortSignal): Promise<CalibratedConfidence>
   watchlist(signal?: AbortSignal): Promise<WatchlistStatus>
 }

@@ -63,6 +63,9 @@ pub struct ConfidenceQuery {
     pub confidence: f64,
     #[serde(default = "default_horizon")]
     pub horizon: u32,
+    /// Modelo con cuyo historial se calibra (el que hizo el análisis). Sin él, el modelo activo.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 fn default_horizon() -> u32 {
@@ -79,6 +82,11 @@ pub async fn calibrated_confidence(
     if !learning::rules::HORIZONS_WEEKS.contains(&q.horizon) {
         return Err(ApiError::invalid("horizon debe ser 1, 4 o 12 (semanas)"));
     }
-    let cfg = LearningConfig { active_model: Some(active_model(&state).await), ..Default::default() };
+    let model = match q.model {
+        Some(m) if m.trim().is_empty() => return Err(ApiError::invalid("model no puede estar vacío")),
+        Some(m) => m,
+        None => active_model(&state).await,
+    };
+    let cfg = LearningConfig { active_model: Some(model), ..Default::default() };
     Ok(Json(learning::calibrated_confidence(&state.db, q.confidence, q.horizon, &cfg).await?))
 }

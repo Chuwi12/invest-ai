@@ -175,7 +175,7 @@ impide arrancar) y `run_learning_loop`: primer `run_cycle` a los 2 min y luego c
 reintenta en el siguiente.
 
 **Rutas** (`docs/API.md`): `GET /api/learning/performance`, `GET /api/learning/weights`, `POST /api/learning/weights/rollback`,
-`GET /api/learning/calibrated-confidence` (la usa el informe de análisis: sale la calibrada solo con calibración aplicable) y
+`GET /api/learning/calibrated-confidence` (la usa el informe de análisis con `model = analysis.model`; sale la calibrada solo con calibración aplicable) y
 `GET /api/watchlist`. Vista `/performance` en el frontend.
 
 ## Datos reales hoy (15-oct-2026)

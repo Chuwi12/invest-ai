@@ -392,7 +392,7 @@ export const mockApi: Api = {
     return mockRollback(version)
   },
 
-  async calibratedConfidence(confidence, horizon = 4, signal) {
+  async calibratedConfidence(confidence, horizon = 4, _model, signal) {
     await lag(signal, 60)
     return mockCalibrated(confidence, horizon)
   },

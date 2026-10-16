@@ -93,7 +93,10 @@ export const httpApi: Api = {
   performance: (signal) => request('/learning/performance', { signal }),
   learningWeights: (signal) => request('/learning/weights', { signal }),
   rollbackWeights: (version) => request('/learning/weights/rollback', { method: 'POST', body: { version } }),
-  calibratedConfidence: (confidence, horizon = 4, signal) =>
-    request(`/learning/calibrated-confidence?confidence=${encodeURIComponent(String(confidence))}&horizon=${horizon}`, { signal }),
+  calibratedConfidence: (confidence, horizon = 4, model, signal) =>
+    request(
+      `/learning/calibrated-confidence?confidence=${encodeURIComponent(String(confidence))}&horizon=${horizon}${model ? `&model=${encodeURIComponent(model)}` : ''}`,
+      { signal },
+    ),
   watchlist: (signal) => request('/watchlist', { signal }),
 }

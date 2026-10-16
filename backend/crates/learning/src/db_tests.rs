@@ -450,3 +450,37 @@ async fn weights_are_versioned_adopted_activated_and_reversible() {
 }
 
 use crate::rollback;
+
+#[tokio::test]
+async fn calibrated_confidence_uses_only_the_requested_model() {
+    use crate::calibrated_confidence;
+    let pool = db().await;
+    let t0 = now().timestamp_millis() - 100 * 86_400_000;
+    // 250 resultados independientes (un activo distinto cada uno) del modelo «a» y 7 del «b».
+    for (model, count) in [("a", 250i64), ("b", 7)] {
+        for i in 0..count {
+            sqlx::query(
+                "INSERT INTO analysis_outcomes (analysis_id, horizon_weeks, asset_id, asset_class, verdict, confidence, model,
+                   generated_at, status, rule_version, bench_kind, excess_return, hit, resolved_at)
+                 VALUES (?1, 4, ?2, 'stock', 'buy', 0.6, ?3, ?4, 'resolved', ?5, 'relative', 0.01, 1, 0)",
+            )
+            .bind(format!("{model}{i}"))
+            .bind(format!("stock:{model}{i}"))
+            .bind(model)
+            .bind(t0 + i * 3_600_000)
+            .bind(RULE_VERSION)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    }
+    let n_of = |m: Option<&str>| {
+        let cfg = LearningConfig { active_model: m.map(String::from), ..Default::default() };
+        let pool = pool.clone();
+        async move { calibrated_confidence(&pool, 0.6, 4, &cfg).await.unwrap().n }
+    };
+    assert_eq!(n_of(Some("a")).await, 250);
+    assert_eq!(n_of(Some("b")).await, 7);
+    assert_eq!(n_of(Some("otro")).await, 0);
+    assert_eq!(n_of(None).await, 257, "sin modelo se mezclan todos");
+}

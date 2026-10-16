@@ -330,6 +330,12 @@ async fn learning_routes_work_empty_and_rollback_is_guarded() {
     assert!(!c["reason"].as_str().unwrap().is_empty());
     assert_eq!(app.get("/api/learning/calibrated-confidence?confidence=1.5").await.0, StatusCode::BAD_REQUEST);
     assert_eq!(app.get("/api/learning/calibrated-confidence?confidence=0.5&horizon=3").await.0, StatusCode::BAD_REQUEST);
+    // Con `model`, se calibra con ese modelo (sin historial suyo: n = 0); vacío, no vale.
+    let (status, c) = app.get("/api/learning/calibrated-confidence?confidence=0.7&model=otro-modelo%3A7b").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(c["calibrated"].is_null());
+    assert_eq!((c["raw"].as_f64(), c["n"].as_i64()), (Some(0.7), Some(0)));
+    assert_eq!(app.get("/api/learning/calibrated-confidence?confidence=0.7&model=").await.0, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

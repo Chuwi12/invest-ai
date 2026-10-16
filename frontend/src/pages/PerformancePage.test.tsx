@@ -129,6 +129,14 @@ describe('confianza calibrada en el informe', () => {
     expect(screen.queryByText(/Calibrada/)).not.toBeInTheDocument()
   })
 
+  it('se calibra con el modelo que hizo el análisis, no con el activo', async () => {
+    const spy = vi.fn(async (raw: number, _h?: number, _model?: string) => ({ raw, calibrated: 0.58, horizonWeeks: 4, n: 412, minRequired: 200, reason: 'ok' }))
+    setApi({ ...mockApi, calibratedConfidence: spy })
+    renderApp(<AnalysisReport analysis={{ ...analysis, model: 'qwen3:8b' }} />)
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    expect(spy.mock.calls[0]?.slice(0, 3)).toEqual([0.74, 4, 'qwen3:8b'])
+  })
+
   it('un fallo al pedirla no rompe el informe', async () => {
     setApi({ ...mockApi, calibratedConfidence: async () => { throw new Error('caído') } })
     renderApp(<AnalysisReport analysis={analysis} />)
