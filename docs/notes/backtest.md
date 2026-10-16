@@ -137,7 +137,7 @@ Anotadas el 16-oct-2026, **antes de ver ningún resultado** (el diseño se escri
 4. Un test de Newey-West (`newey_west_corrects_for_autocorrelation`) tenía mal la teoría de su cota (AR(1) con φ = 0,8: el cociente
    verdadero es √((1+φ)/(1−φ)) = 3, no 5); se corrigió el test, no el estimador.
 
-Después de ver los resultados: **ninguna desviación** (nada se ha cambiado).
+Después de ver los resultados: **ninguna desviación** del diseño (nada se ha cambiado); solo se añadió el apartado «Análisis post hoc», declarado como tal.
 
 ## Resultados (ejecución del 16-oct-2026)
 
@@ -302,6 +302,70 @@ puerta ya lo trata con prudencia; (c) si se quiere una respuesta firme, el sigui
 honesto es repetir este diseño ya fijado con datos libres de supervivencia (constituyentes históricos, incluidos deslistados) y
 con más activos, no ajustar el modelo a esta muestra. Cualquier cambio de pesos justificado por la tabla de arriba sería ajustar a
 ruido.
+
+## Análisis post hoc (después de ver resultados)
+
+**Declaración:** este apartado se añade **después** de ver los resultados de arriba, por la hipótesis de la «Nota de revisión» (el
+signo negativo del riesgo-precio es, en buena parte, exposición beta). **No cambia la regla de decisión ni la conclusión a
+priori**; sus p-valores no son confirmatorios (se miraron 15 ICs en dos versiones y se eligió el ajuste a la vista del resultado
+anterior). Se ejecuta con `cargo run --release -p learning --example backtest -- posthoc` (salida completa en el segundo apéndice).
+
+**Método (fijado antes de ejecutarlo):**
+- **Beta sin anticipación:** para cada activo y viernes, β = cov/var de las rentabilidades semanales (cierre ajustado) del activo frente
+  a su benchmark (SPY) en las **104 semanas anteriores** (anclas cada 7 días hacia atrás desde ese viernes, incluido su cierre y
+  nunca posteriores), mínimo 52 rentabilidades válidas, **recortada a [0, 3]**.
+- **Exceso ajustado:** `r_activo − β·r_SPY` en la misma ventana futura que el exceso original (entrada en el siguiente cierre).
+- Todo lo demás igual (universo 1, Newey-West, subperiodos, 10 pb, préstamo 0,5 %). No se resta la tasa libre de riesgo.
+- Tests nuevos: beta recuperada en datos sintéticos (β = 1,5 → 1,5 ± 0,1; negativa → 0 y marcada; 5 → 3 y marcada; < 52 semanas →
+  sin beta; benchmark constante → sin beta), **sin anticipación** (la beta no cambia con velas futuras, ni con un futuro
+  envenenado), exceso ajustado a mano (100 → 110 y 50 → 52,5 con β = 1,5 da +2,5 %) y el panel ajustado con betas de pata en [0, 3].
+
+**Diagnóstico de la beta (universo 1, 46 737 observaciones activo-semana):** todas tienen beta (el universo ya exigía > 400 días); se
+recortan **179 a 0 (0,38 %) y 3 a 3 (0,01 %)**. Beta media 0,94 (ETF 0,95; acciones/ADR 0,93). SPY rindió **+14,5 %/año** en el periodo.
+La beta media por quintil del riesgo-precio (Q1 = más riesgo): **1,27 / 0,99 / 0,87 / 0,81 / 0,74**. Es decir, la hipótesis de partida
+(los volátiles tienen β > 1) se cumple: el largo-corto «poco riesgo − mucho riesgo» tiene **beta neta ≈ −0,53** (larga 0,74, corta 1,27).
+
+**Comparación: sin ajustar frente a ajustado** (universo 1; t = Newey-West; cartera = quintil superior − inferior, anualizada):
+
+| factor | h | IC sin ajustar (t) | **IC ajustado (t)** | LS bruto sin → con ajuste | LS neto sin → con ajuste | t neto sin → con ajuste |
+|---|---|---|---|---|---|---|
+| riesgo-precio | 1 | -0,017 (-1,37) | **+0,003 (0,26)** | -15,2 % → -5,7 % | -17,6 % → -8,2 % | -2,55 → -1,52 |
+| riesgo-precio | 4 | -0,035 (-1,83) | **-0,001 (-0,07)** | -15,3 % → -5,6 % | -17,0 % → -7,2 % | -2,96 → -1,58 |
+| riesgo-precio | 12 | -0,053 (-1,79) | **+0,004 (0,15)** | -14,6 % → -5,1 % | -15,7 % → -6,1 % | -3,10 → -1,54 |
+| compuesto | 1 | +0,013 (1,01) | +0,017 (1,42) | +1,0 % → +4,6 % | -3,7 % → -0,1 % | -0,53 → -0,01 |
+| compuesto | 4 | +0,008 (0,44) | +0,010 (0,58) | -3,1 % → +0,2 % | -5,5 % → -2,2 % | -1,02 → -0,45 |
+| compuesto | 12 | +0,002 (0,09) | +0,021 (0,80) | -3,8 % → +0,3 % | -5,2 % → -1,2 % | -1,23 → -0,29 |
+| técnico | 1 / 4 / 12 | +0,017 / +0,017 / +0,026 | +0,015 / +0,010 / +0,027 (t ≤ 1,42) | +7,4 / +2,3 / +2,4 % → +7,9 / +2,8 / +3,3 % | +0,6 / -0,5 / +0,8 % → +1,1 / -0,1 / +1,7 % | todos |t| < 0,5 |
+| momentum | 1 / 4 / 12 | +0,019 / +0,018 / +0,011 | +0,017 / +0,008 / +0,012 (t ≤ 1,38) | +7,5 / +3,4 / +1,2 % → +8,1 / +3,6 / +2,5 % | +2,7 / +0,7 / -0,4 % → +3,4 / +1,0 / +0,9 % | todos |t| < 0,6 |
+| *ref. mom. 12-1* | 1 / 4 / 12 | +0,025 / +0,027 / +0,028 | +0,023 (1,78) / +0,017 / +0,021 | +6,6 / +5,5 / +5,1 % → +6,5 / +4,7 / +4,6 % | +3,9 / +3,9 / +3,9 % → +3,8 / +3,1 / +3,5 % | todos |t| < 0,8 |
+
+Por subperiodo, con el exceso ajustado, el IC del riesgo-precio es ≈ 0 en los tres (de −0,014 a +0,037, todos |t| ≤ 1,4) y el del
+compuesto es positivo en 2018-20 (+0,038 / +0,050 / +0,065), negativo en 2021-23 (−0,005 / −0,023 / −0,021) y ≈ 0 o positivo en 2024-hoy: la
+inestabilidad del compuesto sigue ahí. Con ETF y con acciones por separado, el IC ajustado del riesgo-precio también es ≈ 0 (ETF
++0,004 / +0,017 / +0,024; acciones +0,011 / +0,008 / +0,027; todos |t| < 1).
+
+**Interpretación honesta**
+1. **La hipótesis se confirma en lo principal: el signo negativo del IC del riesgo-precio era beta.** Con el exceso ajustado el IC pasa de
+   −0,017 / −0,035 / −0,053 a +0,003 / −0,001 / +0,004 (t entre −0,07 y 0,26): **~0, no una anti-señal**. En la cartera, ~9,5 puntos de los
+   ~15 de pérdida bruta (≈ 63 %) desaparecen con el ajuste, de acuerdo con la exposición medida (−0,53 de beta neta × un mercado
+   que subió ~15 %/año).
+2. **No queda una señal positiva: queda un residuo sin significación.** La cartera largo-corto del riesgo sigue en −5,1 a −5,7 % bruto
+   (−6,1 a −8,2 % neto; t neto ≈ −1,5, no significativo y casi nulo en 2024-hoy: −1,3 / −0,7 / −0,1 %). Dos lecturas que estos datos no
+   pueden separar: un alfa residual negativo de los tranquilos (con la supervivencia a favor de los volátiles que siguen vivos) o
+   beta no eliminada por completo (la beta ex ante se estima con ruido y puede subestimar la de los más volátiles). Un matiz en sentido
+   contrario: no se resta la tasa libre de riesgo; hacerlo (alfa de CAPM) empeoraría el residuo en ≈ 0,53 × ~2 % ≈ 1 punto.
+   Dicho de otro modo: ajustar por beta convierte «el factor pierde mucho» en «el factor no discrimina», no en «el factor acierta».
+3. **El compuesto mejora al ajustar (la mayor parte de su pérdida bruta era también exposición de mercado, aunque su beta neta es solo
+   −0,17), pero sigue sin ser distinguible de 0 ni rentable:** IC +0,017 / +0,010 / +0,021 (t ≤ 1,42, lejos del umbral 2,87), LS neto
+   −0,1 / −2,2 / −1,2 % (t ≈ 0). Tras costes sigue sin ganar. La conclusión a priori no cambia: **no hay señal detectable en los
+   factores de precio, antes ni después de ajustar por beta.**
+4. Técnico, momentum y el momentum 12-1 de referencia apenas se mueven con el ajuste (su beta neta es ≈ 0): lo único que el ajuste
+   mueve es el riesgo-precio y, por contagio, el compuesto.
+5. **Lo que NO se concluye:** no se propone cambiar pesos ni tocar la puntuación ni la orientación del componente de riesgo. Cualquier
+   cambio motivado por estas tablas sería ajustar a ruido: la muestra tiene sesgo de supervivencia, un solo régimen alcista de
+   8,8 años, y este ajuste se eligió después de ver el resultado. Además, el componente de riesgo de la app no se diseñó para
+   producir alfa sino para describir riesgo; este análisis solo aclara que su «pérdida» bruta era en gran parte exposición, no
+   un error de señal.
 
 ## Apéndice: salida completa de `run` (16-oct-2026)
 
@@ -554,3 +618,81 @@ Pruebas de la familia que cumplen todo: 0 de 12.
 | wait | 7421 | 49.5% | 53.7% | -4.3% | [-6.6%, -1.9%] |
 | reduce | 4860 | 53.0% | 53.7% | -0.7% | [-5.5%, +4.2%] |
 | avoid | 2101 | 47.0% | 53.7% | -6.6% | [-13.6%, -0.5%] |
+
+## Apéndice 2: salida completa de `posthoc` (16-oct-2026)
+
+### Análisis post hoc: exceso ajustado por beta
+
+#### A. Beta (104 semanas anteriores, mín. 52, recortada a [0, 3]), universo `equity`
+
+- Observaciones activo-semana: 46737; con beta: 46737; sin beta: 0.
+- Recortadas: 179 a 0 (0.38 %) y 3 a 3 (0.01 %).
+- Beta media: 0.94; ETF 0.95; acciones/ADR 0.93.
+- SPY (rentabilidad total) en el periodo: +14.5 %/año.
+
+Beta media por quintil del factor de riesgo-precio (Q1 = más riesgo, Q5 = menos riesgo), por semana y promediado:
+
+| quintil | beta media |
+|---|---|
+| Q1 | 1.27 |
+| Q2 | 0.99 |
+| Q3 | 0.87 |
+| Q4 | 0.81 |
+| Q5 | 0.74 |
+
+#### B. IC de Spearman con exceso ajustado por beta, universo `equity`
+
+| factor | h | semanas | IC medio | t (NW) | IC 95 % (NW) | 2018-20 | 2021-23 | 2024-hoy | IC sin ajustar | t sin ajustar |
+|---|---|---|---|---|---|---|---|---|---|---|
+| technical | 1 | 457 | +0.015 | 1.42 | [-0.006, +0.037] | +0.034 (t 1.5) | +0.002 (t 0.1) | +0.010 (t 0.6) | +0.017 | 1.52 |
+| technical | 4 | 454 | +0.010 | 0.64 | [-0.021, +0.042] | +0.051 (t 1.6) | -0.022 (t -0.8) | +0.001 (t 0.0) | +0.017 | 1.10 |
+| technical | 12 | 446 | +0.027 | 1.13 | [-0.020, +0.073] | +0.077 (t 1.7) | -0.014 (t -0.4) | +0.015 (t 0.4) | +0.026 | 1.13 |
+| momentum | 1 | 457 | +0.017 | 1.38 | [-0.007, +0.040] | +0.038 (t 1.6) | -0.005 (t -0.2) | +0.017 (t 0.9) | +0.019 | 1.54 |
+| momentum | 4 | 454 | +0.008 | 0.42 | [-0.029, +0.044] | +0.057 (t 1.6) | -0.032 (t -1.0) | -0.002 (t -0.1) | +0.018 | 0.98 |
+| momentum | 12 | 446 | +0.012 | 0.44 | [-0.040, +0.063] | +0.077 (t 1.6) | -0.036 (t -0.9) | -0.009 (t -0.2) | +0.011 | 0.43 |
+| risk | 1 | 457 | +0.003 | 0.26 | [-0.017, +0.023] | +0.007 (t 0.4) | -0.011 (t -0.5) | +0.012 (t 0.9) | -0.017 | -1.37 |
+| risk | 4 | 454 | -0.001 | -0.07 | [-0.033, +0.030] | +0.001 (t 0.0) | -0.009 (t -0.3) | +0.005 (t 0.3) | -0.035 | -1.83 |
+| risk | 12 | 446 | +0.004 | 0.15 | [-0.045, +0.052] | -0.007 (t -0.1) | -0.014 (t -0.3) | +0.037 (t 1.4) | -0.053 | -1.79 |
+| composite | 1 | 457 | +0.017 | 1.42 | [-0.006, +0.040] | +0.038 (t 1.6) | -0.005 (t -0.2) | +0.017 (t 1.0) | +0.013 | 1.01 |
+| composite | 4 | 454 | +0.010 | 0.58 | [-0.025, +0.045] | +0.050 (t 1.4) | -0.023 (t -0.7) | +0.004 (t 0.2) | +0.008 | 0.44 |
+| composite | 12 | 446 | +0.021 | 0.80 | [-0.030, +0.071] | +0.065 (t 1.3) | -0.021 (t -0.5) | +0.018 (t 0.6) | +0.002 | 0.09 |
+| mom12_1 | 1 | 457 | +0.023 | 1.78 | [-0.002, +0.048] | +0.049 (t 1.9) | -0.008 (t -0.4) | +0.027 (t 1.5) | +0.025 | 1.87 |
+| mom12_1 | 4 | 454 | +0.017 | 0.88 | [-0.021, +0.054] | +0.054 (t 1.3) | -0.012 (t -0.4) | +0.007 (t 0.3) | +0.027 | 1.39 |
+| mom12_1 | 12 | 446 | +0.021 | 0.71 | [-0.037, +0.079] | +0.049 (t 0.8) | -0.002 (t -0.0) | +0.016 (t 0.5) | +0.028 | 0.90 |
+
+#### C. Cartera quintil superior − inferior con exceso ajustado, universo `equity` (10 pb, 0,5 %/año)
+
+| factor | h | bruto ajustado | neto ajustado | t neto | bruto sin ajustar | neto sin ajustar | beta larga | beta corta | beta neta (L−C) | ajustado 2018-20 | 2021-23 | 2024-hoy |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| risk | 1 | -5.7% | -8.2% | -1.52 | -15.2% | -17.6% | 0.74 | 1.27 | -0.53 | -9.1% (t -0.9) | -13.6% (t -1.4) | -1.3% (t -0.2) |
+| risk | 4 | -5.6% | -7.2% | -1.58 | -15.3% | -17.0% | 0.74 | 1.27 | -0.53 | -9.3% (t -1.1) | -11.0% (t -1.4) | -0.7% (t -0.1) |
+| risk | 12 | -5.1% | -6.1% | -1.54 | -14.6% | -15.7% | 0.74 | 1.27 | -0.53 | -10.3% (t -1.3) | -7.1% (t -1.1) | -0.1% (t -0.0) |
+| composite | 1 | +4.6% | -0.1% | -0.01 | +1.0% | -3.7% | 0.85 | 1.02 | -0.17 | +11.9% (t 0.9) | -9.0% (t -0.9) | -3.3% (t -0.3) |
+| composite | 4 | +0.2% | -2.2% | -0.45 | -3.1% | -5.5% | 0.85 | 1.02 | -0.17 | +8.7% (t 0.9) | -12.1% (t -1.5) | -3.2% (t -0.5) |
+| composite | 12 | +0.3% | -1.2% | -0.29 | -3.8% | -5.2% | 0.86 | 1.02 | -0.17 | +4.5% (t 0.5) | -6.8% (t -1.2) | -1.2% (t -0.3) |
+| technical | 1 | +7.9% | +1.1% | 0.20 | +7.4% | +0.6% | 0.93 | 0.93 | +0.01 | +7.0% (t 0.6) | -2.5% (t -0.3) | -1.3% (t -0.2) |
+| technical | 4 | +2.8% | -0.1% | -0.02 | +2.3% | -0.5% | 0.94 | 0.93 | +0.01 | +8.1% (t 0.8) | -8.0% (t -1.3) | -0.3% (t -0.1) |
+| technical | 12 | +3.3% | +1.7% | 0.45 | +2.4% | +0.8% | 0.94 | 0.93 | +0.01 | +7.8% (t 0.9) | -3.9% (t -0.8) | +1.3% (t 0.3) |
+| momentum | 1 | +8.1% | +3.4% | 0.54 | +7.5% | +2.7% | 0.98 | 0.94 | +0.04 | +12.2% (t 1.0) | -5.9% (t -0.6) | +3.8% (t 0.4) |
+| momentum | 4 | +3.6% | +1.0% | 0.20 | +3.4% | +0.7% | 0.98 | 0.95 | +0.04 | +14.3% (t 1.3) | -11.3% (t -1.5) | -0.1% (t -0.0) |
+| momentum | 12 | +2.5% | +0.9% | 0.20 | +1.2% | -0.4% | 0.99 | 0.95 | +0.04 | +11.6% (t 1.2) | -6.7% (t -1.2) | -2.6% (t -0.5) |
+| mom12_1 | 1 | +6.5% | +3.8% | 0.56 | +6.6% | +3.9% | 1.04 | 0.95 | +0.09 | +13.3% (t 1.0) | -12.7% (t -1.2) | +11.5% (t 1.2) |
+| mom12_1 | 4 | +4.7% | +3.1% | 0.58 | +5.5% | +3.9% | 1.05 | 0.95 | +0.09 | +10.9% (t 1.0) | -6.7% (t -0.9) | +5.2% (t 0.7) |
+| mom12_1 | 12 | +4.6% | +3.5% | 0.71 | +5.1% | +3.9% | 1.05 | 0.96 | +0.09 | +6.2% (t 0.6) | -0.1% (t -0.0) | +4.6% (t 0.7) |
+
+#### D. IC del riesgo-precio y del compuesto por universo: sin ajustar frente a ajustado
+
+| universo | factor | h | IC sin ajustar (t) | IC ajustado (t) |
+|---|---|---|---|---|
+| etf | risk | 1 | -0.017 (-1.11) | +0.004 (0.27) |
+| etf | risk | 4 | -0.020 (-0.84) | +0.017 (0.76) |
+| etf | risk | 12 | -0.039 (-1.05) | +0.024 (0.71) |
+| etf | composite | 1 | +0.010 (0.61) | +0.014 (0.91) |
+| etf | composite | 4 | +0.008 (0.35) | +0.013 (0.55) |
+| etf | composite | 12 | -0.014 (-0.44) | +0.008 (0.22) |
+| stock | risk | 1 | -0.012 (-0.83) | +0.011 (0.89) |
+| stock | risk | 4 | -0.032 (-1.37) | +0.008 (0.41) |
+| stock | risk | 12 | -0.042 (-1.13) | +0.027 (0.93) |
+| stock | composite | 1 | +0.014 (1.09) | +0.020 (1.60) |
+| stock | composite | 4 | +0.010 (0.50) | +0.015 (0.83) |
+| stock | composite | 12 | +0.010 (0.35) | +0.033 (1.19) |

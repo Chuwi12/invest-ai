@@ -3,6 +3,7 @@
 //! ```text
 //! cargo run --release -p learning --example backtest -- download   # 1 sola vez, ~110 peticiones a Yahoo
 //! cargo run --release -p learning --example backtest -- run        # sin red: lee el fichero congelado
+//! cargo run --release -p learning --example backtest -- posthoc    # análisis POST HOC ajustado por beta
 //! ```
 //!
 //! Datos congelados en `$BACKTEST_DATA` o `~/.cache/invest-ai/backtest/prices.json` (fuera del repo).
@@ -282,12 +283,168 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+fn mean_of(v: impl Iterator<Item = f64>) -> f64 {
+    let (s, n) = v.filter(|x| x.is_finite()).fold((0.0, 0usize), |a, x| (a.0 + x, a.1 + 1));
+    if n == 0 { f64::NAN } else { s / n as f64 }
+}
+
+/// Análisis POST HOC (declarado después de ver los resultados): exceso ajustado por beta.
+fn posthoc() -> Result<(), String> {
+    let (ds, series) = load_dataset(&data_path())?;
+    let start = day_of(NaiveDate::from_ymd_opt(2018, 1, 1).unwrap_or_default());
+    let cfg = PanelConfig { start_day: start, end_day: ds.fetched_at.div_euclid(DAY), now_s: ds.fetched_at };
+    let raw = build_panel(&series, &cfg)?;
+    let adj = raw.with_beta_adjusted_excess();
+    let u = Universe::Equity;
+    let cost = CostModel::default_for(u);
+    println!("# Análisis post hoc: exceso ajustado por beta\n");
+
+    // ---- A. Diagnóstico de la beta ----
+    let obs: Vec<&Obs> = raw
+        .weeks
+        .iter()
+        .flat_map(|w| w.obs.iter())
+        .filter(|o| u.contains(raw.assets[o.asset].group))
+        .collect();
+    let with_beta: Vec<&&Obs> = obs.iter().filter(|o| o.beta.is_some()).collect();
+    let lo = with_beta.iter().filter(|o| o.beta_clipped && o.beta == Some(0.0)).count();
+    let hi = with_beta.iter().filter(|o| o.beta_clipped && o.beta == Some(BETA_MAX)).count();
+    println!("## A. Beta (104 semanas anteriores, mín. 52, recortada a [0, 3]), universo `equity`\n");
+    println!(
+        "- Observaciones activo-semana: {}; con beta: {}; sin beta: {}.\n- Recortadas: {} a 0 ({:.2} %) y {} a 3 ({:.2} %).\n- Beta media: {:.2}; ETF {:.2}; acciones/ADR {:.2}.",
+        obs.len(),
+        with_beta.len(),
+        obs.len() - with_beta.len(),
+        lo,
+        100.0 * lo as f64 / with_beta.len().max(1) as f64,
+        hi,
+        100.0 * hi as f64 / with_beta.len().max(1) as f64,
+        mean_of(with_beta.iter().filter_map(|o| o.beta)),
+        mean_of(with_beta.iter().filter(|o| raw.assets[o.asset].group == Group::Etf).filter_map(|o| o.beta)),
+        mean_of(with_beta.iter().filter(|o| raw.assets[o.asset].group == Group::Stock).filter_map(|o| o.beta)),
+    );
+    if let Some(spy) = series.iter().find(|s| s.id.to_string() == "etf:SPY") {
+        let d0 = start;
+        let first = spy.adj.iter().find(|c| c.t.div_euclid(DAY) >= d0).map(|c| (c.t, c.c));
+        if let (Some((t0, p0)), Some(last)) = (first, spy.adj.last()) {
+            let years = (last.t - t0) as f64 / (365.25 * DAY as f64);
+            println!("- SPY (rentabilidad total) en el periodo: {:+.1} %/año.", 100.0 * ((last.c / p0).powf(1.0 / years) - 1.0));
+        }
+    }
+    println!("\nBeta media por quintil del factor de riesgo-precio (Q1 = más riesgo, Q5 = menos riesgo), por semana y promediado:\n");
+    println!("| quintil | beta media |");
+    println!("|---|---|");
+    let mut sums = [0.0f64; 5];
+    let mut cnt = [0usize; 5];
+    for w in &raw.weeks {
+        let mut c: Vec<(f64, f64)> = w
+            .obs
+            .iter()
+            .filter(|o| u.contains(raw.assets[o.asset].group))
+            .filter_map(|o| o.beta.map(|b| (o.sig[SIG_RISK], b)))
+            .collect();
+        if c.len() < u.min_n() {
+            continue;
+        }
+        c.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let n = c.len();
+        let mut tmp = ([0.0; 5], [0usize; 5]);
+        for (i, x) in c.iter().enumerate() {
+            let q = (i * 5 / n).min(4);
+            tmp.0[q] += x.1;
+            tmp.1[q] += 1;
+        }
+        for q in 0..5 {
+            sums[q] += tmp.0[q] / tmp.1[q].max(1) as f64;
+            cnt[q] += 1;
+        }
+    }
+    for q in 0..5 {
+        println!("| Q{} | {:.2} |", q + 1, sums[q] / cnt[q].max(1) as f64);
+    }
+
+    // ---- B. IC ajustado ----
+    println!("\n## B. IC de Spearman con exceso ajustado por beta, universo `equity`\n");
+    println!("| factor | h | semanas | IC medio | t (NW) | IC 95 % (NW) | 2018-20 | 2021-23 | 2024-hoy | IC sin ajustar | t sin ajustar |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|");
+    for (s, name) in SIGNALS.iter().enumerate() {
+        for (hi, h) in HORIZONS.iter().enumerate() {
+            let a = ics(&adj, u, hi, s);
+            let r = ics(&raw, u, hi, s);
+            let pa: Vec<(usize, f64)> = a.iter().map(|x| (x.0, x.2)).collect();
+            let pr: Vec<(usize, f64)> = r.iter().map(|x| (x.0, x.2)).collect();
+            let (Some(sa), Some(sr)) = (summarize(&pa, *h as usize, false), summarize(&pr, *h as usize, false)) else { continue };
+            let per: Vec<String> = (0..3)
+                .map(|k| {
+                    let v: Vec<(usize, f64)> = a.iter().filter(|x| in_period(x.1, k)).map(|x| (x.0, x.2)).collect();
+                    summarize(&v, *h as usize, false).map_or("n/d".into(), |q| format!("{} (t {:.1})", p(q.mean), q.t))
+                })
+                .collect();
+            println!(
+                "| {name} | {h} | {} | {} | {:.2} | [{}, {}] | {} | {} | {} | {} | {:.2} |",
+                sa.n, p(sa.mean), sa.t, p(sa.lo), p(sa.hi), per[0], per[1], per[2], p(sr.mean), sr.t
+            );
+        }
+    }
+
+    // ---- C. Carteras ----
+    println!("\n## C. Cartera quintil superior − inferior con exceso ajustado, universo `equity` (10 pb, 0,5 %/año)\n");
+    println!("| factor | h | bruto ajustado | neto ajustado | t neto | bruto sin ajustar | neto sin ajustar | beta larga | beta corta | beta neta (L−C) | ajustado 2018-20 | 2021-23 | 2024-hoy |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    for s in [SIG_RISK, SIG_COMPOSITE, SIG_TECHNICAL, SIG_MOMENTUM, SIG_MOM12_1] {
+        for (hi, h) in HORIZONS.iter().enumerate() {
+            let f = move |_: &Week, o: &Obs| o.sig[s];
+            let la = long_short(&adj, u, hi, &f, cost);
+            let lr = long_short(&raw, u, hi, &f, cost);
+            let col = |v: &[PortPoint], g: fn(&PortPoint) -> f64| v.iter().map(g).collect::<Vec<f64>>();
+            let turn = la.iter().map(|x| x.turnover).sum::<f64>() / la.len().max(1) as f64;
+            let (Some(ga), Some(na), Some(gr), Some(nr)) = (
+                summarize_port(&col(&la, |x| x.gross), turn, *h),
+                summarize_port(&col(&la, |x| x.net), turn, *h),
+                summarize_port(&col(&lr, |x| x.gross), turn, *h),
+                summarize_port(&col(&lr, |x| x.net), turn, *h),
+            ) else { continue };
+            let (bl, bs) = (mean_of(la.iter().map(|x| x.beta_long)), mean_of(la.iter().map(|x| x.beta_short)));
+            let per: Vec<String> = (0..3)
+                .map(|k| {
+                    let v: Vec<f64> = la.iter().filter(|x| in_period(x.day, k)).map(|x| x.net).collect();
+                    summarize_port(&v, turn, *h).map_or("n/d".into(), |q| format!("{} (t {:.1})", pc(q.ann), q.t))
+                })
+                .collect();
+            println!(
+                "| {} | {h} | {} | {} | {:.2} | {} | {} | {:.2} | {:.2} | {:+.2} | {} | {} | {} |",
+                SIGNALS[s], pc(ga.ann), pc(na.ann), na.t, pc(gr.ann), pc(nr.ann), bl, bs, bl - bs, per[0], per[1], per[2]
+            );
+        }
+    }
+
+    // ---- D. Riesgo-precio en otros universos ----
+    println!("\n## D. IC del riesgo-precio y del compuesto por universo: sin ajustar frente a ajustado\n");
+    println!("| universo | factor | h | IC sin ajustar (t) | IC ajustado (t) |");
+    println!("|---|---|---|---|---|");
+    for uu in [Universe::Etf, Universe::Stock] {
+        for s in [SIG_RISK, SIG_COMPOSITE] {
+            for (hi, h) in HORIZONS.iter().enumerate() {
+                let f = |panel: &Panel| {
+                    let v: Vec<(usize, f64)> = ics(panel, uu, hi, s).iter().map(|x| (x.0, x.2)).collect();
+                    summarize(&v, *h as usize, false)
+                };
+                if let (Some(r), Some(a)) = (f(&raw), f(&adj)) {
+                    println!("| {} | {} | {h} | {} ({:.2}) | {} ({:.2}) |", uu.name(), SIGNALS[s], p(r.mean), r.t, p(a.mean), a.t);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     let r = match std::env::args().nth(1).as_deref() {
         Some("download") => download().await,
         Some("run") => run(),
-        _ => Err("uso: backtest download | run".into()),
+        Some("posthoc") => posthoc(),
+        _ => Err("uso: backtest download | run | posthoc".into()),
     };
     if let Err(e) = r {
         eprintln!("error: {e}");

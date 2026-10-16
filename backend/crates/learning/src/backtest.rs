@@ -210,6 +210,17 @@ pub fn forward_excess(
     h: u32,
     now_s: i64,
 ) -> Option<f64> {
+    forward_returns(asset_adj, bench_adj, date_day, h, now_s).map(|(a, b)| a - b)
+}
+
+/// Rentabilidades totales futuras `(activo, benchmark)` con las mismas reglas que [`forward_excess`].
+pub fn forward_returns(
+    asset_adj: &[Candle],
+    bench_adj: &[Candle],
+    date_day: i64,
+    h: u32,
+    now_s: i64,
+) -> Option<(f64, f64)> {
     match rules::compute(
         asset_adj,
         Some(bench_adj),
@@ -217,9 +228,63 @@ pub fn forward_excess(
         h,
         now_s,
     ) {
-        Computation::Resolved(r) => Some(r.excess),
+        Computation::Resolved(r) => Some((r.asset_return, r.bench_return)),
         _ => None,
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Beta sin anticipación (análisis POST HOC, ver el documento de diseño)
+// ---------------------------------------------------------------------------------------------
+
+/// Ventana de la beta: 104 semanas anteriores (mínimo 52 rentabilidades semanales válidas).
+pub const BETA_WEEKS: usize = 104;
+pub const BETA_MIN_WEEKS: usize = 52;
+/// La beta se recorta a `[0, BETA_MAX]`.
+pub const BETA_MAX: f64 = 3.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Beta {
+    /// Beta recortada a `[0, BETA_MAX]`.
+    pub value: f64,
+    /// ¿Se recortó?
+    pub clipped: bool,
+    /// Rentabilidades semanales usadas.
+    pub n: usize,
+}
+
+/// Beta = cov/var de las rentabilidades semanales (cierre ajustado, anclas a 7 días del `date_day`
+/// hacia atrás) del activo frente al benchmark en las `BETA_WEEKS` semanas ANTERIORES a `date_day`
+/// (incluido ese cierre, nunca posteriores). `None` con menos de `BETA_MIN_WEEKS` rentabilidades
+/// válidas o benchmark sin varianza.
+pub fn beta_at(asset_adj: &[Candle], bench_adj: &[Candle], date_day: i64) -> Option<Beta> {
+    let anchors = |c: &[Candle]| -> Vec<Option<f64>> {
+        (0..=BETA_WEEKS)
+            .map(|k| close_on_or_before(c, date_day - 7 * k as i64, 5))
+            .collect()
+    };
+    let (pa, pb) = (anchors(asset_adj), anchors(bench_adj));
+    let (mut xs, mut ys) = (Vec::new(), Vec::new());
+    for k in 0..BETA_WEEKS {
+        if let (Some(a1), Some(a0), Some(b1), Some(b0)) = (pa[k], pa[k + 1], pb[k], pb[k + 1]) {
+            ys.push(a1 / a0 - 1.0);
+            xs.push(b1 / b0 - 1.0);
+        }
+    }
+    let n = xs.len();
+    if n < BETA_MIN_WEEKS {
+        return None;
+    }
+    let nf = n as f64;
+    let (mx, my) = (xs.iter().sum::<f64>() / nf, ys.iter().sum::<f64>() / nf);
+    let var: f64 = xs.iter().map(|x| (x - mx).powi(2)).sum();
+    if var <= 1e-18 {
+        return None;
+    }
+    let cov: f64 = xs.iter().zip(&ys).map(|(x, y)| (x - mx) * (y - my)).sum();
+    let raw = cov / var;
+    let value = raw.clamp(0.0, BETA_MAX);
+    Some(Beta { value, clipped: value != raw, n })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -240,6 +305,11 @@ pub struct Obs {
     pub verdict: Verdict,
     /// Exceso a 1/4/12 semanas (`None` si aún no madura o faltan datos).
     pub excess: [Option<f64>; 3],
+    /// Beta frente al benchmark con las 104 semanas anteriores (post hoc); `None` si no hay datos.
+    pub beta: Option<f64>,
+    pub beta_clipped: bool,
+    /// Exceso ajustado por beta: `r_activo − β·r_bench` (`None` sin beta).
+    pub excess_adj: [Option<f64>; 3],
 }
 
 #[derive(Debug, Clone)]
@@ -338,11 +408,23 @@ pub fn build_panel(series: &[Series], cfg: &PanelConfig) -> Result<Panel, String
         let mut obs = Vec::new();
         for (a, &(si, bi)) in refs.iter().enumerate() {
             let Some(sg) = signals_at(&series[si], d) else { continue };
-            let mut excess = [None; 3];
+            let beta = beta_at(&series[si].adj, &series[bi].adj, d);
+            let (mut excess, mut excess_adj) = ([None; 3], [None; 3]);
             for (k, h) in HORIZONS.iter().enumerate() {
-                excess[k] = forward_excess(&series[si].adj, &series[bi].adj, d, *h, cfg.now_s);
+                if let Some((ra, rb)) = forward_returns(&series[si].adj, &series[bi].adj, d, *h, cfg.now_s) {
+                    excess[k] = Some(ra - rb);
+                    excess_adj[k] = beta.map(|b| ra - b.value * rb);
+                }
             }
-            obs.push(Obs { asset: a, sig: sg.v, verdict: sg.verdict, excess });
+            obs.push(Obs {
+                asset: a,
+                sig: sg.v,
+                verdict: sg.verdict,
+                excess,
+                beta: beta.map(|b| b.value),
+                beta_clipped: beta.is_some_and(|b| b.clipped),
+                excess_adj,
+            });
         }
         Week { idx, day: d, obs }
     };
@@ -369,6 +451,20 @@ pub fn build_panel(series: &[Series], cfg: &PanelConfig) -> Result<Panel, String
     });
     weeks.sort_by_key(|w| w.idx);
     Ok(Panel { assets, weeks })
+}
+
+impl Panel {
+    /// Copia del panel cuyo `excess` es el ajustado por beta: todas las funciones de análisis
+    /// (IC, carteras, quintiles…) se reutilizan tal cual. Las observaciones sin beta pierden el exceso.
+    pub fn with_beta_adjusted_excess(&self) -> Panel {
+        let mut p = self.clone();
+        for w in &mut p.weeks {
+            for o in &mut w.obs {
+                o.excess = o.excess_adj;
+            }
+        }
+        p
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -511,6 +607,9 @@ pub struct PortPoint {
     pub long_only_net: f64,
     /// Fracción media sustituida en las dos patas (0 = nada, 1 = todo).
     pub turnover: f64,
+    /// Beta media de la pata larga y de la corta (NaN si ningún activo de la pata tiene beta).
+    pub beta_long: f64,
+    pub beta_short: f64,
 }
 
 /// Cartera largo (quintil superior) − corto (inferior) equiponderada. Cada semana abre una
@@ -560,10 +659,21 @@ pub fn long_short(
             net: ml - ms - trade - borrow,
             long_only_net: ml - c * 2.0 * fl,
             turnover: (fl + fs) / 2.0,
+            beta_long: leg_beta(w, &lset),
+            beta_short: leg_beta(w, &sset),
         });
         held.insert(w.idx, (lset, sset));
     }
     out
+}
+
+/// Beta media de una pata (activos con beta); NaN si ninguno la tiene.
+fn leg_beta(w: &Week, assets: &[usize]) -> f64 {
+    let v: Vec<f64> = assets
+        .iter()
+        .filter_map(|a| w.obs.iter().find(|o| o.asset == *a).and_then(|o| o.beta))
+        .collect();
+    if v.is_empty() { f64::NAN } else { v.iter().sum::<f64>() / v.len() as f64 }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -884,6 +994,113 @@ mod tests {
         assert!(forward_excess(&a, &b, d, 12, i64::MAX / 4).is_none());
     }
 
+    // ---- beta (post hoc) ----
+
+    /// Velas de un activo con la rentabilidad diaria `k`·(la del benchmark) + ruido, mismas fechas.
+    fn levered(bench: &[Candle], k: f64, noise: f64, seed: u64) -> Vec<Candle> {
+        let mut rng = Rng::new(seed);
+        let mut p = 100.0f64;
+        let mut prev = bench[0].c;
+        bench
+            .iter()
+            .map(|b| {
+                p *= 1.0 + k * (b.c / prev - 1.0) + noise * rng.normal();
+                prev = b.c;
+                Candle { c: p, o: p, h: p, l: p, ..*b }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn beta_recovers_a_known_value_and_clips_and_needs_history() {
+        let bench = walk(31, START, 1200, 0.0002, 0.01);
+        let d = day(bench[1000].t);
+        let a15 = levered(&bench, 1.5, 0.002, 5);
+        let b = beta_at(&a15, &bench, d).expect("beta");
+        assert!((b.value - 1.5).abs() < 0.1, "beta {} vs 1.5", b.value);
+        assert!(!b.clipped && b.n >= BETA_MIN_WEEKS);
+        // Beta negativa → se recorta a 0 y se marca.
+        let neg = levered(&bench, -1.0, 0.002, 6);
+        let b = beta_at(&neg, &bench, d).expect("beta");
+        assert!(b.value == 0.0 && b.clipped);
+        // Beta enorme → se recorta a 3.
+        let big = levered(&bench, 5.0, 0.002, 7);
+        let b = beta_at(&big, &bench, d).expect("beta");
+        assert!(b.value == BETA_MAX && b.clipped);
+        // Menos de 52 semanas de historia común → sin beta.
+        let short: Vec<Candle> = a15.iter().copied().filter(|c| day(c.t) > d - 7 * 30).collect();
+        assert!(beta_at(&short, &bench, d).is_none());
+        // Benchmark constante → sin varianza → sin beta.
+        let flat: Vec<Candle> = bench.iter().map(|c| Candle { c: 100.0, o: 100.0, h: 100.0, l: 100.0, ..*c }).collect();
+        assert!(beta_at(&a15, &flat, d).is_none());
+    }
+
+    #[test]
+    fn beta_does_not_change_when_future_candles_are_added() {
+        let bench = walk(41, START, 1200, 0.0002, 0.01);
+        let asset = levered(&bench, 1.2, 0.004, 9);
+        let d = day(bench[900].t);
+        let cut = |v: &[Candle]| v.iter().copied().filter(|c| day(c.t) <= d).collect::<Vec<_>>();
+        let poison = |v: &[Candle]| -> Vec<Candle> {
+            v.iter()
+                .map(|c| if day(c.t) > d { Candle { c: c.c * 40.0, ..*c } } else { *c })
+                .collect()
+        };
+        let a = beta_at(&cut(&asset), &cut(&bench), d).unwrap();
+        let b = beta_at(&asset, &bench, d).unwrap();
+        let c = beta_at(&poison(&asset), &poison(&bench), d).unwrap();
+        assert_eq!(a, b, "añadir velas futuras cambió la beta pasada");
+        assert_eq!(a, c, "un futuro envenenado cambió la beta pasada");
+        let later = beta_at(&asset, &bench, day(bench[1100].t)).unwrap();
+        assert_ne!(a.value, later.value);
+    }
+
+    #[test]
+    fn adjusted_excess_subtracts_beta_times_the_benchmark_return() {
+        let d = (START..START + 7).find(|x| x.rem_euclid(7) == 1).unwrap();
+        let mk = |closes: &[(i64, f64)]| -> Vec<Candle> {
+            closes
+                .iter()
+                .map(|&(dd, c)| Candle { t: dd * DAY + 14 * 3600, o: c, h: c, l: c, c, v: None })
+                .collect()
+        };
+        // Entrada el lunes d+3; salida a una semana: activo 100 → 110, benchmark 50 → 52,5.
+        let a = mk(&[(d, 90.0), (d + 3, 100.0), (d + 10, 110.0)]);
+        let b = mk(&[(d, 49.0), (d + 3, 50.0), (d + 10, 52.5)]);
+        let (ra, rb) = forward_returns(&a, &b, d, 1, i64::MAX / 4).unwrap();
+        assert!((ra - 0.10).abs() < 1e-12 && (rb - 0.05).abs() < 1e-12);
+        let beta = 1.5;
+        assert!((ra - beta * rb - 0.025).abs() < 1e-12);
+        // forward_excess sigue siendo activo − benchmark.
+        assert!((forward_excess(&a, &b, d, 1, i64::MAX / 4).unwrap() - 0.05).abs() < 1e-12);
+    }
+
+    #[test]
+    fn beta_adjusted_panel_swaps_the_excess_and_reports_leg_betas() {
+        let s = small_panel_series();
+        let cfg = PanelConfig { start_day: START + 450, end_day: START + 1500, now_s: (START + 2100) * DAY };
+        let p = build_panel(&s, &cfg).unwrap();
+        let adj = p.with_beta_adjusted_excess();
+        let mut n_beta = 0;
+        for (w, wa) in p.weeks.iter().zip(&adj.weeks) {
+            for (o, oa) in w.obs.iter().zip(&wa.obs) {
+                assert_eq!(oa.excess, o.excess_adj);
+                if let Some(b) = o.beta {
+                    n_beta += 1;
+                    assert!((0.0..=BETA_MAX).contains(&b));
+                }
+            }
+        }
+        assert!(n_beta > 100, "debe haber betas");
+        // Las betas de las patas son medias de betas recortadas.
+        let cost = CostModel::default_for(Universe::Equity);
+        let pts = long_short(&adj, Universe::Equity, 1, &|_, o| o.sig[SIG_RISK], cost);
+        assert!(!pts.is_empty());
+        for x in &pts {
+            assert!((0.0..=BETA_MAX).contains(&x.beta_long) && (0.0..=BETA_MAX).contains(&x.beta_short));
+        }
+    }
+
     // ---- reproducibilidad ----
 
     fn small_panel_series() -> Vec<Series> {
@@ -948,6 +1165,9 @@ mod tests {
                             sig: [0.0, 0.0, 0.0, z, 0.0],
                             verdict: Verdict::Hold,
                             excess: [None, Some(e), None],
+                            beta: None,
+                            beta_clipped: false,
+                            excess_adj: [None; 3],
                         }
                     })
                     .collect(),
@@ -1053,6 +1273,9 @@ mod tests {
             sig: [0.0; 5],
             verdict: v,
             excess: [None, Some(e), None],
+            beta: None,
+            beta_clipped: false,
+            excess_adj: [None; 3],
         };
         let obs = vec![
             mk(0, Verdict::Buy, 0.05),
