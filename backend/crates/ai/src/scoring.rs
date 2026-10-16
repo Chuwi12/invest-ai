@@ -1098,6 +1098,12 @@ fn component_names(l: Lang) -> [&'static str; 7] {
     ]
 }
 
+/// `score` en inglés, para quien no puede nombrar `Lang` (módulo privado), p. ej. el backtest de
+/// `learning`. Mismo cálculo; solo cambia el idioma de las razones.
+pub fn score_en(snapshot: &AssetSnapshot) -> Scorecard {
+    score(snapshot, Lang::En)
+}
+
 /// Puntúa un snapshot. Pura y barata (microsegundos).
 pub fn score(snapshot: &AssetSnapshot, lang: Lang) -> Scorecard {
     let class = snapshot.summary.class;

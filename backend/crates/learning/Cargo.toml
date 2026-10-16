@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 domain = { path = "../domain" }
 ai = { path = "../ai" }
+market = { path = "../market" }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -18,5 +19,4 @@ sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runti
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 async-trait = "0.1"
-market = { path = "../market" }
 

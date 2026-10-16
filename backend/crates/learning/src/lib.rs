@@ -2,6 +2,7 @@
 //! confianza, pesos de la puntuación aprendidos con puerta de validación y datos del panel de
 //! rendimiento. No reentrena el LLM. Ver `docs/notes/learning.md`.
 
+pub mod backtest;
 pub mod calibration;
 pub mod report;
 pub mod resolve;
