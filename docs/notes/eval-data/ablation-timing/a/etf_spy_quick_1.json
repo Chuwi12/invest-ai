@@ -1,0 +1,193 @@
+{
+  "analysis": {
+    "asset": "etf:SPY",
+    "bearCase": [
+      "El sentimiento negativo sugiere riesgos."
+    ],
+    "bullCase": [
+      "La tendencia alcista fuerte [Técnico: 90] apoya la compra. (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 728,
+    "confidence": 0.6899999976158142,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 16275,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T11:11:55.888654034Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a14469-53f0-7360-89c8-28fffcda7e5b",
+    "keyLevels": {
+      "entryZone": [
+        768.5679968261719,
+        769.6
+      ],
+      "resistances": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ],
+      "stopLoss": 762.1355791363812,
+      "supports": [
+        768.5679968261719,
+        762.0399780273438,
+        755.7228567940848,
+        733.3800048828125
+      ],
+      "targets": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ]
+    },
+    "levelsNote": "Zona de entrada 768,57 – 769,6 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 762,14 = SMA50 768,57 − 1×ATR14 6,4324 (Yahoo Finance, 14 oct 2026). Objetivos: 770,65 = SMA20; 777,66 = resistencia; 781,62 = máximo de 52 semanas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.2 (entrada en el punto medio de la zona, 769,08).",
+    "llmCalls": 3,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 3 llamadas, 5880 tokens de entrada y 728 de salida, 16 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 0.84,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 0.9,
+      "volatility30d": 0.10135132749641854
+    },
+    "priceAtAnalysis": 769.6,
+    "promptTokens": 5880,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «tesis»: 12.34"
+    ],
+    "risks": [
+      "La caída máxima a 1 año [9.1%] es un riesgo. [N10] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El sentimiento negativo aumenta la incertidumbre.",
+      "El VIX [15.3] sugiere calma, pero podría cambiar. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 60.79999923706055,
+      "overall": 61.79999923706055,
+      "risk": 14.100000381469727,
+      "sentiment": 44.400001525878906,
+      "technical": 65.5,
+      "valuation": 50.70000076293945
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:00Z",
+        "title": "Cotización etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:41:32Z",
+        "title": "Ondas Retreats 6% Despite Regna AI Launch With Palantir; AeroVironment Drops 3%, Kratos Slips",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/ondas-retreats-6-despite-regna-164132147.html"
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:19.119856148Z",
+        "title": "Fundamentales etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:22.709947687Z",
+        "title": "Puntuación cuantitativa determinista etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:35:58Z",
+        "title": "Applied Optoelectronics Dives 9% as AI Funding Fears Hit Optical Stocks; Coherent Slides 7%, Lumentum Drops 7%",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/applied-optoelectronics-dives-9-ai-163558871.html"
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T18:06:43Z",
+        "title": "Walmart Advances 3% as Inflation Data Sends Money Into Defensives; Costco and Target Edge Higher",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/walmart-advances-3-inflation-data-180643511.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:45:18Z",
+        "title": "Taiwan Semiconductor’s Top Line Growth is Starting to Raise Eyebrows",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/taiwan-semiconductor-top-line-growth-164518154.html"
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+    "summary": "Accumular. Tendencia alcista fuerte (90) y PER razonable (24.43).",
+    "thesis": "El PER razonable (24.43) y el BPA de $14.56 (no disponible) indican una valoración justa. El flujo de caja libre de $12.34⚠ (no disponible) cubre el dividendo. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nLa tendencia alcista fuerte (90) y el RSI14 en zona neutra (49.6) indican un mercado estable. El MACD alcista (0.31) apoya la compra. El soporte (762.04) es sólido. [N5] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nEl PER razonable (24.43) y el sentimiento negativo equilibran la decisión. La tendencia alcista fuerte (90) y el ATR14 bajo (0.8%) apoyan la acumulación. El VIX (15.3) y la caída máxima a 1 año (9.1%) son consideraciones importantes. [N8] (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nIncertidumbre: Los datos faltantes y el sentimiento negativo introducen incertidumbre.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el PER se eleva a 30, la valoración podría parecer excesiva.",
+      "Si el sentimiento se vuelve más negativo, podría cambiar."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 728,
+      "confidence": 0.6899999976158142,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 11,
+      "figuresAllTotal": 18,
+      "figuresThesisDistinct": 10,
+      "figuresThesisTotal": 12,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 16,
+      "llmCalls": 3,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 5880,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 11,
+      "thesisNotInData": 1,
+      "thesisUnlabeledOk": 0,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 1,
+      "unverifiedNotes": 1,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 16.277466479,
+    "wordingFixCalls": 0
+  }
+}

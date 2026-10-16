@@ -1,0 +1,192 @@
+{
+  "analysis": {
+    "asset": "etf:SPY",
+    "bearCase": [
+      "El PER de 24.43 es alto, lo que sugiere que el precio está sobrevalorado. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El rendimiento del bono a 2 años (4.79%) está cerca del tipo de interés federal efectivo (3.88%), lo que podría reducir la atracción de este ETF. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)",
+      "El sentimiento del mercado es mixto con 15 noticias recientes, 4 positivas y 5 negativas. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)"
+    ],
+    "bullCase": [
+      "La tendencia alcista es fuerte, con la SMA20 y SMA50 superando al precio.",
+      "El precio está +6.3% respecto a la SMA200, lo que indica fortaleza. [N9]",
+      "El RSI14 de 49.6 se encuentra en zona neutra, sin signos de sobrecompra o sobreventa. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 2548,
+    "confidence": 0.6100000143051147,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 54674,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T07:18:35.826899970Z",
+    "horizon": "medium",
+    "horizonNote": "El entorno volátil y el rendimiento del bono a 2 años cercano al tipo de interés federal efectivo sugieren un horizonte de medio plazo.",
+    "id": "01a14393-b432-71e9-a8ad-b7df060b422d",
+    "keyLevels": {
+      "entryZone": [
+        768.5679968261719,
+        769.6
+      ],
+      "resistances": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ],
+      "stopLoss": 762.1355791363812,
+      "supports": [
+        768.5679968261719,
+        762.0399780273438,
+        755.7228567940848,
+        733.3800048828125
+      ],
+      "targets": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ]
+    },
+    "levelsNote": "Zona de entrada 768,57 – 769,6 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 762,14 = SMA50 768,57 − 1×ATR14 6,4324 (Yahoo Finance, 14 oct 2026). Objetivos: 770,65 = SMA20; 777,66 = resistencia; 781,62 = máximo de 52 semanas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.2 (entrada en el punto medio de la zona, 769,08).",
+    "llmCalls": 6,
+    "method": "Modelo qwen2.5:7b, profundidad standard, 6 llamadas, 13486 tokens de entrada y 2548 de salida, 55 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 0.84,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 0.9,
+      "volatility30d": 0.10135132749641854
+    },
+    "priceAtAnalysis": 769.6,
+    "promptTokens": 13486,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 20",
+      "La tesis sigue siendo poco específica tras un reintento: se redujo la confianza."
+    ],
+    "risks": [],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 60.79999923706055,
+      "overall": 61.79999923706055,
+      "risk": 14.100000381469727,
+      "sentiment": 44.400001525878906,
+      "technical": 65.5,
+      "valuation": 50.70000076293945
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:00Z",
+        "title": "Cotización etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:22.709947687Z",
+        "title": "Niveles de entrada, stop y objetivos calculados etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:41:32Z",
+        "title": "Ondas Retreats 6% Despite Regna AI Launch With Palantir; AeroVironment Drops 3%, Kratos Slips",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/ondas-retreats-6-despite-regna-164132147.html"
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:19.119856148Z",
+        "title": "Fundamentales etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T17:57:55Z",
+        "title": "Unity Software Sinks 10% Despite Wedbush Target Hike on Vector Ad Platform; AppLovin Falls 3%, Trade Desk Slips",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/unity-software-sinks-10-despite-175755690.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:47:49Z",
+        "title": "Affirm Falls 10% as Inflation Print Lifts Yields; Klarna Drops 3%, PayPal Barely Budges",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/affirm-falls-10-inflation-print-164749757.html"
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Comprar en el rango de entrada de 768.57 a 769.6, con stop en 762.14 y objetivos en 770.65, 777.66 y 781.62.\nSalida: Vender si el precio cae por debajo del stop en 762.14.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular en tramos (confianza 0.68) debido a la fortaleza de la tendencia alcista y el precio +6.3% respecto a la SMA200, aunque el PER de 24.43 es alto y el rendimiento del bono a 2 años está cerca del tipo de interés federal efectivo.",
+    "thesis": "El PER de 24.43 es alto, lo que sugiere que el precio está sobrevalorado. El rendimiento del bono a 2 años (4.79%) está cerca del tipo de interés federal efectivo (3.88%), lo que podría reducir la atracción de este ETF. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)\n\nLa tendencia alcista es fuerte, con la SMA20 y SMA50 superando al precio, y el precio +6.3% respecto a la SMA200. El RSI14 de 49.6 se encuentra en zona neutra, sin signos de sobrecompra o sobreventa. [N9] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nEl valoración (PER de 24.43) y el rendimiento del bono a 2 años (4.79%) sugieren que el precio está sobrevalorado, pero el precio +6.3% respecto a la SMA200 y el RSI14 en zona neutra indican fortaleza. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)\n\nIncertidumbre: El sentimiento del mercado es mixto con 15 noticias recientes, 4 positivas y 5 negativas, lo que añade incertidumbre al análisis.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 se sitúa por encima de 70, lo que indica sobrecompra.",
+      "Si el precio cierra por debajo del stop en 762.14.",
+      "Si el PER baja por debajo de 20⚠."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2548,
+      "confidence": 0.6100000143051147,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 14,
+      "figuresAllTotal": 27,
+      "figuresThesisDistinct": 6,
+      "figuresThesisTotal": 9,
+      "genericThesisPenalty": true,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 14,
+      "llmCalls": 6,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 13486,
+      "qualityNotesCount": 2,
+      "thesisLabeledOk": 5,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 4,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 12,
+      "unverifiedNotes": 1,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO tesis genérica: se pide reescribirla figures=5 boilerplate=1",
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=3"
+    ],
+    "genericThesisRetries": 1,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 54.676074553,
+    "wordingFixCalls": 0
+  }
+}

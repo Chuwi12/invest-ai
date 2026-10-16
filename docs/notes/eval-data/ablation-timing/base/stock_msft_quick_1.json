@@ -1,0 +1,188 @@
+{
+  "analysis": {
+    "asset": "stock:MSFT",
+    "bearCase": [
+      "El RSI14 se encuentra en 62.4, en zona neutra, lo que podría indicar una corrección en el corto plazo. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El precio objetivo medio de los analistas es de 590.28, un 10.6% superior al precio actual, lo que sugiere que el potencial de subida es limitado. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La caída máxima a 1 año es del 34.9%, lo que podría indicar que el riesgo de una corrección importante es significativo. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "bullCase": [
+      "La tendencia alcista es fuerte, con la SMA20 en 516.37 y la SMA50 en 503.91. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El precio ha subido 22.7% respecto a la SMA200, lo que sugiere un sólido crecimiento a largo plazo. (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)",
+      "El margen operativo es del 45.1%, lo que indica una alta eficiencia en la generación de beneficios. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 1672,
+    "confidence": 0.7400000095367432,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 36027,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T11:03:18.552715629Z",
+    "horizon": "medium",
+    "horizonNote": "La volatilidad 30d anualizada de 22.6% y la beta de 1.1 indican un nivel moderado de riesgo en el horizonte medio.",
+    "id": "01a14461-6f18-7048-9df6-61374144c229",
+    "keyLevels": {
+      "entryZone": [
+        522.1318105669318,
+        533.69
+      ],
+      "resistances": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527,
+        870.0
+      ],
+      "stopLoss": 504.81431117728334,
+      "supports": [
+        516.3725006103516,
+        503.90899963378905,
+        493.5,
+        489.6375045776367
+      ],
+      "targets": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527
+      ]
+    },
+    "levelsNote": "Zona de entrada 522,13 – 533,69 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 504,81 = SMA20 516,37 − 1×ATR14 11,56 (Yahoo Finance, 14 oct 2026). Objetivos: 546,68 = banda de Bollinger superior; 553,72 = resistencia; 590,28 = precio objetivo medio de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.8 (entrada en el punto medio de la zona, 527,91).",
+    "llmCalls": 3,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 3 llamadas, 7240 tokens de entrada y 1672 de salida, 36 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.17,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 4.4,
+      "volatility30d": 0.22580403329215804
+    },
+    "priceAtAnalysis": 533.69,
+    "promptTokens": 7240,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «resumen»: 76"
+    ],
+    "risks": [
+      "La volatilidad 30d anualizada de 22.6% y la beta de 1.1 indican un nivel moderado de riesgo en el horizonte medio. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 73.9000015258789,
+      "macroScore": 58.400001525878906,
+      "momentum": 66.80000305175781,
+      "overall": 63.0,
+      "risk": 41.099998474121094,
+      "sentiment": 68.4000015258789,
+      "technical": 69.5,
+      "valuation": 45.29999923706055
+    },
+    "sources": [
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.982381547Z",
+        "title": "Fundamentales stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Puntuación cuantitativa determinista stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "Simply Wall St.",
+        "publishedAt": "2026-10-14T20:14:33Z",
+        "title": "Should Honeywell’s AI Push and Kenya Megarefinery Win Require Action From Honeywell International (HON) Investors?",
+        "url": "https://finance.yahoo.com/technology/ai/articles/honeywell-ai-push-kenya-megarefinery-201433873.html"
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:MSFT",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Comprar en el rango de entrada de 522.13 – 533.69, con stop en 504.81 y objetivos en 546.68, 553.72 y 590.28.\nSalida: Sellar si el precio cae por debajo del stop en 504.81.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular en Microsoft (MSFT) con una confianza del 76%⚠. El precio de 533.69 USD y el RSI14 en 62.4, en zona neutra, son los dos factores más fuertes detrás de esta decisión.",
+    "thesis": "El PER forward de 22.54 y el P/E del año anterior de 30.07 son razonables para el sector de tecnología. El margen operativo del 45.1% y el margen neto del 40.3% indican una alta eficiencia en la generación de beneficios. La rentabilidad por FCF del 0.4% y el margen de FCF del 5.0% sugieren un sólido flujo de caja libre [N10]. [N2] (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)\n\nLa tendencia alcista es fuerte, con la SMA20 en 516.37 y la SMA50 en 503.91, lo que indica un sólido crecimiento a largo plazo. El precio ha subido 22.7% respecto a la SMA200, lo que sugiere un sólido crecimiento a largo plazo. El ATR14 de 2.2% del precio (rango diario típico) indica una volatilidad moderada. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nEl precio de 533.69 USD y el RSI14 en 62.4, en zona neutra, sugieren una corrección potencial en el corto plazo, pero la tendencia alcista fuerte, con la SMA20 en 516.37 y la SMA50 en 503.91, y el margen operativo del 45.1% apuntan a un buen valor a largo plazo. El precio objetivo medio de 590.28 y la caída máxima a 1 año del 34.9% indican un potencial de subida limitado, pero la capitalización bursátil de 3.96T y el margen de FCF del 5.0% sugieren un sólido fundamentales. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nIncertidumbre: El RSI14 en 62.4, en zona neutra, y la caída máxima a 1 año del 34.9% introducen cierta incertidumbre en la decisión.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 sube por encima de 70, podría indicar una sobrecompra y cambiaría la decisión a reducir.",
+      "Si el precio cierra por debajo del stop en 504.81, se vendería.",
+      "Si la caída máxima a 1 año supera el 34.9%, se reduciría la exposición."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1672,
+      "confidence": 0.7400000095367432,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 23,
+      "figuresAllTotal": 45,
+      "figuresThesisDistinct": 15,
+      "figuresThesisTotal": 21,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 36,
+      "llmCalls": 3,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 63.0,
+      "promptTokens": 7240,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 19,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 2,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 8,
+      "unverifiedNotes": 1,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=2",
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=2"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 36.029746337,
+    "wordingFixCalls": 1
+  }
+}

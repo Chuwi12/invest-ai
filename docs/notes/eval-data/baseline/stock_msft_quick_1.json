@@ -1,0 +1,175 @@
+{
+  "analysis": {
+    "asset": "stock:MSFT",
+    "bearCase": [
+      "El PER forward de 22.54 es alto para un sector tecnológico, lo que podría indicar un potencial de caída del precio (22.54). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El ratio de liquidez corriente de 1.23 es bajo, lo que podría indicar problemas de liquidez (1.23). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "El PER forward de 22.54 es razonable para un sector tecnológico, lo que sugiere valor (22.54). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El margen operativo del 45.1% es alto, lo que indica eficiencia en la gestión (45.1%). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El crecimiento de beneficios del 31.7% es fuerte, lo que sugiere potencial de crecimiento (31.7%). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": null,
+        "description": "Fecha de resultados trimestrales: 2026-11-15⚠",
+        "impact": null
+      }
+    ],
+    "completionTokens": 1434,
+    "confidence": 0.7099999785423279,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 69145,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-14T21:02:00.132091775Z",
+    "horizon": "medium",
+    "horizonNote": "La volatilidad 30d anualizada de 22.6% y el crecimiento de beneficios del 31.7% sugieren un horizonte de inversión a medio plazo.",
+    "id": "01a13c38-d5c4-75fe-85e4-2024c5ce38d1",
+    "keyLevels": {
+      "entryZone": [
+        522.1318105669318,
+        533.69
+      ],
+      "resistances": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527,
+        870.0
+      ],
+      "stopLoss": 504.81431117728334,
+      "supports": [
+        516.3725006103516,
+        503.90899963378905,
+        493.5,
+        489.6375045776367
+      ],
+      "targets": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527
+      ]
+    },
+    "levelsNote": "Zona de entrada 522,13 – 533,69 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 504,81 = SMA20 516,37 − 1×ATR14 11,56 (Yahoo Finance, 14 oct 2026). Objetivos: 546,68 = banda de Bollinger superior; 553,72 = resistencia; 590,28 = precio objetivo medio de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.8 (entrada en el punto medio de la zona, 527,91).",
+    "llmCalls": 3,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 3 llamadas, 7157 tokens de entrada y 1434 de salida, 69 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.17,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 4.4,
+      "volatility30d": 0.22580403329215804
+    },
+    "priceAtAnalysis": 533.69,
+    "promptTokens": 7157,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (34.9 (en los datos es «Caída máxima», no «volatilidad»)): «La caída máxima a 1 año del 34.9% es significativa, lo que sugiere riesgos de…»",
+      "Fechas que no figuran en los datos (marcadas con ⚠) en «catalizador»: 2026-11-15",
+      "Se quitó la fecha de 1 catalizador(es): no figura en los datos."
+    ],
+    "risks": [],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 73.9000015258789,
+      "macroScore": 58.400001525878906,
+      "momentum": 66.80000305175781,
+      "overall": 63.0,
+      "risk": 41.099998474121094,
+      "sentiment": 68.4000015258789,
+      "technical": 69.5,
+      "valuation": 45.29999923706055
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.982381547Z",
+        "title": "Fundamentales stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:MSFT",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Comprar en el rango de entrada de 522.13 – 533.69, con stop en 504.81 y objetivos en 546.68, 553.72 y 590.28.\nSalida: Invalidar la entrada si el precio cae por debajo del stop en 504.81.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular en Microsoft (MSFT) debido a su PER forward razonable y fuerte crecimiento de beneficios. La tendencia alcista y el precio objetivo de 590.28 son factores adicionales a favor.",
+    "thesis": "El PER forward de 22.54 es razonable para un sector tecnológico. El margen operativo del 45.1% y el crecimiento de beneficios del 31.7% son indicadores sólidos. Sin embargo, el PER forward alto y la caída máxima a 1 año del 34.9% son preocupantes. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa tendencia alcista fuerte y el precio +22.7% respecto a la SMA200 (434.78) son indicadores positivos. El RSI14 de 62.4 en zona neutra y el MACD histograma 1.5 (alcista) son factores adicionales a favor. El ATR14 de 2.2% del precio sugiere volatilidad moderada. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa valoración y fundamentales son sólidos, con un PER forward de 22.54 y un margen operativo del 45.1%. La tendencia alcista y el precio objetivo de 590.28 son factores adicionales a favor. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nIncertidumbre: Los datos están actualizados y los indicadores son sólidos, pero el PER forward alto y la caída máxima a 1 año del 34.9% son factores de incertidumbre.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 se mueve por encima de 70, lo que podría indicar sobrecompra (70).",
+      "Si el precio cierra por debajo del stop en 504.81, lo que podría indicar una corrección (504.81).",
+      "Si los resultados trimestrales son decepcionantes, lo que podría indicar una caída en el precio (522.13)."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1434,
+      "confidence": 0.7099999785423279,
+      "droppedClaims": 1,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 1,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 1,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 18,
+      "figuresAllTotal": 37,
+      "figuresThesisDistinct": 10,
+      "figuresThesisTotal": 13,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 2,
+      "labeledOk": 24,
+      "llmCalls": 3,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 63.0,
+      "promptTokens": 7157,
+      "qualityNotesCount": 3,
+      "thesisLabeledOk": 12,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 1,
+      "unlabeledOk": 13,
+      "unverifiedNotes": 1,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=2",
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=2"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 69.146848632,
+    "wordingFixCalls": 1
+  }
+}

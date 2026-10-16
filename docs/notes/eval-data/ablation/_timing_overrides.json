@@ -1,0 +1,6 @@
+{
+ "invalidSince": "2026-10-15T15:20:00+02:00",
+ "reason": "gpu_shared_beelzebub",
+ "appliesToRecordsWithoutField": "gpuForeign",
+ "note": "Desde ~15:20 el proceso ajeno PID 26943 (beelzebub, torch, ~1 GB VRAM) compartio la GPU; los registros de _env.jsonl anteriores a que se anadiera gpuForeign se invalidan para tiempos. La calidad sigue valiendo."
+}

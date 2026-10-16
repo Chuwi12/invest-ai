@@ -1,0 +1,167 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El RSI14 se sitúa en 47.1, en zona neutra, lo que sugiere que el mercado no está sobrecalentado ni sobreventa (70). (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El sentimiento negativo, con 6 noticias negativas vs 0 positivas, podría presionar el precio (35). (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "La tendencia alcista fuerte, con la SMA20 -2.5% y la SMA50 +0.7%, podría continuar (90).",
+      "El precio está 13.2% por encima de la SMA200 (72243.67), lo que sugiere un fuerte apoyo (72). (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El MACD histograma -554.2 (bajista) podría revertir a favor del precio (31). (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 1386,
+    "confidence": 0.5899999737739563,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 29778,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T07:32:17.422381883Z",
+    "horizon": "medium",
+    "horizonNote": "La volatilidad 30d anualizada de 39.4% y la caída máxima a 1 año de 48.8% sugieren un horizonte de medio plazo.",
+    "id": "01a143a0-3d8e-7326-bf79-70a7466bb2d4",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 2,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 2 llamadas, 6385 tokens de entrada y 1386 de salida, 30 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 6385,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (52.8): «El precio está a 29.7% del máximo de 52 semanas (86410.63), lo que podría indicar una…»",
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (52.8): «El precio está a 29.7% del máximo de 52 semanas, lo que podría indicar una corrección…»"
+    ],
+    "risks": [],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Puntuación cuantitativa determinista crypto:BTC",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Comprar en el rango de entrada 81295.91 – 81782.31, con stop en 79086.54 y objetivos en 82850, 83853.27 y 86410.63.\nSalida: Vender si el precio cae a 79086.54, el stop, o si se rompe el soporte 79939.61 (-2.3%).\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "Se mantiene la posición en Bitcoin, con una puntuación global de 54.7/100. El precio está 13.2% por encima de la SMA200 (72243.67) y 1.3% por debajo de la resistencia 82850, lo que sugiere un fuerte apoyo y una posible corrección alcista (72, 90, 82850).",
+    "thesis": "El precio está al 64.9% de su máximo histórico (126080), lo que sugiere que el valor está razonable (55). La FDV / market cap = 1.00x (dilución futura) podría ser un factor neutral (85). (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC)\n\nLa tendencia alcista fuerte, con la SMA20 -2.5% y la SMA50 +0.7%, podría continuar (90). El MACD histograma -554.2 (bajista) podría revertir a favor del precio (31). La SMA50 sobre la SMA200 (+12.4%): cruz dorada, podría ser un fuerte soporte (78). (fuente: indicadores técnicos 2026-10-14 00:00 UTC)\n\nEl precio está 13.2% por encima de la SMA200 (72243.67), lo que sugiere un fuerte apoyo (72). El RSI14 se sitúa en 47.1, en zona neutra, lo que sugiere que el mercado no está sobrecalentado ni sobreventa (70). (fuente: indicadores técnicos 2026-10-14 00:00 UTC)\n\nIncertidumbre: El veredicto es provisional y depende de factores como el sentimiento negativo y el RSI14 en zona neutra.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "Si el RSI14 sube a 70, podría indicar una corrección (70).",
+      "Si el precio cae a 79086.54, el stop, podría indicar una caída importante (48.8%).",
+      "Si se publican resultados trimestrales negativos, podría afectar el sentimiento (35)."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1386,
+      "confidence": 0.5899999737739563,
+      "droppedClaims": 2,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 2,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 2,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 31,
+      "figuresAllTotal": 52,
+      "figuresThesisDistinct": 17,
+      "figuresThesisTotal": 17,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 2,
+      "labeledOk": 23,
+      "llmCalls": 2,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 6385,
+      "qualityNotesCount": 2,
+      "thesisLabeledOk": 9,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 8,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 29,
+      "unverifiedNotes": 0,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=2"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 29.779945227,
+    "wordingFixCalls": 0
+  }
+}

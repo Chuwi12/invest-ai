@@ -1,0 +1,176 @@
+{
+  "analysis": {
+    "asset": "stock:AAPL",
+    "bearCase": [
+      "El PER 35.76 y el P/S 10.72 son altos, lo que podría indicar sobrevaloración. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "El crecimiento de ingresos del 16.4% y el margen operativo del 32.6% son sólidos. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 747,
+    "confidence": 0.7699999809265137,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 17022,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T10:58:28.853375821Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a1445d-0375-7381-a1f5-f423e5a736d4",
+    "keyLevels": {
+      "entryZone": [
+        336.80750274658203,
+        342.96
+      ],
+      "resistances": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ],
+      "stopLoss": 330.13080444827784,
+      "supports": [
+        336.80750274658203,
+        334.989990234375,
+        329.4581021780075,
+        325.80999755859375
+      ],
+      "targets": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ]
+    },
+    "levelsNote": "Zona de entrada 336,81 – 342,96 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 330,13 = SMA20 336,81 − 1×ATR14 6,6767 (Yahoo Finance, 14 oct 2026). Objetivos: 344,16 = banda de Bollinger superior; 348,15 = máximo de 52 semanas; 405 = precio objetivo máximo de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.4 (entrada en el punto medio de la zona, 339,88).",
+    "llmCalls": 3,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 3 llamadas, 6799 tokens de entrada y 747 de salida, 17 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 1.95,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 2.9,
+      "volatility30d": 0.19883421620277855
+    },
+    "priceAtAnalysis": 342.96,
+    "promptTokens": 6799,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 20 (en los datos es «Volatilidad 30d (anualizada) / Volatilidad», no «caída máxima»)"
+    ],
+    "risks": [
+      "La caída máxima a 1 año del 13.8% podría ser un riesgo. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El VIX en 15.3 podría subir, afectando la volatilidad. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)",
+      "La noticia sobre lanzamiento de características AI en China podría ser negativa."
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 77.19999694824219,
+      "macroScore": 58.400001525878906,
+      "momentum": 69.9000015258789,
+      "overall": 61.79999923706055,
+      "risk": 30.700000762939453,
+      "sentiment": 57.0,
+      "technical": 65.9000015258789,
+      "valuation": 34.900001525878906
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:15.894470797Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.866245838Z",
+        "title": "Fundamentales stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+    "summary": "Accumular. Tendencia alcista fuerte (90) y RSI14 62.1 (neutra).",
+    "thesis": "El PER 35.76 y el P/S 10.72 son altos (exigentes), pero el margen operativo del 32.6% es sólido (85). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nTendencia alcista fuerte (90) y RSI14 62.1 (neutra) indican un mercado en zona neutra. El ATR14 de 1.9% del precio (rango diario típico) es bajo (37). (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nEl crecimiento de ingresos del 16.4% y el margen operativo del 32.6% son sólidos (85). La caída máxima a 1 año del 13.8% podría ser un riesgo (28). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nIncertidumbre: El RSI14 en 62.1 es neutro, pero la caída máxima a 1 año del 13.8% podría ser un riesgo.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el PER supera 40, podría indicar sobrevaloración.",
+      "Si la caída máxima a 1 año supera 20%⚠, podría ser un riesgo."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 747,
+      "confidence": 0.7699999809265137,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 14,
+      "figuresAllTotal": 25,
+      "figuresThesisDistinct": 11,
+      "figuresThesisTotal": 15,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 20,
+      "llmCalls": 3,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 6799,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 11,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 4,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 4,
+      "unverifiedNotes": 1,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 1,
+      "wrongLabelExamples": [
+        {
+          "actual": "Volatilidad 30d (anualizada) / Volatilidad",
+          "figure": "20",
+          "said": "caída máxima",
+          "snippet": "Si la caída máxima a 1 año supera 20%, podría ser un riesgo."
+        }
+      ]
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 17.023625556,
+    "wordingFixCalls": 0
+  }
+}

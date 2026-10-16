@@ -1,0 +1,180 @@
+{
+  "analysis": {
+    "asset": "stock:AAPL",
+    "bearCase": [
+      "El RSI14 de 62.1 se encuentra en una zona neutra, lo que podría indicar que el momentum está en un punto de equilibrio y podría cambiar de dirección en cualquier momento. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El precio objetivo promedio de 329.38 USD sugiere que hay espacio para una caída del 4.0%. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)",
+      "La caída máxima a 1 año del 13.8% podría indicar que el mercado está preparado para una corrección. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "El precio de 342.96 USD está por encima de la SMA200 de 291.77 USD, lo que sugiere una tendencia alcista. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El rendimiento a 1 año del 38.4% indica un rendimiento sólido en el largo plazo. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El ROE de 148.8% y el margen operativo del 32.6% indican una alta rentabilidad y eficiencia en la gestión de la empresa. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 1670,
+    "confidence": 0.7900000214576721,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 43442,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-15T13:46:03.345349006Z",
+    "horizon": "medium",
+    "horizonNote": "La volatilidad 30d anualizada de 19.9% y la caída máxima a 1 año del 13.8% indican un nivel moderado de riesgo y posibles correcciones en el medio plazo.",
+    "id": "01a13fd0-12d1-709a-adb1-7292959a6b0c",
+    "keyLevels": {
+      "entryZone": [
+        336.80750274658203,
+        342.96
+      ],
+      "resistances": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ],
+      "stopLoss": 330.13080444827784,
+      "supports": [
+        336.80750274658203,
+        334.989990234375,
+        329.4581021780075,
+        325.80999755859375
+      ],
+      "targets": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ]
+    },
+    "levelsNote": "Zona de entrada 336,81 – 342,96 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 330,13 = SMA20 336,81 − 1×ATR14 6,6767 (Yahoo Finance, 14 oct 2026). Objetivos: 344,16 = banda de Bollinger superior; 348,15 = máximo de 52 semanas; 405 = precio objetivo máximo de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.4 (entrada en el punto medio de la zona, 339,88).",
+    "llmCalls": 6,
+    "method": "Modelo qwen2.5:7b, profundidad standard, 6 llamadas, 10119 tokens de entrada y 1670 de salida, 43 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 1.95,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 2.9,
+      "volatility30d": 0.19883421620277855
+    },
+    "priceAtAnalysis": 342.96,
+    "promptTokens": 10119,
+    "qualityNotes": [],
+    "risks": [
+      "El P/E forward de 35.76 sugiere una valoración alta. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La caída máxima a 1 año del 13.8% podría indicar una corrección. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El ATR14 de 6.6767 USD sugiere una volatilidad moderada. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 77.19999694824219,
+      "macroScore": 58.400001525878906,
+      "momentum": 69.9000015258789,
+      "overall": 61.79999923706055,
+      "risk": 30.700000762939453,
+      "sentiment": 57.0,
+      "technical": 65.9000015258789,
+      "valuation": 34.900001525878906
+    },
+    "sources": [
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:15.894470797Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.866245838Z",
+        "title": "Fundamentales stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "GuruFocus.com",
+        "publishedAt": "2026-10-14T19:00:41Z",
+        "title": "Apple Stocks Rise as $299 HomeView Adds a Paid-AI Path",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/apple-stocks-rise-299-homeview-190041463.html"
+      },
+      {
+        "provider": "Yahoo",
+        "publishedAt": "2026-10-14T18:38:00Z",
+        "title": "GlobalFoundries Stock Extends Rally on Chip Deal Worth Up to $21 Billion",
+        "url": "https://finnhub.io/api/news?id=9d5a7b0fb6eceb0c86f7571c08fbc78ae26daa3eaf61b04fce0cf62281ee0736"
+      }
+    ],
+    "strategy": "Entrada: Comprar en el rango de entrada de 336.81 - 342.96 USD, con stop en 330.13 USD y objetivos en 344.16, 348.15 y 405 USD.\nSalida: Sellar si el precio cae por debajo del stop en 330.13 USD.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular en tramos (confianza 0.85) debido a la tendencia alcista y el rendimiento sólido a largo plazo. El precio de 342.96 USD y el RSI14 de 62.1 en zona neutra son los dos factores más fuertes.",
+    "thesis": "El P/E forward de 35.76 y el P/E histórico de 39.33 indican una valoración alta. El ROE de 148.8% y el margen operativo del 32.6% sugieren una alta rentabilidad y eficiencia en la gestión de la empresa. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nEl precio de 342.96 USD está por encima de la SMA200 de 291.77 USD, lo que sugiere una tendencia alcista. El RSI14 de 62.1 en zona neutra indica un momentum estable. El ATR14 de 6.6767 USD sugiere una volatilidad moderada. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa valoración alta y la caída máxima a 1 año del 13.8% sugieren un riesgo moderado, pero el rendimiento a 1 año del 38.4% y el ROE de 148.8% indican una alta rentabilidad. La tendencia alcista y el RSI14 en zona neutra apuntan a una corrección eventual pero no inminente. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: El RSI14 en zona neutra y la caída máxima a 1 año del 13.8% introducen incertidumbre sobre el futuro momentum y la corrección posible.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 sube por encima de 70, lo que indicaría sobrecompra.",
+      "Si el precio cierra por debajo del stop en 330.13 USD, lo que podría indicar una reversión de la tendencia alcista.",
+      "Si el rendimiento a 1 año baja por debajo del 30%, lo que podría indicar una corrección."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1670,
+      "confidence": 0.7900000214576721,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 20,
+      "figuresAllTotal": 38,
+      "figuresThesisDistinct": 10,
+      "figuresThesisTotal": 12,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 29,
+      "llmCalls": 6,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 10119,
+      "qualityNotesCount": 0,
+      "thesisLabeledOk": 11,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 9,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=1"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 43.446276565,
+    "wordingFixCalls": 1
+  }
+}

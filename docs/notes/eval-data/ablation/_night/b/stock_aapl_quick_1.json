@@ -1,0 +1,177 @@
+{
+  "analysis": {
+    "asset": "stock:AAPL",
+    "bearCase": [
+      "El P/E forward de 35.76 sugiere una valoración alta, lo que podría indicar una corrección. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La caída máxima a 1 año del 13.8% podría indicar que el mercado está reaccionando a riesgos macroeconómicos. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "La volatilidad 30d anualizada del 19.9% podría indicar una mayor incertidumbre en los próximos meses. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "bullCase": [
+      "El RSI14 de 62.1 indica una tendencia alcista, lo que podría indicar un recorrido al alza. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El crecimiento de beneficios del 28.7% podría indicar un potencial de crecimiento en el futuro. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El margen operativo del 32.6% podría indicar una fuerte capacidad de generación de beneficios. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": null,
+        "description": "Los resultados trimestrales, 2026-10-14",
+        "impact": null
+      },
+      {
+        "date": null,
+        "description": "La curva 10a-2a, 2026-10-14",
+        "impact": null
+      }
+    ],
+    "completionTokens": 1256,
+    "confidence": 0.7599999904632568,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 27869,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-14T21:28:38.234505392Z",
+    "horizon": "medium",
+    "horizonNote": "La volatilidad 30d anualizada del 19.9% sugiere un horizonte de medio plazo.",
+    "id": "01a13c51-385a-71b8-95f7-ddaa737451ff",
+    "keyLevels": {
+      "entryZone": [
+        336.80750274658203,
+        342.96
+      ],
+      "resistances": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ],
+      "stopLoss": 330.13080444827784,
+      "supports": [
+        336.80750274658203,
+        334.989990234375,
+        329.4581021780075,
+        325.80999755859375
+      ],
+      "targets": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ]
+    },
+    "levelsNote": "Zona de entrada 336,81 – 342,96 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 330,13 = SMA20 336,81 − 1×ATR14 6,6767 (Yahoo Finance, 14 oct 2026). Objetivos: 344,16 = banda de Bollinger superior; 348,15 = máximo de 52 semanas; 405 = precio objetivo máximo de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.4 (entrada en el punto medio de la zona, 339,88).",
+    "llmCalls": 2,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 2 llamadas, 7337 tokens de entrada y 1256 de salida, 28 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 1.95,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 2.9,
+      "volatility30d": 0.19883421620277855
+    },
+    "priceAtAnalysis": 342.96,
+    "promptTokens": 7337,
+    "qualityNotes": [],
+    "risks": [
+      "La caída máxima a 1 año del 13.8% podría indicar una reacción al mercado. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 77.19999694824219,
+      "macroScore": 58.400001525878906,
+      "momentum": 69.9000015258789,
+      "overall": 61.79999923706055,
+      "risk": 30.700000762939453,
+      "sentiment": 57.0,
+      "technical": 65.9000015258789,
+      "valuation": 34.900001525878906
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.866245838Z",
+        "title": "Fundamentales stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:15.894470797Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:AAPL",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Comprar en el rango de entrada de 336.81 a 342.96, con stop en 330.13 y objetivos en 344.16, 348.15 y 405.\nSalida: Vender si el precio cae por debajo del stop de 330.13 o si el RSI14 sube a 70.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular en tramos (confianza 0.8). El RSI14 de 62.1 indica una tendencia alcista y el crecimiento de beneficios del 28.7% sugiere un potencial de crecimiento.",
+    "thesis": "El P/E forward de 35.76 sugiere una valoración alta, pero el crecimiento de beneficios del 28.7% y el margen operativo del 32.6% indican una fuerte capacidad de generación de beneficios. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nEl RSI14 de 62.1 indica una tendencia alcista, la SMA20 sobre la SMA200 (11.2%) sugiere una fuerte tendencia alcista y el precio +17.5% respecto a la SMA200 (291.77) indica un rendimiento superior a la media. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa tendencia alcista (RSI14 de 62.1) y el crecimiento de beneficios (28.7%) pesan a favor de la acumulación. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: Se basa en datos actuales, pero la valoración actual (P/E forward de 35.76) podría indicar una corrección.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 sube a 70, podría indicar una sobrecompra y una corrección.",
+      "Si el precio cae por debajo del stop de 330.13, podría indicar una reacción al mercado.",
+      "Si el P/E forward baja por debajo de 30, podría indicar una valoración más atractiva."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1256,
+      "confidence": 0.7599999904632568,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 17,
+      "figuresAllTotal": 30,
+      "figuresThesisDistinct": 7,
+      "figuresThesisTotal": 10,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 25,
+      "llmCalls": 2,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 7337,
+      "qualityNotesCount": 0,
+      "thesisLabeledOk": 9,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 5,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=2"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 27.870300822,
+    "wordingFixCalls": 0
+  }
+}

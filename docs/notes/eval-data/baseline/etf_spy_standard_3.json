@@ -1,0 +1,219 @@
+{
+  "analysis": {
+    "asset": "etf:SPY",
+    "bearCase": [
+      "La caída máxima a 1 año es de -9.1%, lo que indica un riesgo potencial. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El volumen de 54.51M es alto, pero podría indicar una corrección. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC)",
+      "El sentimiento del mercado es mixto, con 4 noticias positivas y 5 negativas,."
+    ],
+    "bullCase": [
+      "El precio actual es 769.6 USD, lo que sugiere un buen nivel de entrada. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El RSI14 es 49.6, en zona neutra, lo que no indica sobrecompra ni sobreventa. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El rendimiento a 1 año es de +16.2%, lo que indica una sólida rentabilidad. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": null,
+        "description": "El próximo informe de resultados trimestral, previsto para 2026-11-15⚠.",
+        "impact": null
+      },
+      {
+        "date": null,
+        "description": "El próximo informe de inflación, previsto para 2026-11-10⚠.",
+        "impact": null
+      }
+    ],
+    "completionTokens": 3060,
+    "confidence": 0.6399999856948853,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 64081,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-14T21:22:31.823915423Z",
+    "horizon": "medium",
+    "horizonNote": "La volatilidad baja (ATR14 = 0.8%) y la tendencia alcista sugieren un horizonte de medio plazo.",
+    "id": "01a13c4b-a10f-74be-a1d6-677fee43b015",
+    "keyLevels": {
+      "entryZone": [
+        768.5679968261719,
+        769.6
+      ],
+      "resistances": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ],
+      "stopLoss": 762.1355791363812,
+      "supports": [
+        768.5679968261719,
+        762.0399780273438,
+        755.7228567940848,
+        733.3800048828125
+      ],
+      "targets": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ]
+    },
+    "levelsNote": "Zona de entrada 768,57 – 769,6 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 762,14 = SMA50 768,57 − 1×ATR14 6,4324 (Yahoo Finance, 14 oct 2026). Objetivos: 770,65 = SMA20; 777,66 = resistencia; 781,62 = máximo de 52 semanas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.2 (entrada en el punto medio de la zona, 769,08).",
+    "llmCalls": 7,
+    "method": "Modelo qwen2.5:7b, profundidad standard, 7 llamadas, 13217 tokens de entrada y 3060 de salida, 64 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 0.84,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 0.9,
+      "volatility30d": 0.10135132749641854
+    },
+    "priceAtAnalysis": 769.6,
+    "promptTokens": 13217,
+    "qualityNotes": [
+      "Fechas que no figuran en los datos (marcadas con ⚠) en «catalizador»: 2026-11-15",
+      "Fechas que no figuran en los datos (marcadas con ⚠) en «catalizador»: 2026-11-10"
+    ],
+    "risks": [
+      "El P/E es 24.43, lo que indica una valoración moderada pero no baja. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El ATR14 es de 0.8% del precio, lo que sugiere volatilidad diaria baja. [N8] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 60.79999923706055,
+      "overall": 61.79999923706055,
+      "risk": 14.100000381469727,
+      "sentiment": 44.400001525878906,
+      "technical": 65.5,
+      "valuation": 50.70000076293945
+    },
+    "sources": [
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:22.709947687Z",
+        "title": "Niveles de entrada, stop y objetivos calculados etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T18:06:43Z",
+        "title": "Walmart Advances 3% as Inflation Data Sends Money Into Defensives; Costco and Target Edge Higher",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/walmart-advances-3-inflation-data-180643511.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:41:32Z",
+        "title": "Ondas Retreats 6% Despite Regna AI Launch With Palantir; AeroVironment Drops 3%, Kratos Slips",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/ondas-retreats-6-despite-regna-164132147.html"
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:00Z",
+        "title": "Cotización etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:19.119856148Z",
+        "title": "Fundamentales etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T17:57:55Z",
+        "title": "Unity Software Sinks 10% Despite Wedbush Target Hike on Vector Ad Platform; AppLovin Falls 3%, Trade Desk Slips",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/unity-software-sinks-10-despite-175755690.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:47:49Z",
+        "title": "Affirm Falls 10% as Inflation Print Lifts Yields; Klarna Drops 3%, PayPal Barely Budges",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/affirm-falls-10-inflation-print-164749757.html"
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:45:18Z",
+        "title": "Taiwan Semiconductor’s Top Line Growth is Starting to Raise Eyebrows",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/taiwan-semiconductor-top-line-growth-164518154.html"
+      }
+    ],
+    "strategy": "Entrada: Comprar en la zona de entrada de 768.57 – 769.6, con stop en 762.14 y objetivos en 770.65, 777.66 y 781.62.\nSalida: Invalidar la entrada si el precio cierra por debajo del stop en 762.14.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular en SPY (etf:SPY) debido a la tendencia alcista y el rendimiento sólido a 1 año. El RSI14 en zona neutra y el precio actual de 769.6 USD son factores adicionales.",
+    "thesis": "El PER de 24.43 (exigente; sector general) y el coste anual (TER) de 0.1% son factores a favor de la inversión. El rendimiento a 1 año de +16.2% y el ATR14 de 0.8% del precio indican una valoración moderada y una volatilidad baja. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa tendencia alcista fuerte (SMA20 770.65 y SMA50 768.57) y el MACD alcista (0.31) sugieren un potencial de recorrido al alza. El RSI14 en zona neutra (49.6) no indica sobrecompra ni sobreventa, lo que permite acumular sin riesgo excesivo. El ATR14 de 0.8% del precio indica volatilidad diaria baja, lo que favorece la acumulación en tramos. [N5] (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nEl análisis técnico muestra una tendencia alcista fuerte (SMA20 770.65 y SMA50 768.57) y un RSI14 en zona neutra (49.6), lo que sugiere un equilibrio entre el riesgo y la oportunidad. El análisis fundamental indica una valoración moderada (P/E 24.43) y un bajo costo operativo (TER 0.1%), lo que favorece la inversión. El sentimiento del mercado es mixto, con 4 noticias positivas y 5 negativas, lo que introduce cierta incertidumbre. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: El sentimiento del mercado es mixto, con 4 noticias positivas y 5 negativas, lo que introduce cierta incertidumbre.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 se sitúa por encima de 70, lo que indicaría sobrecompra, se recomendaría reducir la exposición.",
+      "Si el precio cierra por debajo del stop en 762.14, se invalidaría la entrada y se recomendaría vender.",
+      "Si el rendimiento a 1 año se desacelera significativamente, se recomendaría revisar la inversión."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 3060,
+      "confidence": 0.6399999856948853,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 14,
+      "figuresAllTotal": 31,
+      "figuresThesisDistinct": 8,
+      "figuresThesisTotal": 14,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 24,
+      "llmCalls": 7,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 13217,
+      "qualityNotesCount": 2,
+      "thesisLabeledOk": 12,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 2,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 2,
+      "unlabeledOk": 7,
+      "unverifiedNotes": 2,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 4,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO tesis genérica: se pide reescribirla figures=8 boilerplate=1",
+      "INFO redacción sospechosa: se pide corregirla n=3",
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=1"
+    ],
+    "genericThesisRetries": 1,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 64.082991543,
+    "wordingFixCalls": 1
+  }
+}

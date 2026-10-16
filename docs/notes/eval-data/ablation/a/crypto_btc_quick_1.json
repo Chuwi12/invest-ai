@@ -1,0 +1,195 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El RSI14 = 47.1, en zona neutra, sugiere un posible retroceso. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "bullCase": [
+      "La capitalización 1.64T implica un volumen significativo de transacciones. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 811,
+    "confidence": 0.699999988079071,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 23569,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-15T13:29:52.705783617Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a13fc1-4341-74ad-af4c-b7d8a93d63b6",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 3,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 3 llamadas, 5886 tokens de entrada y 811 de salida, 24 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 5886,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «tesis»: 64.9 (en los datos es «ATH / máximo histórico», no «PER»), 12.3, 13.2 (en los datos es «SMA200», no «crecimiento de ingresos»), 81782.31 (en los datos es «Precio / Zona de entrada», no «flujo de caja»)"
+    ],
+    "risks": [
+      "Noticias negativas [N3, N4, N5] indican riesgos a la baja.",
+      "La caída máxima a 1 año = 48.8% es un riesgo significativo. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El VIX = 15.3, aunque bajo, sugiere volatilidad potencial. [N1] (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Niveles de entrada, stop y objetivos calculados crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "Robinhood",
+        "publishedAt": "2026-10-14T20:04:32Z",
+        "title": "BTC price range on Oct 15, 2026 at 5pm EDT Crypto Prediction Market",
+        "url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOSzNyS1JjV1dkX0xzaEtpNnlQWnh4WUx3ck9YUGV4VFZLdko3V2I0UlhlREtnbUFEMEVqT3RDRVRES3dHTXF3ME5PNlF3NVVQWUJ2a01PaE9KNjNrQ2lwOEhfb0pZODhaZUNCVk5zV3BGZ0dxUEYxQWhDVC1lOGhnckI2M0h4NFRrMFJsYTN2YnY2MVRKOThTOTZacTg3Y01OcTZmR1hhNnZaWlB6ejFnMy1RS2dFZw?oc=5"
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "Mantener. La tendencia alcista fuerte y la capitalización 1.64T, pero el RSI14 = 47.1 y las noticias negativas [N3, N4, N5] son cautelosos.",
+    "thesis": "El PER 64.9⚠ con margen operativo de 12.3⚠ y un crecimiento de ingresos de 13.2%⚠ deja la valoración en zona razonable. El flujo de caja libre de 81782.31⚠ USDT cubre la capitalización 1.64T. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC)\n\nLa tendencia alcista fuerte y la RSI14 = 47.1, en zona neutra, indican estabilidad. El MACD bajista y el ATR14 = 2.7% del precio sugieren volatilidad. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)\n\nEl precio al 64.9% de su máximo histórico (126080) y la FDV / market cap = 1.00x indican valoración neutral. Noticias negativas [N3, N4, N5] y macro inflación alta [4.02%] sugieren riesgo a la baja. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)\n\nIncertidumbre: El RSI14 = 47.1 en zona neutra y la caída máxima a 1 año = 48.8% son inciertos.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "Si el RSI14 se mueve a sobreventa (bajo 30), podría reducir la exposición.",
+      "Si las noticias positivas [N1, N2] aumentan el sentimiento, podría considerar una compra."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 811,
+      "confidence": 0.699999988079071,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 12,
+      "figuresAllTotal": 19,
+      "figuresThesisDistinct": 11,
+      "figuresThesisTotal": 13,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 14,
+      "llmCalls": 3,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 5886,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 8,
+      "thesisNotInData": 1,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 1,
+      "unverifiedNotes": 1,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 5,
+      "wrongLabel": 3,
+      "wrongLabelExamples": [
+        {
+          "actual": "ATH / máximo histórico",
+          "figure": "64.9",
+          "said": "PER",
+          "snippet": "El PER 64.9 con margen operativo de 12.3 y un crecimiento"
+        },
+        {
+          "actual": "SMA200",
+          "figure": "13.2",
+          "said": "crecimiento de ingresos",
+          "snippet": "PER 64.9 con margen operativo de 12.3 y un crecimiento de ingresos de 13.2% deja la valoración en zona razonable. El fl"
+        },
+        {
+          "actual": "Precio / Zona de entrada",
+          "figure": "81782.31",
+          "said": "flujo de caja",
+          "snippet": "3.2% deja la valoración en zona razonable. El flujo de caja libre de 81782.31 USDT cubre la capitalización 1.64T."
+        }
+      ]
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 23.581235981,
+    "wordingFixCalls": 0
+  }
+}

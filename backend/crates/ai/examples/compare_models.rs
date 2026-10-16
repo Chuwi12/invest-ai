@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ai::{AiConfig, OllamaAnalyst, analysis::lint, models::ACTIVE_MODEL_KEY};
+use ai::{AiConfig, OllamaAnalyst, analysis::lint, fidelity::extract_numbers, models::ACTIVE_MODEL_KEY, scoring::verdict_rank};
 use async_trait::async_trait;
 use domain::{Analysis, AnalysisDepth, Analyst, AssetSnapshot, SettingsStore};
 use serde_json::json;
@@ -121,6 +121,97 @@ fn model_texts(a: &Analysis) -> Vec<(String, String)> {
     v
 }
 
+/// Primer entero que aparece en `s` (0 si no hay).
+fn first_int(s: &str) -> usize {
+    s.split(|c: char| !c.is_ascii_digit()).find(|t| !t.is_empty()).and_then(|t| t.parse().ok()).unwrap_or(0)
+}
+
+/// Veredicto que corresponde a la puntuación global por los umbrales de `scoring::quantitative_verdict`
+/// (sin sus ajustes por riesgo/cobertura, que no son accesibles desde fuera del crate).
+fn threshold_verdict(overall: f64) -> domain::Verdict {
+    use domain::Verdict::*;
+    match overall {
+        x if x >= 70.0 => Buy,
+        x if x >= 60.0 => Accumulate,
+        x if x >= 50.0 => Hold,
+        x if x >= 42.0 => Wait,
+        x if x >= 32.0 => Reduce,
+        _ => Avoid,
+    }
+}
+
+/// Métricas automáticas y reproducibles (sin juicio humano) de un resultado. Solo usa la API pública
+/// y las funciones de auditoría `#[doc(hidden)]`, para poder ejecutarse sobre cualquier versión del motor.
+fn auto_metrics(snap: &AssetSnapshot, a: &Analysis, num_ctx: u32, lang: &str) -> serde_json::Value {
+    let mt = model_texts(a);
+    // Cifras citadas (no exentas: se excluyen enteros pequeños, años y fragmentos de fecha).
+    let figs = |filter: &dyn Fn(&str) -> bool| -> (usize, usize) {
+        let joined: Vec<&str> = mt.iter().filter(|(f, _)| filter(f)).map(|(_, t)| t.as_str()).collect();
+        let total: usize = joined.iter().map(|t| extract_numbers(t).iter().filter(|n| !n.exempt).count()).sum();
+        let distinct = lint::specificity(&joined.join("\n\n")).figures;
+        (total, distinct)
+    };
+    let (th_total, th_distinct) = figs(&|f| f == "thesis");
+    let (all_total, all_distinct) = figs(&|_| true);
+    // Verificación de las cifras que quedan en el texto final, con el contexto que vio el modelo.
+    let rows = ai::analysis::audit_figures(snap, lang, num_ctx, &mt);
+    let sum = |f: &dyn Fn(&ai::analysis::AuditRow) -> usize| rows.iter().map(f).sum::<usize>();
+    let thesis_rows: Vec<_> = rows.iter().filter(|r| r.field == "thesis").collect();
+    let wrong_label_examples: Vec<_> = rows.iter().flat_map(|r| r.wrong_label.iter().map(|w| json!({"figure": w.0, "said": w.1, "actual": w.2, "snippet": w.3}))).collect();
+    // Avisos de calidad: descartes (por tipo), citas quitadas, cifras inventadas atrapadas.
+    let notes = a.quality_notes.clone().unwrap_or_default();
+    let (mut dropped_claims, mut dropped_for_figures, mut dropped_for_dates, mut dropped_for_citation) = (0, 0, 0, 0);
+    let (mut scenario_sentences, mut citations_stripped, mut invented_caught, mut unverified_notes) = (0, 0, 0, 0);
+    for n in &notes {
+        if n.starts_with("Se descartó una afirmación") {
+            dropped_claims += 1;
+            if n.contains("cifras que no aparecen") {
+                dropped_for_figures += 1;
+                if let (Some(i), Some(j)) = (n.find("datos ("), n.find("): «")) {
+                    invented_caught += n[i + 7..j.max(i + 7)].split(", ").filter(|x| !x.trim().is_empty()).count();
+                }
+            } else if n.contains("fechas que no figuran") {
+                dropped_for_dates += 1;
+            } else {
+                dropped_for_citation += 1;
+            }
+        } else if n.contains("frase(s) del modelo descartada(s)") {
+            scenario_sentences += first_int(n.split(':').nth(1).unwrap_or(""));
+        } else if n.starts_with("Se quitaron") {
+            citations_stripped += first_int(n);
+        } else if n.starts_with("Cifras no verificables") || n.starts_with("Fechas que no figuran") {
+            unverified_notes += 1;
+        }
+    }
+    // Coherencia veredicto <-> puntuación cuantitativa.
+    let tv = threshold_verdict(a.scores.overall as f64);
+    let (vr, tr) = (verdict_rank(a.verdict), verdict_rank(tv));
+    let generic_penalty = notes.iter().any(|n| n.starts_with("La tesis sigue siendo poco específica"));
+    json!({
+        "llmCalls": a.llm_calls, "promptTokens": a.prompt_tokens, "completionTokens": a.completion_tokens,
+        "figuresThesisTotal": th_total, "figuresThesisDistinct": th_distinct,
+        "figuresAllTotal": all_total, "figuresAllDistinct": all_distinct,
+        "thesisLabeledOk": thesis_rows.iter().map(|r| r.labeled_ok).sum::<usize>(),
+        "thesisUnlabeledOk": thesis_rows.iter().map(|r| r.unlabeled_ok).sum::<usize>(),
+        "thesisNotInData": thesis_rows.iter().map(|r| r.not_in_data).sum::<usize>(),
+        "labeledOk": sum(&|r| r.labeled_ok), "unlabeledOk": sum(&|r| r.unlabeled_ok),
+        "notInData": sum(&|r| r.not_in_data), "wrongLabel": sum(&|r| r.wrong_label.len()),
+        "unknownDates": sum(&|r| r.unknown_dates.len()),
+        "warnMarks": serde_json::to_string(a).map_or(0, |s| s.matches('⚠').count()),
+        "wrongLabelExamples": wrong_label_examples,
+        "qualityNotesCount": notes.len(),
+        "droppedClaims": dropped_claims, "droppedForFigures": dropped_for_figures, "droppedForDates": dropped_for_dates,
+        "droppedForCitation": dropped_for_citation, "droppedScenarioSentences": scenario_sentences,
+        "droppedTotal": dropped_claims + scenario_sentences,
+        "citationsStripped": citations_stripped, "inventedFiguresCaught": invented_caught, "unverifiedNotes": unverified_notes,
+        "genericThesisPenalty": generic_penalty,
+        "verdict": format!("{:?}", a.verdict), "thresholdVerdict": format!("{tv:?}"),
+        "verdictMatchesScore": vr == tr, "verdictRankDelta": vr - tr, "overallScore": a.scores.overall,
+        "confidence": a.confidence, "expectedReturnPct": a.expected_return_pct,
+        "optimisticWithNegativeExpectedReturn": vr >= 4 && a.expected_return_pct.is_some_and(|r| r < 0.0),
+    })
+}
+
 fn issues_of(a: &Analysis) -> Vec<serde_json::Value> {
     texts(a)
         .into_iter()
@@ -169,6 +260,7 @@ async fn main() -> anyhow::Result<()> {
     settings.set(ACTIVE_MODEL_KEY, model).await?;
     let think = cfg.think;
     let (num_ctx, temperature) = (cfg.num_ctx, cfg.temperature);
+    let lang_code = cfg.lang_code();
     let analyst = OllamaAnalyst::new(cfg, settings)?;
 
     let t = std::time::Instant::now();
@@ -185,6 +277,7 @@ async fn main() -> anyhow::Result<()> {
         "genericThesisRetries": count("tesis genérica"),
         "wordingFixCalls": count("redacción sospechosa"),
         "spanishIssuesFinal": issues,
+        "auto": auto_metrics(&snap, &a, num_ctx, &lang_code),
         "events": events,
     });
     std::fs::write(out, serde_json::to_string_pretty(&json!({ "metrics": metrics, "analysis": a }))?)?;

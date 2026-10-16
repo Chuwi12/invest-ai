@@ -1,0 +1,180 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El sentimiento negativo [N3, N4, N5] y la caída del oro podrían presionar."
+    ],
+    "bullCase": [
+      "La tendencia alcista fuerte, con SMA20 +13.2%."
+    ],
+    "catalysts": [],
+    "completionTokens": 804,
+    "confidence": 0.6800000071525574,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 17845,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T11:07:23.409355316Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a14465-2b91-735c-a7a4-6ef3425ae7ea",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 3,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 3 llamadas, 6662 tokens de entrada y 804 de salida, 18 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 6662,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «tesis»: 70 (en los datos es «Valoración», no «PER»), 64.9 (en los datos es «ATH / máximo histórico», no «PER»)",
+      "La tesis es poco específica (modo rápido, sin reintento): se redujo la confianza."
+    ],
+    "risks": [
+      "La caída máxima a 1 año del 48.8% es un riesgo significativo. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El sentimiento negativo [N3, N4, N5] podría influir.",
+      "La volatilidad 30d anualizada del 39.4% es alta. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Puntuación cuantitativa determinista crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Niveles de entrada, stop y objetivos calculados crypto:BTC",
+        "url": null
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "Mantener, con una tendencia alcista fuerte y una recompensa/riesgo favorable. El ATR14 del 2.7% y la SMA50 sobre la SMA200 (+12.4%) son clave.",
+    "thesis": "El valoración de 70⚠ y el PER 64.9%⚠ del máximo histórico sugieren un precio justo. La FDV / capitalización de 1.00x es razonable. (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)\n\nLa tendencia alcista fuerte, con SMA20 +13.2% y SMA50 +0.7%, y la recompensa/riesgo del 0.5 son clave. El ATR14 del 2.7% y la SMA50 sobre la SMA200 (+12.4%) son positivos. (fuente: niveles calculados 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 00:00 UTC)\n\nEl sentimiento negativo [N3, N4, N5] y la caída del oro son riesgos.\n\nIncertidumbre: El sentimiento negativo [N3, N4, N5] y la caída del oro son inciertos.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "Si el sentimiento negativo [N3, N4, N5] empeora.",
+      "Si la caída máxima a 1 año supera el 48.8%."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 804,
+      "confidence": 0.6800000071525574,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 10,
+      "figuresAllTotal": 14,
+      "figuresThesisDistinct": 8,
+      "figuresThesisTotal": 8,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 12,
+      "llmCalls": 3,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 6662,
+      "qualityNotesCount": 2,
+      "thesisLabeledOk": 6,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 0,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 0,
+      "unverifiedNotes": 1,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 3,
+      "wrongLabel": 2,
+      "wrongLabelExamples": [
+        {
+          "actual": "Valoración",
+          "figure": "70",
+          "said": "PER",
+          "snippet": "El valoración de 70 y el PER 64.9% del máximo histórico sugieren "
+        },
+        {
+          "actual": "ATH / máximo histórico",
+          "figure": "64.9",
+          "said": "PER",
+          "snippet": "El valoración de 70 y el PER 64.9% del máximo histórico sugieren un precio ju"
+        }
+      ]
+    },
+    "depth": "quick",
+    "events": [
+      "INFO tesis genérica en quick: sin reintento figures=8"
+    ],
+    "genericThesisRetries": 1,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 17.846664398,
+    "wordingFixCalls": 0
+  }
+}

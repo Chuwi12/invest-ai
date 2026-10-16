@@ -1,0 +1,200 @@
+{
+  "analysis": {
+    "asset": "etf:SPY",
+    "bearCase": [
+      "El RSI14 (49.6) se encuentra en zona neutra, lo que sugiere que el momentum no está extremo y podría continuar la corrección. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El precio (769.6 USD) está cerca del soporte (762.04), lo que podría indicar una corrección si el precio cae por debajo. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El volumen (54.51M) es alto, pero podría disminuir si el precio se mantiene estancado, lo que podría ser un signo de debilidad. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC)"
+    ],
+    "bullCase": [
+      "La tendencia alcista fuerte (SMA200) sugiere que el precio (769.6 USD) está por encima de la media a largo plazo. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El rendimiento a 1 año (16.2%) es positivo y podría continuar si la macroeconomía se mantiene estable. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El PER (24.43) es justo para el sector general, lo que sugiere que el valor está correctamente evaluado. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 2687,
+    "confidence": 0.6299999952316284,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 57412,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T07:20:10.722059307Z",
+    "horizon": "medium",
+    "horizonNote": "El entorno inflacionario y la volatilidad del mercado de bonos sugieren un horizonte de medio plazo.",
+    "id": "01a14395-26e2-7004-b5c5-93f955ba9ce2",
+    "keyLevels": {
+      "entryZone": [
+        768.5679968261719,
+        769.6
+      ],
+      "resistances": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ],
+      "stopLoss": 762.1355791363812,
+      "supports": [
+        768.5679968261719,
+        762.0399780273438,
+        755.7228567940848,
+        733.3800048828125
+      ],
+      "targets": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ]
+    },
+    "levelsNote": "Zona de entrada 768,57 – 769,6 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 762,14 = SMA50 768,57 − 1×ATR14 6,4324 (Yahoo Finance, 14 oct 2026). Objetivos: 770,65 = SMA20; 777,66 = resistencia; 781,62 = máximo de 52 semanas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.2 (entrada en el punto medio de la zona, 769,08).",
+    "llmCalls": 6,
+    "method": "Modelo qwen2.5:7b, profundidad standard, 6 llamadas, 12538 tokens de entrada y 2687 de salida, 57 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 0.84,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 0.9,
+      "volatility30d": 0.10135132749641854
+    },
+    "priceAtAnalysis": 769.6,
+    "promptTokens": 12538,
+    "qualityNotes": [
+      "La tesis sigue siendo poco específica tras un reintento: se redujo la confianza."
+    ],
+    "risks": [
+      "La caída máxima a 1 año (-9.1%) podría ser un riesgo si el mercado retrocede. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El ATR14 (0.8%) indica alta volatilidad, lo que podría llevar a fluctuaciones bruscas en el precio. [N8] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El rendimiento a 1 mes (+1.1%) es bajo y podría disminuir si la macroeconomía se debilita. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 60.79999923706055,
+      "overall": 61.79999923706055,
+      "risk": 14.100000381469727,
+      "sentiment": 44.400001525878906,
+      "technical": 65.5,
+      "valuation": 50.70000076293945
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:00Z",
+        "title": "Cotización etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:22.709947687Z",
+        "title": "Niveles de entrada, stop y objetivos calculados etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T18:06:43Z",
+        "title": "Walmart Advances 3% as Inflation Data Sends Money Into Defensives; Costco and Target Edge Higher",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/walmart-advances-3-inflation-data-180643511.html"
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:19.119856148Z",
+        "title": "Fundamentales etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T17:57:55Z",
+        "title": "Unity Software Sinks 10% Despite Wedbush Target Hike on Vector Ad Platform; AppLovin Falls 3%, Trade Desk Slips",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/unity-software-sinks-10-despite-175755690.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:47:49Z",
+        "title": "Affirm Falls 10% as Inflation Print Lifts Yields; Klarna Drops 3%, PayPal Barely Budges",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/affirm-falls-10-inflation-print-164749757.html"
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:45:18Z",
+        "title": "Taiwan Semiconductor’s Top Line Growth is Starting to Raise Eyebrows",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/taiwan-semiconductor-top-line-growth-164518154.html"
+      }
+    ],
+    "strategy": "Entrada: Comprar en el rango de entrada (768.57 - 769.6 USD) y establecer un stop en 762.14 USD.\nSalida: Vender si el precio cae por debajo del stop (762.14 USD) o si se alcanza el primer objetivo (770.65 USD).\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular (confianza 0.68) debido a la tendencia alcista fuerte y el rendimiento positivo a 1 año. El RSI14 (49.6) y el PER (24.43) indican que el valor está correctamente evaluado.",
+    "thesis": "El PER (24.43) es justo para el sector general, lo que sugiere que el valor está correctamente evaluado. El rendimiento a 1 año (16.2%) es positivo, lo que podría continuar si la macroeconomía se mantiene estable. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa tendencia alcista fuerte (SMA200) y el precio (769.6 USD) por encima de la SMA50 (768.57) indican un mercado alcista. El MACD histograma (0.31) es positivo, lo que sugiere alcista. El volumen (54.51M) es alto, lo que podría indicar interés en el mercado. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa tendencia alcista fuerte (SMA200) y el rendimiento a 1 año (16.2%) apoyan la acumulación. Sin embargo, el RSI14 (49.6) y el ATR14 (0.8%) sugieren que el mercado podría ser volátil. [N8] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nIncertidumbre: El RSI14 (49.6) se encuentra en zona neutra, lo que sugiere que el momentum no está extremo, pero podría cambiar si el mercado se mueve hacia los extremos.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 se mueve por encima de 70, podría indicar sobrecompra y cambiaría el veredicto a reducir.",
+      "Si el precio cae por debajo del stop (762.14 USD), podría indicar una corrección y cambiaría el veredicto a reducir.",
+      "Si el rendimiento a 1 año se reduce significativamente, podría indicar una corrección y cambiaría el veredicto a reducir."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2687,
+      "confidence": 0.6299999952316284,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 14,
+      "figuresAllTotal": 29,
+      "figuresThesisDistinct": 8,
+      "figuresThesisTotal": 10,
+      "genericThesisPenalty": true,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 24,
+      "llmCalls": 6,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 12538,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 9,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 5,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO tesis genérica: se pide reescribirla figures=8 boilerplate=2"
+    ],
+    "genericThesisRetries": 1,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 57.414652129,
+    "wordingFixCalls": 0
+  }
+}

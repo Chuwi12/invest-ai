@@ -1,0 +1,212 @@
+{
+  "analysis": {
+    "asset": "stock:AAPL",
+    "bearCase": [
+      "El precio de 342.96 USD está cerca de la zona de entrada superior, lo que podría indicar una corrección (344.16). (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El RSI14 de 62.1 se encuentra en zona neutral, sin signos de sobrecompra (70). (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El volumen relativo de 1.05 sugiere un volumen normal, no extremo, lo que podría indicar una pausa en la tendencia alcista (1.69). (fuente: indicadores técnicos 2026-10-14 13:30 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC)"
+    ],
+    "bullCase": [
+      "El precio de 342.96 USD está por encima de la media móvil 50 (324.46), lo que podría indicar una tendencia alcista (347.07). (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El rendimiento a 1 año de +38.4% podría indicar una sólida recuperación (341.27). (fuente: indicadores técnicos 2026-10-14 13:30 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": null,
+        "description": "El HomeView podría impulsar el crecimiento a corto plazo.",
+        "impact": null
+      },
+      {
+        "date": null,
+        "description": "El acuerdo con GlobalFoundries podría fortalecer la posición en chips.",
+        "impact": null
+      }
+    ],
+    "completionTokens": 1592,
+    "confidence": 0.5799999833106995,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 35071,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T11:00:47.649511797Z",
+    "horizon": "medium",
+    "horizonNote": "La volatilidad 30d anualizada de 19.9% y la caída máxima en 1 año de -13.8% indican un riesgo moderado (330.13).",
+    "id": "01a1445f-21a1-7505-9e40-7448a5ea99a3",
+    "keyLevels": {
+      "entryZone": [
+        336.80750274658203,
+        342.96
+      ],
+      "resistances": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ],
+      "stopLoss": 330.13080444827784,
+      "supports": [
+        336.80750274658203,
+        334.989990234375,
+        329.4581021780075,
+        325.80999755859375
+      ],
+      "targets": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ]
+    },
+    "levelsNote": "Zona de entrada 336,81 – 342,96 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 330,13 = SMA20 336,81 − 1×ATR14 6,6767 (Yahoo Finance, 14 oct 2026). Objetivos: 344,16 = banda de Bollinger superior; 348,15 = máximo de 52 semanas; 405 = precio objetivo máximo de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.4 (entrada en el punto medio de la zona, 339,88).",
+    "llmCalls": 5,
+    "method": "Modelo qwen2.5:7b, profundidad standard, 5 llamadas, 9645 tokens de entrada y 1592 de salida, 35 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 1.95,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 2.9,
+      "volatility30d": 0.19883421620277855
+    },
+    "priceAtAnalysis": 342.96,
+    "promptTokens": 9645,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (291.77 (en los datos es «SMA20 / SMA50 / SMA200 / SMA200», no «rentabilidad»)): «El margen operativo de 32.6% y el ROE de 148.8% indican altos niveles de rentabilidad…»",
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (330.13 (en los datos es «Stop / Stop (SMA20)», no «volatilidad»)): «La capitalización de 5.01T podría indicar una mayor volatilidad (330.13).»",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «resumen»: 347.07 (en los datos es «Open / High / Low / Prev close», no «rendimiento»)",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «tesis»: 341.27 (en los datos es «Open / High / Low / Prev close», no «P/E»)",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «tesis»: 347.07 (en los datos es «Open / High / Low / Prev close», no «RSI14»)"
+    ],
+    "risks": [
+      "El PER forward de 35.76 podría indicar un valoración alta (341.27). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC)",
+      "El beta de 1.07 podría indicar una correlación similar a la del mercado (330.13). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 77.19999694824219,
+      "macroScore": 58.400001525878906,
+      "momentum": 69.9000015258789,
+      "overall": 61.79999923706055,
+      "risk": 30.700000762939453,
+      "sentiment": 57.0,
+      "technical": 65.9000015258789,
+      "valuation": 34.900001525878906
+    },
+    "sources": [
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.866245838Z",
+        "title": "Fundamentales stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "GuruFocus.com",
+        "publishedAt": "2026-10-14T19:00:41Z",
+        "title": "Apple Stocks Rise as $299 HomeView Adds a Paid-AI Path",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/apple-stocks-rise-299-homeview-190041463.html"
+      },
+      {
+        "provider": "Yahoo",
+        "publishedAt": "2026-10-14T18:38:00Z",
+        "title": "GlobalFoundries Stock Extends Rally on Chip Deal Worth Up to $21 Billion",
+        "url": "https://finnhub.io/api/news?id=9d5a7b0fb6eceb0c86f7571c08fbc78ae26daa3eaf61b04fce0cf62281ee0736"
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:15.894470797Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:AAPL",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Comprar en el punto medio de la zona de entrada (339.88) para limitar el riesgo (1.9% ATR14).\nSalida: Establecer un stop en 330.13, la SMA20, para proteger la inversión (336.81).\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular (61.8/100) debido a la tendencia alcista fuerte (347.07⚠) y el rendimiento a 1 año sólido (38.4%).",
+    "thesis": "El PER forward de 35.76 y el P/E de 341.27⚠ indican una valoración alta, pero los altos márgenes operativos (32.6%) y ROE (148.8%) apoyan la inversión (341.27). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC)\n\nLa tendencia alcista fuerte (347.07) y la media móvil 50 sobre la 200 (291.77) indican un mercado en fase de crecimiento (341.27). El RSI14 en zona neutral (62.1) y el MACD positivo (0.14) sugieren un mercado en equilibrio (341.27). (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nEl análisis técnico muestra una tendencia alcista fuerte (347.07⚠) y un RSI14 en zona neutral (62.1), lo que sugiere acumular (339.88). El análisis fundamental destaca altos márgenes operativos (32.6%) y ROE (148.8%), lo que apoya la decisión (341.27). (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: La puntuación global de 62/100 y la confianza del 72% indican una decisión cautelosa (339.88).",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 se sitúa por encima de 70, podría indicar sobrecompra (62.1).",
+      "Si el precio cierra por debajo del stop en 330.13, podría indicar una corrección (330.13).",
+      "Si el rendimiento a 1 año disminuye a menos del 30%, podría indicar una debilidad (38.4%)."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1592,
+      "confidence": 0.5799999833106995,
+      "droppedClaims": 2,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 2,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 2,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 26,
+      "figuresAllTotal": 50,
+      "figuresThesisDistinct": 10,
+      "figuresThesisTotal": 19,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 4,
+      "labeledOk": 23,
+      "llmCalls": 5,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 9645,
+      "qualityNotesCount": 5,
+      "thesisLabeledOk": 10,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 7,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 24,
+      "unverifiedNotes": 3,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 6,
+      "wrongLabel": 3,
+      "wrongLabelExamples": [
+        {
+          "actual": "Open / High / Low / Prev close",
+          "figure": "347.07",
+          "said": "rendimiento",
+          "snippet": " recomienda acumular (61.8/100) debido a la tendencia alcista fuerte (347.07) y el rendimiento a 1 año sólido (38.4%)."
+        },
+        {
+          "actual": "Open / High / Low / Prev close",
+          "figure": "341.27",
+          "said": "P/E",
+          "snippet": "El PER forward de 35.76 y el P/E de 341.27 indican una valoración alta, pero los alto"
+        },
+        {
+          "actual": "Open / High / Low / Prev close",
+          "figure": "347.07",
+          "said": "RSI14",
+          "snippet": "El análisis técnico muestra una tendencia alcista fuerte (347.07) y un RSI14 en zona neutral (62.1), lo que "
+        }
+      ]
+    },
+    "depth": "standard",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 35.073056307,
+    "wordingFixCalls": 0
+  }
+}

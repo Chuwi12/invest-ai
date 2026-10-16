@@ -1,0 +1,181 @@
+{
+  "analysis": {
+    "asset": "stock:MSFT",
+    "bearCase": [
+      "El precio (533.69 USD) se encuentra en una zona neutra del RSI14 (62.4), lo que podría indicar una corrección en el futuro. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El PER forward (22.54) es alto, lo que podría sugerir que el mercado ya ha incorporado optimismo en las expectativas de crecimiento. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La caída máxima en 1 año (-34.9%) podría indicar un riesgo significativo y una posibilidad de corrección en el corto plazo. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "bullCase": [
+      "La tendencia alcista fuerte (SMA200 = 434.78) y la SMA50 sobre la SMA200 (+15.9%) indican un fuerte apoyo al alza. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El rendimiento a 3 meses (+38.6%) y el crecimiento de beneficios (+31.7%) son altos, lo que podría indicar un potencial de crecimiento. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El precio objetivo medio (590.28 USD) sugiere un potencial de crecimiento del 10.6%. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": null,
+        "description": "La fecha de resultados trimestrales, 2026-10-26⚠, podría ser un catalizador importante.",
+        "impact": null
+      },
+      {
+        "date": null,
+        "description": "El anuncio de OpenAI CFO sobre un riesgo oculto en modelos de IA chinos podría afectar a Microsoft (MSFT).",
+        "impact": null
+      }
+    ],
+    "completionTokens": 1700,
+    "confidence": 0.6899999976158142,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 45200,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-15T13:50:22.991295457Z",
+    "horizon": "medium",
+    "horizonNote": "El mercado es volátil con una volatilidad 30d anualizada del 22.6% y una caída máxima del 1 año del -34.9%.",
+    "id": "01a13fd4-090f-7043-9eec-4537711d2fd0",
+    "keyLevels": {
+      "entryZone": [
+        522.1318105669318,
+        533.69
+      ],
+      "resistances": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527,
+        870.0
+      ],
+      "stopLoss": 504.81431117728334,
+      "supports": [
+        516.3725006103516,
+        503.90899963378905,
+        493.5,
+        489.6375045776367
+      ],
+      "targets": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527
+      ]
+    },
+    "levelsNote": "Zona de entrada 522,13 – 533,69 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 504,81 = SMA20 516,37 − 1×ATR14 11,56 (Yahoo Finance, 14 oct 2026). Objetivos: 546,68 = banda de Bollinger superior; 553,72 = resistencia; 590,28 = precio objetivo medio de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.8 (entrada en el punto medio de la zona, 527,91).",
+    "llmCalls": 5,
+    "method": "Modelo qwen2.5:7b, profundidad standard, 5 llamadas, 9770 tokens de entrada y 1700 de salida, 45 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.17,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 4.4,
+      "volatility30d": 0.22580403329215804
+    },
+    "priceAtAnalysis": 533.69,
+    "promptTokens": 9770,
+    "qualityNotes": [
+      "Fechas que no figuran en los datos (marcadas con ⚠) en «catalizador»: 2026-10-26"
+    ],
+    "risks": [
+      "El PER forward (22.54) es alto, lo que podría indicar un riesgo de sobrevaloración. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El beta de 1.1 sugiere que el activo es sensible a los movimientos del mercado, lo que podría aumentar la volatilidad. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 73.9000015258789,
+      "macroScore": 58.400001525878906,
+      "momentum": 66.80000305175781,
+      "overall": 63.0,
+      "risk": 41.099998474121094,
+      "sentiment": 68.4000015258789,
+      "technical": 69.5,
+      "valuation": 45.29999923706055
+    },
+    "sources": [
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.982381547Z",
+        "title": "Fundamentales stock:MSFT",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Comprar en tramos a precios dentro de la zona de entrada (522.13 – 533.69 USD), con stop en 504.81 USD y objetivos en 546.68 / 553.72 / 590.28 USD.\nSalida: Vender si el precio cae por debajo del stop (504.81 USD) o si se alcanza el primer objetivo (546.68 USD).\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular (confianza 0.76) en Microsoft (MSFT) debido a la fuerte tendencia alcista (SMA200 = 434.78) y el rendimiento a 3 meses (+38.6%). El precio objetivo medio (590.28 USD) sugiere un potencial de crecimiento del 10.6%.",
+    "thesis": "El PER forward (22.54) y el crecimiento de beneficios (+31.7%) indican un valoración razonable pero potencial de crecimiento limitado. El margen operativo (45.1%) y el ROE (34.0%) sugieren alta eficiencia y rentabilidad. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nLa tendencia alcista fuerte (SMA200 = 434.78) y la SMA50 sobre la SMA200 (+15.9%) indican un fuerte apoyo al alza. El MACD histograma 1.5 (alcista) y el RSI14 en zona neutra (62.4) apoyan la estrategia alcista. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa valoración razonable (PER forward = 22.54) y el crecimiento de beneficios (+31.7%) apoyan la decisión de acumular. Sin embargo, el alto PER y la caída máxima en 1 año (-34.9%) son factores de riesgo. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nIncertidumbre: El RSI14 se encuentra en zona neutra (62.4), lo que añade incertidumbre a la decisión de compra.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 se sitúa por encima de 70, lo que indicaría sobrecompra.",
+      "Si el precio cierra por debajo del stop (504.81 USD), lo que podría indicar una corrección.",
+      "Si el rendimiento a 1 año se deteriora significativamente, lo que podría indicar una pérdida de confianza en el mercado."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1700,
+      "confidence": 0.6899999976158142,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 20,
+      "figuresAllTotal": 40,
+      "figuresThesisDistinct": 9,
+      "figuresThesisTotal": 12,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 33,
+      "llmCalls": 5,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 63.0,
+      "promptTokens": 9770,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 12,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 0,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 1,
+      "unlabeledOk": 7,
+      "unverifiedNotes": 1,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=1"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 45.202090399,
+    "wordingFixCalls": 0
+  }
+}
