@@ -58,6 +58,11 @@ export const qk = {
   performance: ['learning', 'performance'] as const,
   calibrated: (confidence: number, horizon: number, model: string | undefined) => ['learning', 'calibrated', confidence, horizon, model ?? null] as const,
   watchlist: ['watchlist'] as const,
+  ipoCalendar: (from?: string, to?: string) => ['ipo', 'calendar', from ?? null, to ?? null] as const,
+  ipoProfile: (symbol: string, date?: string) => ['ipo', 'profile', symbol, date ?? null] as const,
+  ipoProspectus: (symbol: string) => ['ipo', 'prospectus', symbol] as const,
+  ipoPerformance: (symbol: string, date?: string) => ['ipo', 'performance', symbol, date ?? null] as const,
+  ipoBaseRate: (months: number) => ['ipo', 'base-rate', months] as const,
 }
 
 /** Vigencia por tipo de dato. */
@@ -682,5 +687,58 @@ export function useCalibratedConfidence(confidence: number | undefined, horizon 
     enabled: confidence !== undefined,
     staleTime: 5 * MIN,
     retry: false,
+  })
+}
+
+// --- OPV de EE. UU. -----------------------------------------------------------------------------
+
+export function useIpoCalendar(range?: { from?: string; to?: string }) {
+  return useQuery({
+    queryKey: qk.ipoCalendar(range?.from, range?.to),
+    queryFn: ({ signal }) => api.ipoCalendar(range, signal),
+    staleTime: 10 * MIN,
+  })
+}
+
+export function useIpoRiskProfile(symbol: string | undefined, date?: string) {
+  return useQuery({
+    queryKey: qk.ipoProfile(symbol ?? '', date),
+    queryFn: ({ signal }) => api.ipoRiskProfile(symbol as string, date, signal),
+    enabled: !!symbol,
+    staleTime: 10 * MIN,
+    retry: false,
+  })
+}
+
+export function useIpoProspectus(symbol: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: qk.ipoProspectus(symbol ?? ''),
+    queryFn: ({ signal }) => api.ipoProspectus(symbol as string, undefined, signal),
+    enabled: !!symbol && enabled,
+    staleTime: 30 * MIN,
+    retry: false,
+  })
+}
+
+/** Rendimiento posterior; solo tiene sentido si la OPV ya cotiza (`enabled`). */
+export function useIpoPerformance(symbol: string | undefined, date: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.ipoPerformance(symbol ?? '', date),
+    queryFn: ({ signal }) => api.ipoPerformance(symbol as string, date, signal),
+    enabled: !!symbol && enabled,
+    staleTime: 30 * MIN,
+    retry: false,
+  })
+}
+
+export function useIpoBaseRate(months = 12, enabled = true) {
+  return useQuery({
+    queryKey: qk.ipoBaseRate(months),
+    queryFn: ({ signal }) => api.ipoBaseRate(months, signal),
+    enabled,
+    staleTime: 30 * MIN,
+    // El cálculo en frío puede superar el tiempo de espera del servidor: se reintenta unas veces.
+    retry: 2,
+    retryDelay: 8000,
   })
 }

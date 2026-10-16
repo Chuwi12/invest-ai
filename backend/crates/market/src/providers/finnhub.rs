@@ -168,9 +168,7 @@ pub fn parse_ipo_calendar(v: &Value, now: chrono::DateTime<Utc>) -> Vec<IpoEntry
                 None => (num(&r["price"]), num(&r["price"])),
             };
             let symbol = text(&r["symbol"]);
-            let low = name.to_ascii_lowercase();
-            let spac_likely = low.contains("acquisition")
-                && (price_low == Some(10.0) || symbol.as_deref().is_some_and(|s| s.len() == 5 && s.ends_with('U')));
+            let spac_likely = is_spac_likely(&name, symbol.as_deref(), price_low, price_high);
             Some(IpoEntry {
                 date,
                 symbol,
@@ -188,6 +186,45 @@ pub fn parse_ipo_calendar(v: &Value, now: chrono::DateTime<Utc>) -> Vec<IpoEntry
             })
         })
         .collect()
+}
+
+/// Indicio (no certeza) de sociedad vehículo (SPAC) a partir del nombre, el símbolo y el precio.
+/// Las SPAC salen a 10,00 USD (valor del fideicomiso), así que el precio exacto es la condición
+/// necesaria de las reglas nuevas; además debe darse una de: (a) símbolo de 5 letras acabado en
+/// `U` (unidades), (b) palabra típica en el nombre, (c) nombre acabado en numeral de serie
+/// («Capital Corp XIII», «Corp 4», «Capital Four»). Se mantiene la regla antigua («acquisition»
+/// con precio 10 o símbolo de unidades). Heurística: puede dejar pasar alguna SPAC y, con precio
+/// 10 y «Holdings» o «Special», marcar alguna empresa operativa. Una conversión de caja de ahorros
+/// a 10 USD («Hoyne Bancorp, Inc.») no se marca.
+pub fn is_spac_likely(name: &str, symbol: Option<&str>, low: Option<f64>, high: Option<f64>) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let units = symbol.is_some_and(|s| s.len() == 5 && s.ends_with('U') && s.chars().all(|c| c.is_ascii_uppercase()));
+    if lower.contains("acquisition") && (low == Some(10.0) || units) {
+        return true;
+    }
+    if low != Some(10.0) || high != Some(10.0) {
+        return false;
+    }
+    const WORDS: &[&str] = &[
+        "acquisition", "merger", "spac", "blank check", "capital corp", "capital partners", "equity partners", "holdings",
+        "investment corp", "opportunit", "liquidity", "growth corp", "special",
+    ];
+    units || WORDS.iter().any(|w| lower.contains(w)) || ends_in_series_number(&lower)
+}
+
+/// Nombre acabado en numeral romano (II..XV), cifra o número en letra, ignorando el sufijo societario.
+fn ends_in_series_number(lower: &str) -> bool {
+    let mut toks: Vec<&str> = lower.split_whitespace().map(|t| t.trim_matches(|c: char| c == ',' || c == '.')).filter(|t| !t.is_empty()).collect();
+    if toks.last().is_some_and(|t| matches!(*t, "inc" | "corp" | "corporation" | "ltd" | "co" | "llc" | "limited")) {
+        toks.pop();
+    }
+    toks.last().is_some_and(|t| {
+        matches!(
+            *t,
+            "ii" | "iii" | "iv" | "v" | "vi" | "vii" | "viii" | "ix" | "x" | "xi" | "xii" | "xiii" | "xiv" | "xv"
+                | "two" | "three" | "four" | "five" | "six" | "seven" | "eight" | "nine" | "ten"
+        ) || (t.len() <= 2 && t.chars().all(|c| c.is_ascii_digit()) && *t != "0" && *t != "1")
+    })
 }
 
 #[async_trait]

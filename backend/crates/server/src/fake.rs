@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use domain::{
     Analysis, Analyst, AssetClass, AssetId, AssetSnapshot, AssetSummary, Candle, ChatEvent, ChatRequest,
-    DomainError, Fundamentals, Horizon, Indicators, Interval, KeyLevels, LlmStatus, MacroContext,
+    DomainError, Fundamentals, Horizon, Indicators, IpoEntry, IpoPerformance, Prospectus, Interval, KeyLevels, LlmStatus, MacroContext,
     MacroIndicator, MarketData, MarketState, NewsItem, PriceTick, ProviderStatus, Quote, Range,
     Result, ScoreBreakdown, Sentiment, SentimentLabel, SourceRef, Trend, Verdict,
 };
@@ -577,5 +577,289 @@ impl Analyst for FakeAnalyst {
             supports_tools: true,
             error: None,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// OPV simulada (INVEST_AI_FAKE=1): empresas inventadas, texto de folleto inventado
+// ---------------------------------------------------------------------------------------------
+
+/// Datos de OPV inventados pero verosímiles. El texto de los folletos usa el mismo formato que los
+/// reales (tablas «Etiqueta | valor»), así que el perfil de riesgo lo calcula el extractor real.
+/// Todo va marcado con `source = "fake"`; las URLs no apuntan a documentos reales.
+#[derive(Clone)]
+pub struct FakeIpo {
+    /// «Hoy» de la simulación (el calendario se genera en torno a esta fecha).
+    pub today: chrono::NaiveDate,
+}
+
+impl Default for FakeIpo {
+    fn default() -> Self {
+        Self { today: Utc::now().date_naive() }
+    }
+}
+
+/// Ficha de una OPV inventada.
+struct FakeSpec {
+    symbol: &'static str,
+    name: &'static str,
+    exchange: &'static str,
+    /// Días respecto a «hoy» (negativo = ya cotiza).
+    offset: i64,
+    status: domain::IpoStatus,
+    /// Precio (o rango) en USD; `None` en presentaciones.
+    price: Option<(f64, f64)>,
+    new_shares: u64,
+    sell_shares: u64,
+    out_after: u64,
+    spac: bool,
+    lock_days: u32,
+    debt_musd: Option<u32>,
+    dual_class: bool,
+    controlled_pct: Option<u32>,
+    dilution: f64,
+    /// (ingresos en miles de USD, resultado neto en miles) por periodo.
+    fin: [(i64, i64); 3],
+    underwriters: [&'static str; 3],
+    /// Bandera de rendimiento: (día 1 %, 3 meses %) usados por la simulación.
+    drift: (f64, f64),
+}
+
+const FAKE_IPOS: &[FakeSpec] = &[
+    FakeSpec { symbol: "LHTX", name: "Lumen Harbor Therapeutics", exchange: "NASDAQ Global Select", offset: -12, status: domain::IpoStatus::Priced, price: Some((16.0, 16.0)), new_shares: 12_500_000, sell_shares: 0, out_after: 48_300_000, spac: false, lock_days: 180, debt_musd: None, dual_class: false, controlled_pct: None, dilution: 9.12, fin: [(0, -41_200), (0, -63_900), (2_100, -78_400)], underwriters: ["Fictional Securities LLC", "Example Capital Markets", "Placeholder & Co."], drift: (31.0, 0.0) },
+    FakeSpec { symbol: "ORFS", name: "Orbital Freight Systems", exchange: "NYSE", offset: -27, status: domain::IpoStatus::Priced, price: Some((24.0, 24.0)), new_shares: 15_000_000, sell_shares: 18_000_000, out_after: 212_000_000, spac: false, lock_days: 180, debt_musd: Some(240), dual_class: true, controlled_pct: Some(71), dilution: 21.4, fin: [(612_300, 18_400), (781_900, -22_700), (904_500, 31_200)], underwriters: ["Example Capital Markets", "Fictional Securities LLC", "Sample Partners LLC"], drift: (-6.0, -18.0) },
+    FakeSpec { symbol: "CBME", name: "Cobalt Meridian Energy", exchange: "NYSE", offset: 9, status: domain::IpoStatus::Expected, price: Some((18.0, 20.0)), new_shares: 20_000_000, sell_shares: 0, out_after: 96_000_000, spac: false, lock_days: 180, debt_musd: Some(120), dual_class: false, controlled_pct: None, dilution: 14.8, fin: [(210_000, -12_000), (305_400, -4_300), (388_700, 9_800)], underwriters: ["Sample Partners LLC", "Example Capital Markets", "Placeholder & Co."], drift: (0.0, 0.0) },
+    FakeSpec { symbol: "NRWF", name: "Nimbus Row Foods", exchange: "NASDAQ Global Market", offset: 23, status: domain::IpoStatus::Expected, price: Some((12.0, 14.0)), new_shares: 9_000_000, sell_shares: 3_000_000, out_after: 41_500_000, spac: false, lock_days: 90, debt_musd: None, dual_class: false, controlled_pct: None, dilution: 8.3, fin: [(88_000, 1_900), (97_400, 3_100), (121_800, 6_700)], underwriters: ["Placeholder & Co.", "Fictional Securities LLC", "Sample Partners LLC"], drift: (0.0, 0.0) },
+    FakeSpec { symbol: "HQACU", name: "Helix Quarry Acquisition Corp.", exchange: "NASDAQ Global", offset: -5, status: domain::IpoStatus::Priced, price: Some((10.0, 10.0)), new_shares: 20_000_000, sell_shares: 0, out_after: 25_000_000, spac: true, lock_days: 180, debt_musd: None, dual_class: false, controlled_pct: None, dilution: 0.9, fin: [(0, -120), (0, -310), (0, -95)], underwriters: ["Example Capital Markets", "Fictional Securities LLC", "Sample Partners LLC"], drift: (0.5, 0.0) },
+    FakeSpec { symbol: "VLPM", name: "Verdant Loop Mobility", exchange: "NASDAQ", offset: -3, status: domain::IpoStatus::Filed, price: None, new_shares: 0, sell_shares: 0, out_after: 0, spac: false, lock_days: 180, debt_musd: None, dual_class: false, controlled_pct: None, dilution: 0.0, fin: [(0, 0), (0, 0), (0, 0)], underwriters: ["", "", ""], drift: (0.0, 0.0) },
+    FakeSpec { symbol: "STRB", name: "Saffron Tide Robotics", exchange: "NASDAQ", offset: 15, status: domain::IpoStatus::Withdrawn, price: None, new_shares: 0, sell_shares: 0, out_after: 0, spac: false, lock_days: 180, debt_musd: None, dual_class: false, controlled_pct: None, dilution: 0.0, fin: [(0, 0), (0, 0), (0, 0)], underwriters: ["", "", ""], drift: (0.0, 0.0) },
+    // Más antiguas: solo alimentan la tasa base y el rendimiento posterior.
+    FakeSpec { symbol: "GPKS", name: "Granite Peak Software", exchange: "NASDAQ Global Select", offset: -75, status: domain::IpoStatus::Priced, price: Some((20.0, 20.0)), new_shares: 14_000_000, sell_shares: 6_000_000, out_after: 88_000_000, spac: false, lock_days: 180, debt_musd: None, dual_class: true, controlled_pct: None, dilution: 15.2, fin: [(142_000, -9_800), (201_000, -4_100), (268_000, 2_300)], underwriters: ["Fictional Securities LLC", "Example Capital Markets", "Sample Partners LLC"], drift: (44.0, 22.0) },
+    FakeSpec { symbol: "AMBR", name: "Amber Trail Biosciences", exchange: "NASDAQ Global Select", offset: -120, status: domain::IpoStatus::Priced, price: Some((15.0, 15.0)), new_shares: 10_000_000, sell_shares: 0, out_after: 39_000_000, spac: false, lock_days: 180, debt_musd: None, dual_class: false, controlled_pct: None, dilution: 8.9, fin: [(0, -30_000), (0, -52_000), (0, -71_000)], underwriters: ["Example Capital Markets", "Placeholder & Co.", "Fictional Securities LLC"], drift: (12.0, -27.0) },
+    FakeSpec { symbol: "KLRN", name: "Kilroy Nine Logistics", exchange: "NYSE", offset: -170, status: domain::IpoStatus::Priced, price: Some((28.0, 28.0)), new_shares: 18_000_000, sell_shares: 12_000_000, out_after: 150_000_000, spac: false, lock_days: 180, debt_musd: Some(300), dual_class: false, controlled_pct: Some(64), dilution: 25.1, fin: [(402_000, 21_000), (470_000, 33_400), (561_000, 40_100)], underwriters: ["Sample Partners LLC", "Fictional Securities LLC", "Example Capital Markets"], drift: (8.0, 5.0) },
+    FakeSpec { symbol: "PNDL", name: "Pendulum Reach Health", exchange: "NASDAQ Global Select", offset: -230, status: domain::IpoStatus::Priced, price: Some((17.0, 17.0)), new_shares: 16_000_000, sell_shares: 0, out_after: 71_000_000, spac: false, lock_days: 180, debt_musd: None, dual_class: false, controlled_pct: None, dilution: 11.0, fin: [(55_000, -38_000), (79_000, -44_000), (96_000, -51_000)], underwriters: ["Placeholder & Co.", "Example Capital Markets", "Sample Partners LLC"], drift: (63.0, 41.0) },
+];
+
+/// Pseudoaleatorio estable por símbolo (no es criptografía: solo variación inventada).
+fn fake_noise(sym: &str, salt: u32) -> f64 {
+    let mut h: u32 = 2_166_136_261 ^ salt;
+    for b in sym.bytes() {
+        h = (h ^ u32::from(b)).wrapping_mul(16_777_619);
+    }
+    f64::from(h % 10_000) / 10_000.0 - 0.5
+}
+
+fn group3(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn money_cell(v: i64) -> String {
+    if v < 0 { format!("$({})", group3(v.unsigned_abs())) } else { format!("${}", group3(v as u64)) }
+}
+
+impl FakeIpo {
+    fn entry(&self, s: &FakeSpec) -> IpoEntry {
+        let (lo, hi) = s.price.unzip();
+        let total = match (s.status, s.price) {
+            (domain::IpoStatus::Priced, Some((p, _))) => Some(p * (s.new_shares + s.sell_shares) as f64),
+            (domain::IpoStatus::Expected, Some((_, h))) => Some(h * (s.new_shares + s.sell_shares) as f64 * 1.15),
+            _ => None,
+        };
+        IpoEntry {
+            date: self.today + chrono::Duration::days(s.offset),
+            symbol: Some(s.symbol.into()),
+            name: s.name.into(),
+            exchange: Some(s.exchange.into()),
+            status: s.status,
+            price_low: lo,
+            price_high: hi,
+            shares: (s.new_shares + s.sell_shares > 0).then_some(s.new_shares + s.sell_shares),
+            total_value: total,
+            spac_likely: s.spac,
+            source: "fake".into(),
+            source_url: None,
+            as_of: fixed_time(),
+        }
+    }
+
+    fn spec(symbol: &str) -> Option<&'static FakeSpec> {
+        FAKE_IPOS.iter().find(|s| s.symbol.eq_ignore_ascii_case(symbol))
+    }
+
+    fn section(key: &str, title: &str, text: String) -> domain::ProspectusSection {
+        let n = text.chars().count();
+        domain::ProspectusSection { key: key.into(), title: title.into(), text, parent: None, truncated: false, original_chars: n }
+    }
+
+    /// Folleto inventado con el formato de los reales.
+    fn fake_prospectus(&self, s: &FakeSpec) -> Prospectus {
+        let price = s.price.map_or(0.0, |(_, h)| h);
+        let total = s.new_shares + s.sell_shares;
+        let mut offering = format!("Common stock offered by us | {} shares.\n", group3(s.new_shares));
+        if s.sell_shares > 0 {
+            offering.push_str(&format!("Common stock offered by the selling stockholders | {} shares.\n", group3(s.sell_shares)));
+        }
+        offering.push_str(&format!("Common stock to be outstanding immediately after this offering | {} shares.\n", group3(s.out_after)));
+        if s.dual_class {
+            offering.push_str("Voting rights | Following this offering we will have two classes of common stock. Our Class A common stock will be entitled to one vote per share, and our Class B common stock will be entitled to ten votes per share.\n");
+        }
+        let mut uop = format!(
+            "We estimate that we will receive net proceeds of approximately ${:.1} million from the sale of shares in this offering, based on an assumed initial public offering price of ${price:.2} per share. This is simulated text.\n",
+            price * s.new_shares as f64 * 0.93 / 1e6
+        );
+        if s.sell_shares > 0 {
+            uop.push_str("We will not receive any proceeds from the sale of shares by the selling stockholders.\n");
+        }
+        match s.debt_musd {
+            Some(d) => uop.push_str(&format!("We intend to use the net proceeds to repay approximately ${d} million of outstanding indebtedness under our term loan and for general corporate purposes.\n")),
+            None => uop.push_str("We intend to use the net proceeds to fund clinical and product development, working capital and other general corporate purposes.\n"),
+        }
+        let mut summary = String::from("This is a simulated prospectus summary written for the INVEST_AI_FAKE mode. The company, its figures and its underwriters are invented.\n");
+        if let Some(pct) = s.controlled_pct {
+            summary.push_str(&format!("As a “controlled company” under the listing rules we may exempt ourselves from some governance requirements. Our sponsor will control approximately {pct}% of the voting power of our outstanding capital stock after this offering.\n"));
+        }
+        let lock = format!(
+            "We, our directors, executive officers and the holders of substantially all of our equity securities have agreed with the underwriters that for a period of {} days after the date of this prospectus we will not sell or transfer any shares, subject to exceptions.\n",
+            s.lock_days
+        );
+        let mut uw = String::from("The underwriters named below have severally agreed to purchase the shares set forth opposite their names. Simulated text.\nName | Number of Shares\n");
+        let split = [total * 45 / 100, total * 35 / 100];
+        let parts = [split[0], split[1], total - split[0] - split[1]];
+        for (n, k) in s.underwriters.iter().zip(parts) {
+            uw.push_str(&format!("{n} | {}\n", group3(k)));
+        }
+        uw.push_str(&format!("Total | {}\n", group3(total)));
+        let dil = format!(
+            "Purchasers of shares in this offering will experience immediate dilution.\nDilution per share to new investors in this offering | ${:.2}\n",
+            s.dilution
+        );
+        let fin = format!(
+            "(in thousands) | 2024 | 2025 | Six Months Ended June 30, 2026\nRevenue | {} | {} | {}\nNet loss | {} | {} | {}\n",
+            money_cell(s.fin[0].0), money_cell(s.fin[1].0), money_cell(s.fin[2].0),
+            money_cell(s.fin[0].1), money_cell(s.fin[1].1), money_cell(s.fin[2].1),
+        );
+        // «Net loss» con resultados positivos se ve como «Net income (loss)» en los folletos reales.
+        let fin = if s.fin.iter().any(|f| f.1 > 0) { fin.replace("Net loss", "Net income (loss)") } else { fin };
+        let sections = vec![
+            Self::section("summary", "Prospectus Summary", summary),
+            Self::section("offering", "The Offering", offering),
+            Self::section("summary_financial_data", "Summary Financial Data", fin),
+            Self::section("risk_factors", "Risk Factors", "Simulated risk factors. Investing in these shares involves a high degree of risk (invented text).".into()),
+            Self::section("use_of_proceeds", "Use of Proceeds", uop),
+            Self::section("dilution", "Dilution", dil),
+            Self::section("lock_up", "Lock-Up Agreements", lock),
+            Self::section("underwriting", "Underwriting", uw),
+        ];
+        let entry = self.entry(s);
+        Prospectus {
+            issuer: s.name.into(),
+            cik: 9_000_000 + s.symbol.len() as u64,
+            ticker: Some(s.symbol.into()),
+            form: if s.status == domain::IpoStatus::Priced { "424B4".into() } else { "S-1/A".into() },
+            preliminary: s.status != domain::IpoStatus::Priced,
+            filed_on: entry.date - chrono::Duration::days(1),
+            accession: "0000000000-00-000000".into(),
+            url: "https://www.sec.gov/edgar/search/".into(),
+            index_url: "https://www.sec.gov/edgar/search/".into(),
+            offer_price: s.price.map(|(_, h)| h),
+            missing: vec!["capitalization".into(), "dividend_policy".into(), "principal_stockholders".into(), "shares_eligible".into()],
+            document_chars: sections.iter().map(|x| x.original_chars).sum(),
+            sections,
+            source: "fake".into(),
+            fetched_at: fixed_time(),
+        }
+    }
+
+    fn fake_performance(&self, s: &FakeSpec, date: chrono::NaiveDate, price: f64, bench: &str) -> IpoPerformance {
+        let today = self.today;
+        let days = (today - date).num_days().max(0);
+        let d1 = s.drift.0 + fake_noise(s.symbol, 1) * 6.0;
+        let long = s.drift.1;
+        let ret = |months: i64| -> f64 { d1 + (long - d1) * (months as f64 / 3.0).min(2.0) + fake_noise(s.symbol, months as u32 + 7) * 8.0 };
+        let mut points = Vec::new();
+        for (h, m) in [("1m", 1i64), ("3m", 3), ("6m", 6), ("12m", 12)] {
+            let target = date + chrono::Duration::days(m * 30);
+            let reached = (today - target).num_days() >= 0;
+            let r = reached.then(|| ret(m));
+            let b = reached.then(|| 1.4 * m as f64 + fake_noise(s.symbol, 40 + m as u32) * 2.0);
+            points.push(domain::IpoReturnPoint {
+                horizon: h.into(),
+                target_date: target,
+                price_date: reached.then_some(target),
+                price: r.map(|r| price * (1.0 + r / 100.0)),
+                return_pct: r,
+                since_first_close_pct: r.map(|r| ((1.0 + r / 100.0) / (1.0 + d1 / 100.0) - 1.0) * 100.0),
+                benchmark_return_pct: b,
+                excess_pct: r.zip(b).map(|(r, b)| r - b),
+            });
+        }
+        let latest = if days >= 30 { ret((days / 30).min(12)) } else { d1 };
+        IpoPerformance {
+            symbol: s.symbol.into(),
+            ipo_date: date,
+            offer_price: price,
+            offer_price_source: "calendar".into(),
+            first_day_close: price * (1.0 + d1 / 100.0),
+            first_day_return_pct: d1,
+            first_day_high_pct: d1 + 4.0 + fake_noise(s.symbol, 3).abs() * 6.0,
+            points,
+            latest_price: price * (1.0 + latest / 100.0),
+            latest_date: today,
+            latest_return_pct: latest,
+            max_drawdown_pct: -(8.0 + fake_noise(s.symbol, 5).abs() * 40.0),
+            benchmark: bench.into(),
+            source: "fake".into(),
+            source_url: None,
+            warnings: vec!["Datos simulados (INVEST_AI_FAKE).".into()],
+            as_of: fixed_time(),
+        }
+    }
+}
+
+#[async_trait]
+impl domain::IpoData for FakeIpo {
+    async fn calendar(&self, from: chrono::NaiveDate, to: chrono::NaiveDate) -> Result<Vec<IpoEntry>> {
+        Ok(FAKE_IPOS.iter().map(|s| self.entry(s)).filter(|e| e.date >= from && e.date <= to).collect())
+    }
+
+    async fn prospectus(&self, issuer: &str) -> Result<Prospectus> {
+        let s = Self::spec(issuer).ok_or_else(|| DomainError::NotFound(format!("folleto no encontrado: {issuer}")))?;
+        if s.price.is_none() || s.new_shares == 0 {
+            return Err(DomainError::NotFound(format!("{issuer}: aún sin folleto con datos de la oferta")));
+        }
+        Ok(self.fake_prospectus(s))
+    }
+
+    async fn performance(&self, symbol: &str, ipo_date: chrono::NaiveDate, offer_price: Option<f64>, benchmark: &str) -> Result<IpoPerformance> {
+        let s = Self::spec(symbol).ok_or_else(|| DomainError::NotFound(format!("{symbol}: OPV desconocida")))?;
+        let e = self.entry(s);
+        let price = offer_price.or(e.price_low).ok_or_else(|| DomainError::NotFound(format!("{symbol}: sin precio de OPV")))?;
+        if e.status != domain::IpoStatus::Priced || e.date > self.today {
+            return Err(DomainError::NotFound(format!("{symbol}: aún no cotiza")));
+        }
+        Ok(self.fake_performance(s, ipo_date, price, benchmark))
+    }
+
+    async fn base_rate(&self, months: u32) -> Result<domain::IpoBaseRate> {
+        let cutoff = self.today - chrono::Duration::days(i64::from(months) * 30);
+        let perfs: Vec<IpoPerformance> = FAKE_IPOS
+            .iter()
+            .filter(|s| s.status == domain::IpoStatus::Priced && !s.spac)
+            .map(|s| (s, self.entry(s)))
+            .filter(|(_, e)| e.date >= cutoff && e.date <= self.today)
+            .map(|(s, e)| self.fake_performance(s, e.date, e.price_low.unwrap_or(10.0), "SPY"))
+            .collect();
+        let mut b = market::ipo_risk::compute_base_rate(&perfs, months, "SPY", fixed_time());
+        b.source = "fake".into();
+        b.caveats.insert(0, "Datos simulados (INVEST_AI_FAKE): no son OPV reales.".into());
+        Ok(b)
     }
 }

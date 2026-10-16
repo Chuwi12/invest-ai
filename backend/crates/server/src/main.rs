@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-use domain::{Analyst, MarketData, ModelService, NewsItem};
+use domain::{Analyst, IpoData, MarketData, ModelService, NewsItem};
 use server::{AppState, Settings, config::Config, db, fake, repo::settings::SqliteSettings};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -10,7 +10,7 @@ use tracing_subscriber::EnvFilter;
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 /// Mercado, analista, anotador de sentimiento y, con el analista real, la gestión de modelos.
-type Services = (Arc<dyn MarketData>, Arc<dyn Analyst>, fn(&mut [NewsItem]), Option<Arc<dyn ModelService>>);
+type Services = (Arc<dyn MarketData>, Arc<dyn IpoData>, Arc<dyn Analyst>, fn(&mut [NewsItem]), Option<Arc<dyn ModelService>>);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::from_env()?;
     let pool = db::connect(&config.database_url).await?;
-    let (market, analyst, annotate_news, models) = build_services(&config, &pool).await?;
+    let (market, ipo, analyst, annotate_news, models) = build_services(&config, &pool).await?;
 
     let mut state = AppState::new(
         market,
@@ -34,7 +34,8 @@ async fn main() -> anyhow::Result<()> {
         pool.clone(),
         Settings { language: config.language.clone(), allowed_origins: config.frontend_origins.clone() },
     )
-    .with_news_annotator(annotate_news);
+    .with_news_annotator(annotate_news)
+    .with_ipo(ipo);
     if let Some(models) = models {
         state = state.with_models(models);
     }
@@ -111,7 +112,7 @@ async fn build_services(config: &Config, pool: &sqlx::SqlitePool) -> anyhow::Res
     if config.fake {
         tracing::warn!("INVEST_AI_FAKE activo: datos y analista simulados");
         let market = fake::FakeMarket { tick_interval: Duration::from_millis(250), ..Default::default() };
-        return Ok((Arc::new(market), Arc::new(fake::FakeAnalyst::default()), fake::annotate_fake, None));
+        return Ok((Arc::new(market), Arc::new(fake::FakeIpo::default()), Arc::new(fake::FakeAnalyst::default()), fake::annotate_fake, None));
     }
     // Datos reales: proveedores con fallback, caché y tiempo real (ver docs/notes/market.md).
     let market = market::MarketService::new(market::MarketConfig::from_env())
@@ -121,7 +122,8 @@ async fn build_services(config: &Config, pool: &sqlx::SqlitePool) -> anyhow::Res
     let analyst = ai::OllamaAnalyst::new(ai::AiConfig::from_env(), settings)
         .map_err(|e| anyhow::anyhow!("no se pudo iniciar el analista: {e}"))?;
     let models = analyst.models();
-    Ok((market, Arc::new(analyst), ai::annotate_sentiment, Some(models)))
+    let ipo: Arc<dyn IpoData> = Arc::new(market::MarketIpo(market.clone()));
+    Ok((market, ipo, Arc::new(analyst), ai::annotate_sentiment, Some(models)))
 }
 
 /// Espera Ctrl+C o SIGTERM.

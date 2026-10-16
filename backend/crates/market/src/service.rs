@@ -1206,6 +1206,8 @@ pub struct MarketService {
     inner: Arc<Inner>,
     hub: Hub,
     cancel: CancellationToken,
+    /// Tasa base de OPV recientes (caché de 6 h y cálculo único en vuelo).
+    pub(crate) ipo_base: crate::ipo_risk::BaseRates,
 }
 
 impl Drop for MarketService {
@@ -1325,7 +1327,7 @@ impl MarketService {
             }
         }
         let hub = builder.build(quote_fn, cancel.clone());
-        Ok(Arc::new(Self { inner, hub, cancel }))
+        Ok(Arc::new(Self { inner, hub, cancel, ipo_base: Default::default() }))
     }
 
     /// Cadena de opciones (Yahoo). Fuera del contrato `MarketData`.
@@ -1368,24 +1370,49 @@ impl MarketService {
     }
 
     /// Historial de resultados de las OPV con precio definitivo de los últimos `months` meses
-    /// (hasta `limit`, las más recientes primero). Las que fallan se omiten.
+    /// (hasta `limit`, en el orden del calendario). Las que fallan se omiten.
     pub async fn recent_ipo_performance(&self, months: u32, limit: usize, benchmark: &str) -> domain::Result<Vec<IpoPerformance>> {
+        let wanted: Vec<IpoEntry> = self.priced_ipos(months).await?.into_iter().take(limit.clamp(1, 50)).collect();
+        Ok(self.performances_of(wanted, benchmark).await)
+    }
+
+    /// Como `recent_ipo_performance`, pero con la muestra repartida de forma uniforme por toda la
+    /// ventana (en vez de las primeras): así incluye OPV lo bastante antiguas para tener ya el
+    /// dato de 3 o 6 meses. Es la base de la tasa base de `ipo_risk`.
+    pub async fn sampled_ipo_performance(&self, months: u32, limit: usize, benchmark: &str) -> domain::Result<Vec<IpoPerformance>> {
+        let all = self.priced_ipos(months).await?;
+        let limit = limit.clamp(1, 50);
+        let wanted: Vec<IpoEntry> = if all.len() <= limit {
+            all
+        } else {
+            (0..limit).map(|k| all[k * all.len() / limit].clone()).collect()
+        };
+        Ok(self.performances_of(wanted, benchmark).await)
+    }
+
+    /// OPV con precio definitivo (sin SPAC) de los últimos `months` meses, según el calendario.
+    async fn priced_ipos(&self, months: u32) -> domain::Result<Vec<IpoEntry>> {
         let to = Utc::now().date_naive();
         let from = to.checked_sub_months(chrono::Months::new(months.clamp(1, 24))).unwrap_or(to);
         let cal = self.inner.ipo_calendar(from, to).await?;
-        let wanted: Vec<IpoEntry> = cal
+        Ok(cal
             .into_iter()
             .filter(|e| e.status == IpoStatus::Priced && !e.spac_likely && e.symbol.is_some() && e.price_low.is_some() && e.price_low == e.price_high)
-            .take(limit.clamp(1, 50))
-            .collect();
-        let mut out = Vec::new();
-        for e in wanted {
-            let sym = e.symbol.clone().unwrap_or_default();
-            if let Ok(p) = self.inner.ipo_performance(&sym, e.date, e.price_low, benchmark).await {
-                out.push(p);
-            }
-        }
-        Ok(out)
+            .collect())
+    }
+
+    /// Rendimiento de varias OPV, cuatro a la vez (cada una son 2-3 peticiones); conserva el
+    /// orden y omite las que fallan.
+    async fn performances_of(&self, wanted: Vec<IpoEntry>, benchmark: &str) -> Vec<IpoPerformance> {
+        futures::stream::iter(wanted)
+            .map(|e| async move {
+                let sym = e.symbol.clone().unwrap_or_default();
+                self.inner.ipo_performance(&sym, e.date, e.price_low, benchmark).await.ok()
+            })
+            .buffered(4)
+            .filter_map(|p| async move { p })
+            .collect::<Vec<_>>()
+            .await
     }
 
     /// Ficha del activo (nombre, mercado...).

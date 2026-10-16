@@ -1233,6 +1233,141 @@ pub struct IpoPerformance {
     pub as_of: DateTime<Utc>,
 }
 
+// ---------------------------------------------------------------------------------------------
+// OPV: perfil de riesgo determinista (sin LLM) y tasa base
+// ---------------------------------------------------------------------------------------------
+
+/// Si el indicador se pudo leer del folleto o de los datos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpoIndicatorStatus {
+    /// Valor leído con una regla verificable; `evidence` cita el texto.
+    Extracted,
+    /// No se encontró o no se pudo leer con fiabilidad. Nunca se rellena ni se estima.
+    NotExtracted,
+}
+
+/// De dónde sale un indicador.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoIndicatorSource {
+    /// `prospectus` (sección de un folleto en EDGAR) o `calendar` (calendario de Finnhub/EDGAR).
+    pub kind: String,
+    /// Clave de la sección del folleto (`use_of_proceeds`, `offering`...), si procede.
+    pub section: Option<String>,
+    /// Texto legible de la fuente («Folleto 424B4, sección «Use of Proceeds»»).
+    pub label: String,
+    /// Documento verificable (folleto en sec.gov o página del calendario).
+    pub url: Option<String>,
+}
+
+/// Una bandera dentro de un indicador (p. ej. «devolver deuda»). Es un hecho leído del texto,
+/// no un veredicto: `attention` solo marca lo que conviene mirar con más cuidado.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoRiskFlag {
+    pub code: String,
+    pub label: String,
+    pub attention: bool,
+    /// Frase literal del folleto que la sustenta.
+    pub evidence: String,
+}
+
+/// Un indicador del perfil de riesgo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoRiskIndicator {
+    pub key: String,
+    pub label: String,
+    pub status: IpoIndicatorStatus,
+    /// Valor en texto, listo para mostrar (`null` si no se extrajo).
+    pub value: Option<String>,
+    /// Valor numérico principal, si lo hay.
+    pub numeric: Option<f64>,
+    pub unit: Option<String>,
+    pub flags: Vec<IpoRiskFlag>,
+    /// Cita literal del folleto de la que sale el valor.
+    pub evidence: Option<String>,
+    /// Limitación o motivo de «no extraído».
+    pub note: Option<String>,
+    pub source: IpoIndicatorSource,
+}
+
+/// Tasa base de las OPV recientes: lo que ha pasado de media, no lo que pasará.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoBaseRate {
+    pub months: u32,
+    pub benchmark: String,
+    /// OPV (con precio definitivo, sin SPAC) incluidas en la muestra.
+    pub sample: usize,
+    /// Con dato del primer día / con dato a 3 meses (las más recientes aún no lo tienen).
+    pub n_day1: usize,
+    pub n_3m: usize,
+    pub median_day1_pct: Option<f64>,
+    /// % de OPV con cierre del primer día por encima del precio de salida.
+    pub positive_day1_pct: Option<f64>,
+    pub median_3m_pct: Option<f64>,
+    /// Mediana del exceso frente al índice a 3 meses.
+    pub median_3m_excess_pct: Option<f64>,
+    /// % de OPV con rentabilidad a 3 meses por encima del índice.
+    pub beat_benchmark_3m_pct: Option<f64>,
+    pub symbols: Vec<String>,
+    pub source: String,
+    pub as_of: DateTime<Utc>,
+    /// Sesgos conocidos de la muestra.
+    pub caveats: Vec<String>,
+}
+
+/// Referencia del folleto del que sale el perfil.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoProspectusRef {
+    pub form: String,
+    pub preliminary: bool,
+    pub filed_on: NaiveDate,
+    pub url: String,
+    pub index_url: String,
+    pub document_chars: usize,
+    pub missing: Vec<String>,
+}
+
+/// Perfil de riesgo de una OPV: indicadores verificables y tasa base. No es una recomendación
+/// ni una predicción.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoRiskProfile {
+    pub symbol: String,
+    pub name: Option<String>,
+    /// Entrada del calendario usada (si se encontró).
+    pub entry: Option<IpoEntry>,
+    pub prospectus: Option<IpoProspectusRef>,
+    pub indicators: Vec<IpoRiskIndicator>,
+    pub base_rate: Option<IpoBaseRate>,
+    /// Avisos: folleto preliminar, SPAC probable, folleto o tasa base no disponibles...
+    pub warnings: Vec<String>,
+    pub disclaimer: String,
+    pub generated_at: DateTime<Utc>,
+}
+
+/// Acceso a los datos de OPV de EE. UU. Lo implementa `market` (`MarketService`); el modo
+/// simulado del servidor implementa una versión con datos inventados.
+#[async_trait]
+pub trait IpoData: Send + Sync + 'static {
+    async fn calendar(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<IpoEntry>>;
+    /// Folleto de la OPV con el texto completo de las secciones.
+    async fn prospectus(&self, issuer: &str) -> Result<Prospectus>;
+    async fn performance(
+        &self,
+        symbol: &str,
+        ipo_date: NaiveDate,
+        offer_price: Option<f64>,
+        benchmark: &str,
+    ) -> Result<IpoPerformance>;
+    /// Tasa base de las OPV de los últimos `months` meses.
+    async fn base_rate(&self, months: u32) -> Result<IpoBaseRate>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

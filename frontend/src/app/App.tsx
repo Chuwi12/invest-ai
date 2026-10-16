@@ -9,6 +9,7 @@ const FavoritesPage = lazy(() => import('@/pages/FavoritesPage'))
 const HistoryPage = lazy(() => import('@/pages/HistoryPage'))
 const ModelsPage = lazy(() => import('@/pages/ModelsPage'))
 const PerformancePage = lazy(() => import('@/pages/PerformancePage'))
+const IpoPage = lazy(() => import('@/pages/IpoPage'))
 
 function NotFound() {
   return (
@@ -35,6 +36,7 @@ export function App() {
           <Route path="favorites" element={<FavoritesPage />} />
           <Route path="history" element={<HistoryPage />} />
           <Route path="performance" element={<PerformancePage />} />
+          <Route path="ipo/:symbol?" element={<IpoPage />} />
           <Route path="settings" element={<Navigate to="/settings/models" replace />} />
           <Route path="settings/models" element={<ModelsPage />} />
           <Route path="*" element={<NotFound />} />

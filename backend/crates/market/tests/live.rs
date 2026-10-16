@@ -516,3 +516,61 @@ async fn ipo_performance_of_mature_ipos() {
     }
     assert!(ok >= 3, "al menos 3 de 5 OPV deberían calcularse");
 }
+
+/// Perfil de riesgo de OPV reales recientes (calendario de Finnhub + folleto de EDGAR) y tasa base.
+/// Imprime cada indicador con su valor o «no extraído». Necesita `FINNHUB_API_KEY` y `SEC_USER_AGENT`.
+#[tokio::test]
+#[ignore = "red real"]
+async fn ipo_risk_profile_of_recent_real_ipos() {
+    use domain::IpoData as _;
+    let key = env_key("FINNHUB_API_KEY");
+    let ua = std::env::var("SEC_USER_AGENT").ok().or_else(|| dotenv_value("SEC_USER_AGENT"));
+    let cfg = MarketConfig::from_lookup(|k| match k {
+        "FINNHUB_API_KEY" => key.as_ref().map(|s| s.expose().to_string()),
+        "SEC_USER_AGENT" => ua.clone(),
+        _ => None,
+    });
+    let ipo = market::MarketIpo(MarketService::new(cfg).expect("servicio"));
+    let today = chrono::Utc::now().date_naive();
+    let cal = ipo.calendar(today - chrono::Duration::days(75), today).await.expect("calendario");
+    let picks: Vec<_> = cal
+        .iter()
+        .filter(|e| e.status == domain::IpoStatus::Priced && !e.spac_likely && e.symbol.is_some() && e.price_low.is_some())
+        .take(6)
+        .collect();
+    assert!(picks.len() >= 3, "hacen falta al menos 3 OPV recientes: {}", picks.len());
+    let mut extracted_total = 0;
+    for e in &picks {
+        let sym = e.symbol.clone().unwrap();
+        let p = ipo.prospectus(&sym).await.expect("folleto");
+        let prof = market::ipo_risk::build_profile(market::ipo_risk::ProfileInput {
+            symbol: &sym,
+            entry: Some(e),
+            prospectus: Some(&p),
+            base_rate: None,
+            now: chrono::Utc::now(),
+        });
+        println!("== {sym} {} ({} {}) {}", p.issuer, p.form, p.filed_on, p.url);
+        for i in &prof.indicators {
+            let ok = i.status == domain::IpoIndicatorStatus::Extracted;
+            extracted_total += usize::from(ok);
+            println!("   {} {:32} {}", if ok { "OK" } else { "--" }, i.label, i.value.clone().or(i.note.clone()).unwrap_or_default());
+        }
+    }
+    assert!(extracted_total >= picks.len() * 5, "pocos indicadores extraídos: {extracted_total}");
+    let b = ipo.base_rate(12).await.expect("tasa base");
+    println!(
+        "TASA BASE 12m: muestra {} (día 1: n={}, 3m: n={}); mediana día 1 {:?} %, al alza día 1 {:?} %, mediana 3m {:?} %, exceso 3m {:?} %; símbolos {:?}",
+        b.sample, b.n_day1, b.n_3m, b.median_day1_pct, b.positive_day1_pct, b.median_3m_pct, b.median_3m_excess_pct, b.symbols
+    );
+    let year = ipo.calendar(today - chrono::Duration::days(180), today).await.expect("calendario");
+    let year2 = ipo.calendar(today - chrono::Duration::days(365), today - chrono::Duration::days(181)).await.expect("calendario");
+    let priced: Vec<_> = year.iter().chain(year2.iter()).filter(|e| e.status == domain::IpoStatus::Priced && e.price_low.is_some()).collect();
+    println!(
+        "CALENDARIO 12m: {} OPV con precio, {} marcadas SPAC; a 10,00 USD sin marcar: {:?}",
+        priced.len(),
+        priced.iter().filter(|e| e.spac_likely).count(),
+        priced.iter().filter(|e| !e.spac_likely && e.price_low == Some(10.0)).map(|e| format!("{} {}", e.symbol.clone().unwrap_or_default(), e.name)).collect::<Vec<_>>()
+    );
+    assert!(b.sample > 0);
+}

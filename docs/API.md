@@ -292,9 +292,9 @@ Cambios de significado: `keyLevels.entryZone/stopLoss/targets` los **calcula el 
 objetivos = resistencias y niveles de los datos), no el modelo; `null` = sin base en los datos (ver `levelsNote`).
 `dataWarnings` contiene solo carencias reales de los datos; la nota de método ya no va ahí sino en `method`.
 
-## OPV de EE. UU. (tipos en `domain`; rutas sugeridas en `docs/notes/market.md → Para el coordinador`)
+## OPV de EE. UU. (tipos en `domain`; perfil de riesgo en `docs/notes/ipo-risk.md`)
 
-Métodos de `MarketService` (no forman parte del trait `MarketData`). Todos los `Option` sin valor viajan como `null`.
+Los datos vienen de `MarketService` (métodos inherentes, expuestos al servidor por el trait `IpoData`; no forman parte de `MarketData`). Todos los `Option` sin valor viajan como `null`.
 
 ```ts
 type IpoEntry = { date: string /*YYYY-MM-DD*/; symbol: string | null; name: string; exchange: string | null;
@@ -316,3 +316,37 @@ type IpoPerformance = { symbol: string; ipoDate: string; offerPrice: number; off
   benchmark: string; source: "yahoo"; sourceUrl: string | null; warnings: string[]; asOf: string };
 ```
 Porcentajes en puntos porcentuales (`12.5` = +12,5 %). Un horizonte aún no alcanzado lleva `null` (nunca se extrapola). `url`/`sourceUrl` apuntan al documento original para verificar.
+
+### Rutas `/api/ipo/*`
+
+El perfil es un **perfil de riesgo determinista** (reglas sobre el folleto; sin LLM), no una recomendación ni una predicción.
+`{symbol}` se normaliza a mayúsculas y solo admite letras, cifras, `.` y `-` (máx. 12; además de la validación de `market::symbol`).
+Los errores de proveedor se devuelven genéricos (`502 upstream` «el proveedor de datos no respondió»; el detalle va al log del servidor).
+
+| Método | Ruta | Respuesta |
+|--------|------|-----------|
+| GET | `/ipo/calendar?from=&to=` | `IpoEntry[]` ordenado por fecha. `from`/`to` = `YYYY-MM-DD`. Sin parámetros: hoy−30 → hoy+60 días. Con solo `from`: `from` → `from`+90. **400** si `from > to`, rango > 180 días, fecha inexistente o fuera de [hoy−5 años, hoy+1 año]. Caché 30 min en `market`. |
+| GET | `/ipo/{symbol}/prospectus?maxChars=` | `Prospectus` del folleto de la OPV (424B4/424B1; si no hay definitivo, el último S-1/A o F-1/A con `preliminary: true`). Cada sección se recorta a `maxChars` (def. 12 000; 500–60 000; `truncated`/`originalChars` lo indican). **404** si no hay folleto. Caché 6 h. |
+| GET | `/ipo/{symbol}/performance?date=&offerPrice=&benchmark=SPY` | `IpoPerformance`: día 1 y 1/3/6/12 meses frente a `SPY`, `IWM` o `QQQ`. Sin `date`, la del calendario (debe estar con precio fijado); `offerPrice` opcional (0–100 000). **400** si `date` es futura o `benchmark` no admitido; **404** si la OPV no está en el calendario. Caché 1 h. |
+| GET | `/ipo/recent-performance?months=12` | `IpoBaseRate`: **tasa base** = medianas del primer día y de los 3 meses de las OPV con precio definitivo (sin SPAC) de los últimos `months` meses (1–24, def. 12), con el tamaño de muestra de cada una (`nDay1`, `n3m`). Muestra de hasta 30 OPV repartidas por la ventana. Se calcula una vez y se cachea 6 h; en frío tarda ~15–25 s (si supera el tiempo de espera, **503** y el cálculo sigue en segundo plano: reintenta). |
+| GET | `/ipo/{symbol}/risk-profile?date=` | `IpoRiskProfile`: indicadores + tasa base + avisos. `date` (opcional) acota la búsqueda en el calendario (±7 días). Si el folleto no está, devuelve el perfil con lo que haya (calendario) y todo lo demás `not_extracted`, más un aviso. **404** solo si no hay ni calendario ni folleto. Si la tasa base tarda más de 12 s se sirve sin ella (aviso) y se completa en la siguiente petición. |
+
+```ts
+type IpoRiskProfile = { symbol: string; name: string | null; entry: IpoEntry | null;
+  prospectus: { form: string; preliminary: boolean; filedOn: string; url: string; indexUrl: string; documentChars: number; missing: string[] } | null;
+  indicators: IpoRiskIndicator[]; baseRate: IpoBaseRate | null; warnings: string[]; disclaimer: string; generatedAt: string };
+type IpoRiskIndicator = { key: "offer_size" | "use_of_proceeds" | "secondary_sale" | "float_offered" | "lock_up" | "underwriters"
+    | "dilution" | "voting" | "controlled" | "net_result" | "revenue";
+  label: string; status: "extracted" | "not_extracted";
+  value: string | null;            // texto para mostrar; null si no se extrajo
+  numeric: number | null; unit: string | null;
+  flags: { code: string; label: string; attention: boolean; evidence: string }[];   // hechos leídos, no veredictos
+  evidence: string | null;         // cita literal del folleto
+  note: string | null;             // limitación del indicador o motivo de «no extraído»
+  source: { kind: "prospectus" | "calendar"; section: string | null; label: string; url: string | null } };
+type IpoBaseRate = { months: number; benchmark: string; sample: number; nDay1: number; n3m: number;
+  medianDay1Pct: number | null; positiveDay1Pct: number | null; median3mPct: number | null;
+  median3mExcessPct: number | null; beatBenchmark3mPct: number | null;   // puntos porcentuales / % de OPV
+  symbols: string[]; source: string; asOf: string; caveats: string[] };
+```
+Con `INVEST_AI_FAKE=1` todo es inventado (`source: "fake"`, empresas ficticias, URLs genéricas de EDGAR) y el perfil se calcula con el extractor real sobre texto de folleto inventado.

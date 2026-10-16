@@ -1,4 +1,4 @@
-import { Gauge, History, LayoutDashboard, MessageSquare, Monitor, Moon, Search, Settings, Star, Sun } from 'lucide-react'
+import { Gauge, History, LayoutDashboard, MessageSquare, Monitor, Moon, Rocket, Search, Settings, Star, Sun } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { SkeletonRows } from '@/components/states'
@@ -10,12 +10,16 @@ const SearchPalette = lazy(() => import('./SearchPalette').then((m) => ({ defaul
 
 const NAV = [
   { to: '/dashboard', label: 'Panel', Icon: LayoutDashboard },
+  { to: '/ipo', label: 'OPV', Icon: Rocket },
   { to: '/chat', label: 'Chat', Icon: MessageSquare },
   { to: '/favorites', label: 'Favoritos', Icon: Star },
   { to: '/history', label: 'Historial', Icon: History },
   { to: '/performance', label: 'Rendimiento', Icon: Gauge },
   { to: '/settings/models', label: 'Modelos de IA', Icon: Settings },
 ] as const
+
+/** Etiquetas más cortas para la barra móvil (7 columnas a 400 px). */
+const MOBILE_LABEL: Record<string, string> = { 'Modelos de IA': 'Modelos', Rendimiento: 'Rendim.' }
 
 const THEME_LABEL = { system: 'Tema: automático', light: 'Tema: claro', dark: 'Tema: oscuro' } as const
 const THEME_ICON = { system: Monitor, light: Sun, dark: Moon } as const
@@ -92,7 +96,7 @@ export function Shell() {
         {NAV.map(({ to, label, Icon }) => (
           <NavLink key={to} to={to}>
             <Icon aria-hidden="true" />
-            <span>{label.replace('Modelos de IA', 'Modelos')}</span>
+            <span>{MOBILE_LABEL[label] ?? label}</span>
           </NavLink>
         ))}
       </nav>

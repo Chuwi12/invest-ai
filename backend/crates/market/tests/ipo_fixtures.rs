@@ -239,3 +239,57 @@ fn crwv_full_year_horizons() {
     assert!(p.first_day_return_pct.abs() < 10.0, "{}", p.first_day_return_pct);
     assert!(p.warnings.is_empty(), "{:?}", p.warnings);
 }
+
+// ---- Heurística de SPAC ------------------------------------------------------------------------
+
+#[test]
+fn spac_heuristic_on_real_calendar_names() {
+    use market::providers::finnhub::is_spac_likely as spac;
+    let p = Some(10.0);
+    let yes = [
+        ("General Catalyst Global Resilience Merger Corp", "GCGRU"),
+        ("West Enclave Merger Corp.", "WENCU"),
+        ("B&R Technology Merger Corp.", "BRTMU"),
+        ("Xsolla SPAC 1", "XSLLU"),
+        ("Archimedes Tech SPAC Partners III Co.", "ARCIU"),
+        ("Gores Holdings XI, Inc.", "GHXIU"),
+        ("Churchill Capital Corp XIII", "XIIIU"),
+        ("Churchill Capital Corp XII", "CXIIU"),
+        ("Churchill Capital Corp XI", "CCXIU"),
+        ("SilverBox Corp V", "SBXEU"),
+        ("Aldabra 4 Liquidity Opportunity Vehicle, Inc.", "ALOVU"),
+        ("Cantor Equity Partners VII, Inc.", "CAES"),
+        ("Cantor Equity Partners VI, Inc.", "CEPS"),
+        ("Research Alliance Corp III", "RACC"),
+        ("Research Alliance Corp IV", "RACD"),
+        ("Helix Quarry Acquisition Corp.", "HQACU"),
+        ("Foo Industries Corp 4", "FOOX"),
+        ("Bar Capital Four", "BARX"),
+        ("Baz Partners Inc. III", "BAZX"),
+    ];
+    for (name, sym) in yes {
+        assert!(spac(name, Some(sym), p, p), "{name} debería marcarse");
+    }
+    // Un símbolo de unidades a 10 USD basta por sí solo.
+    assert!(spac("Nombre Neutro", Some("ZZZZU"), p, p));
+    // Casos negativos: conversión de caja de ahorros a 10 USD y empresas operativas sin palabras clave.
+    for (name, sym) in [("Hoyne Bancorp, Inc.", "HYNE"), ("Lumen Harbor Therapeutics", "LHTX"), ("Nimbus Row Foods, Inc.", "NRWF")] {
+        assert!(!spac(name, Some(sym), p, p), "{name} NO debe marcarse");
+    }
+    // Precio distinto de 10: las reglas nuevas no se aplican (aunque el nombre sea de SPAC).
+    assert!(!spac("Churchill Capital Corp XIII", Some("XIIIU"), Some(18.0), Some(18.0)));
+    assert!(!spac("Gores Holdings XI, Inc.", Some("GHXIU"), Some(9.0), Some(11.0)));
+    // Regla antigua: «Acquisition» con símbolo de unidades aunque el precio falte.
+    assert!(spac("Foo Acquisition Corp", Some("FOOAU"), None, None));
+}
+
+#[test]
+fn edgar_fallback_flags_blank_checks_by_sic_6770() {
+    let mk = |sic: &str| {
+        format!(
+            r#"{{"hits":{{"hits":[{{"_source":{{"ciks":["0001"],"display_names":["X Corp  (CIK 0000000001)"],"form":"424B4","file_date":"2026-10-01","adsh":"0000000001-26-000001","sics":["{sic}"]}}}}]}}}}"#
+        )
+    };
+    assert!(parse_fts(&mk("6770")).unwrap()[0].blank_check);
+    assert!(!parse_fts(&mk("2834")).unwrap()[0].blank_check);
+}

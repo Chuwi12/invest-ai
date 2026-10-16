@@ -19,6 +19,11 @@ import type {
   HistoryResult,
   Indicators,
   Interval,
+  IpoBaseRate,
+  IpoEntry,
+  IpoPerformance,
+  IpoRiskProfile,
+  Prospectus,
   MacroContext,
   ModelsResponse,
   PerformanceReport,
@@ -104,4 +109,14 @@ export interface Api {
   /** Confianza declarada junto a la calibrada (si hay calibración aplicable). */
   calibratedConfidence(confidence: number, horizon?: number, model?: string, signal?: AbortSignal): Promise<CalibratedConfidence>
   watchlist(signal?: AbortSignal): Promise<WatchlistStatus>
+
+  // OPV de EE. UU.: perfil de riesgo determinista (no una recomendación).
+  /** Sin fechas: de hoy−30 a hoy+60 días. Rango máx. 180 días. */
+  ipoCalendar(range?: { from?: string; to?: string }, signal?: AbortSignal): Promise<IpoEntry[]>
+  ipoRiskProfile(symbol: string, date?: string, signal?: AbortSignal): Promise<IpoRiskProfile>
+  ipoProspectus(symbol: string, maxChars?: number, signal?: AbortSignal): Promise<Prospectus>
+  /** Sin `date`, la del calendario. 404 si la OPV aún no cotiza. */
+  ipoPerformance(symbol: string, date?: string, signal?: AbortSignal): Promise<IpoPerformance>
+  /** Tasa base: medianas de las OPV recientes con su tamaño de muestra. */
+  ipoBaseRate(months?: number, signal?: AbortSignal): Promise<IpoBaseRate>
 }

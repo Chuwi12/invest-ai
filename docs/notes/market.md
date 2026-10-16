@@ -191,7 +191,9 @@ Muestra de 5 elegida a mano (OPV grandes y conocidas): NO es una estadística y 
 
 **Tests**: `tests/ipo_fixtures.rs` (13, sin red, fixtures reales en `tests/fixtures/finnhub_ipo_calendar_*`, `sec_submissions_{etra,crwv,crwv_files001}`, `sec_fts_*`, `sec_prospectus_*` y `yahoo_daily_*`), unitarios en `html.rs` (12), `prospectus.rs` (3), `ipo.rs` (4); `tests/live.rs`: `ipo_calendar_prospectus_and_performance` y `ipo_performance_of_mature_ipos` (`#[ignore]`). Los fixtures de folleto son **recortados**: HTML sencillo regenerado desde las líneas reales (portada, índice, títulos y las primeras líneas de cada sección) con `examples/prospectus_probe.rs --fixture 9`, salvo `sec_prospectus_dfin_424b4_head.html`, que son los primeros 130 KB del HTML crudo de TRXB. Sin claves en ningún fixture (comprobado con grep).
 
-**Pendiente / no verificado**: 253G2 real; folletos en PDF o texto plano antiguo (pre-2001); documentos > 16 MB (tope de `http::send`); `Slot` de la SEC usa el `OP_TIMEOUT` de 25 s para toda la operación; no hay endpoint en el servidor; el calendario de Finnhub no distingue SPAC (solo `spac_likely`, heurística por nombre/precio 10); la apertura del primer día de Yahoo no es el primer precio negociado.
+**Perfil de riesgo y rutas (16-oct-2026)**: las rutas `/api/ipo/*`, el perfil de riesgo determinista y la tasa base están documentados en `docs/notes/ipo-risk.md` y `docs/API.md`. `recent_ipo_performance` ahora calcula 4 OPV a la vez y hay `sampled_ipo_performance` (muestra repartida por la ventana).
+
+**Pendiente / no verificado**: 253G2 real; folletos en PDF o texto plano antiguo (pre-2001); documentos > 16 MB (tope de `http::send`); `Slot` de la SEC usa el `OP_TIMEOUT` de 25 s para toda la operación; el calendario de Finnhub no distingue SPAC (solo `spac_likely`, heurística por nombre/precio 10); la apertura del primer día de Yahoo no es el primer precio negociado.
 
 ### Para el coordinador (rutas sugeridas, no creadas)
 - `GET /api/ipo/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` -> `MarketService::ipo_calendar(from,to)` (`IpoEntry[]`).

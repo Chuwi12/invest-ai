@@ -13,7 +13,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use server::{
     AppState, Settings, db,
-    fake::{FakeAnalyst, FakeMarket, annotate_fake},
+    fake::{FakeAnalyst, FakeIpo, FakeMarket, annotate_fake},
 };
 use tower::ServiceExt;
 
@@ -47,7 +47,8 @@ impl TestApp {
             pool,
             Settings { language: "es".into(), allowed_origins: vec!["http://localhost:5180".into()] },
         )
-        .with_news_annotator(annotate_fake);
+        .with_news_annotator(annotate_fake)
+        .with_ipo(Arc::new(FakeIpo::default()));
         let router = server::app(state.clone(), static_dir);
         Self { router, state, market, analyst }
     }

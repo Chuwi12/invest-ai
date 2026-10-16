@@ -197,6 +197,8 @@ pub struct FtsHit {
     pub form: String,
     pub filed: NaiveDate,
     pub accession: String,
+    /// El índice trae SIC 6770 («Blank Checks»): señal fiable de SPAC, sin peticiones extra.
+    pub blank_check: bool,
 }
 
 /// Respuesta de `efts.sec.gov/LATEST/search-index` (sin el texto de los documentos).
@@ -218,6 +220,7 @@ pub fn parse_fts(text: &str) -> PResult<Vec<FtsHit>> {
                 form: s["form"].as_str()?.to_string(),
                 filed: NaiveDate::parse_from_str(s["file_date"].as_str()?, "%Y-%m-%d").ok()?,
                 accession: s["adsh"].as_str()?.to_string(),
+                blank_check: s["sics"].as_array().is_some_and(|a| a.iter().any(|x| x.as_str() == Some("6770"))),
             })
         })
         .collect())
@@ -355,7 +358,7 @@ impl Sec {
                 price_high: None,
                 shares: None,
                 total_value: None,
-                spac_likely: false,
+                spac_likely: h.blank_check,
                 source: "sec".into(),
                 source_url: Some(format!(
                     "https://www.sec.gov/Archives/edgar/data/{}/{}/",

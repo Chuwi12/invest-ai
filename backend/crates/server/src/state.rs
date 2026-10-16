@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use domain::{Analysis, Analyst, AssetId, MarketData, ModelService, NewsItem};
+use domain::{Analysis, Analyst, AssetId, IpoData, MarketData, ModelService, NewsItem};
 use sqlx::SqlitePool;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
@@ -29,6 +29,9 @@ impl Default for Settings {
 #[derive(Clone)]
 pub struct AppState {
     pub market: Arc<dyn MarketData>,
+    /// Datos de OPV de EE. UU. (calendario, folleto, rendimiento). Por defecto no disponible:
+    /// el cableado debe llamar a `with_ipo`.
+    pub ipo: Arc<dyn IpoData>,
     pub analyst: Arc<dyn Analyst>,
     pub db: SqlitePool,
     /// Gestión de modelos de IA (`/models`). Por defecto una versión simulada en memoria:
@@ -58,6 +61,7 @@ impl AppState {
         let tasks = TaskTracker::new();
         Self {
             market,
+            ipo: Arc::new(crate::routes::ipo::NoIpoData),
             analyst,
             db,
             models: Arc::new(crate::routes::models::FakeModelService::default()),
@@ -71,6 +75,11 @@ impl AppState {
             clock: Arc::new(SystemClock),
             power: Arc::new(SystemPower::default()),
         }
+    }
+
+    pub fn with_ipo(mut self, ipo: Arc<dyn IpoData>) -> Self {
+        self.ipo = ipo;
+        self
     }
 
     pub fn with_models(mut self, models: Arc<dyn ModelService>) -> Self {

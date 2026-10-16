@@ -17,6 +17,7 @@ import { mockChatStream } from './chat'
 import { genAnalysis, genMacro, genNews, genSnapshot } from './content'
 import { getDb, nextId, saveDb } from './db'
 import { entryFor, genCandles, genFundamentals, genIndicators, genQuote } from './market'
+import { mockIpoBaseRate, mockIpoCalendar, mockIpoPerformance, mockIpoProspectus, mockIpoRiskProfile } from './ipo'
 import { mockCalibrated, mockPerformance, mockRollback, mockWatchlist, mockWeights } from './learning'
 import { activeModelId, installedModelIds, mockDelete, mockModels, mockPull, mockSetActive } from './models'
 import { sleep } from './rng'
@@ -400,6 +401,31 @@ export const mockApi: Api = {
   async watchlist(signal) {
     await lag(signal, 120)
     return mockWatchlist()
+  },
+
+  async ipoCalendar(range, signal) {
+    await lag(signal)
+    return mockIpoCalendar(range?.from, range?.to)
+  },
+
+  async ipoRiskProfile(symbol, _date, signal) {
+    await lag(signal, 160)
+    return mockIpoRiskProfile(symbol)
+  },
+
+  async ipoProspectus(symbol, _maxChars, signal) {
+    await lag(signal, 120)
+    return mockIpoProspectus(symbol)
+  },
+
+  async ipoPerformance(symbol, _date, signal) {
+    await lag(signal, 120)
+    return mockIpoPerformance(symbol)
+  },
+
+  async ipoBaseRate(months, signal) {
+    await lag(signal, 120)
+    return mockIpoBaseRate(months)
   },
 }
 

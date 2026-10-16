@@ -864,3 +864,162 @@ export interface WatchlistStatus {
   recentRuns: WatchlistRun[]
   analysesTotal: number
 }
+
+// --- OPV de EE. UU.: calendario, folleto, perfil de riesgo y tasa base (docs/API.md, «OPV») -----
+
+export type IpoStatus = 'expected' | 'priced' | 'filed' | 'withdrawn' | 'unknown'
+
+/** Una OPV del calendario. Lo que el proveedor no da va a `null`. */
+export interface IpoEntry {
+  /** `priced`: primer día de cotización; `expected`: fecha prevista; `filed`: presentación. */
+  date: string
+  symbol: string | null
+  name: string
+  exchange: string | null
+  status: IpoStatus
+  priceLow: number | null
+  priceHigh: number | null
+  shares: number | null
+  /** USD. En `expected` es el máximo posible (límite alto × acciones × 1,15). */
+  totalValue: number | null
+  /** Indicio (no certeza) de sociedad vehículo (SPAC). */
+  spacLikely: boolean
+  source: string
+  sourceUrl: string | null
+  asOf: string
+}
+
+export interface ProspectusSection {
+  key: string
+  title: string
+  text: string
+  parent: string | null
+  truncated: boolean
+  originalChars: number
+}
+
+export interface Prospectus {
+  issuer: string
+  cik: number
+  ticker: string | null
+  form: string
+  preliminary: boolean
+  filedOn: string
+  accession: string
+  /** Documento original en sec.gov. */
+  url: string
+  indexUrl: string
+  offerPrice: number | null
+  sections: ProspectusSection[]
+  /** Claves de secciones que no se localizaron. */
+  missing: string[]
+  documentChars: number
+  source: string
+  fetchedAt: string
+}
+
+export interface IpoReturnPoint {
+  horizon: '1m' | '3m' | '6m' | '12m'
+  targetDate: string
+  priceDate: string | null
+  price: number | null
+  /** Puntos porcentuales desde el precio de la OPV; `null` si aún no se alcanza. */
+  returnPct: number | null
+  sinceFirstClosePct: number | null
+  benchmarkReturnPct: number | null
+  excessPct: number | null
+}
+
+export interface IpoPerformance {
+  symbol: string
+  ipoDate: string
+  offerPrice: number
+  offerPriceSource: string
+  firstDayClose: number
+  firstDayReturnPct: number
+  firstDayHighPct: number
+  points: IpoReturnPoint[]
+  latestPrice: number
+  latestDate: string
+  latestReturnPct: number
+  maxDrawdownPct: number
+  benchmark: string
+  source: string
+  sourceUrl: string | null
+  warnings: string[]
+  asOf: string
+}
+
+export type IpoIndicatorStatus = 'extracted' | 'not_extracted'
+
+export interface IpoIndicatorSource {
+  /** `prospectus` (sección de un folleto en EDGAR) o `calendar`. */
+  kind: 'prospectus' | 'calendar'
+  section: string | null
+  label: string
+  url: string | null
+}
+
+/** Un hecho leído del texto (no un veredicto); `attention` marca lo que conviene mirar con cuidado. */
+export interface IpoRiskFlag {
+  code: string
+  label: string
+  attention: boolean
+  /** Frase literal del folleto. */
+  evidence: string
+}
+
+export interface IpoRiskIndicator {
+  key: string
+  label: string
+  status: IpoIndicatorStatus
+  value: string | null
+  numeric: number | null
+  unit: string | null
+  flags: IpoRiskFlag[]
+  evidence: string | null
+  /** Limitación del indicador o motivo de «no extraído». */
+  note: string | null
+  source: IpoIndicatorSource
+}
+
+export interface IpoBaseRate {
+  months: number
+  benchmark: string
+  sample: number
+  nDay1: number
+  n3m: number
+  /** Puntos porcentuales. */
+  medianDay1Pct: number | null
+  positiveDay1Pct: number | null
+  median3mPct: number | null
+  median3mExcessPct: number | null
+  beatBenchmark3mPct: number | null
+  symbols: string[]
+  source: string
+  asOf: string
+  caveats: string[]
+}
+
+export interface IpoProspectusRef {
+  form: string
+  preliminary: boolean
+  filedOn: string
+  url: string
+  indexUrl: string
+  documentChars: number
+  missing: string[]
+}
+
+/** Perfil de riesgo determinista de una OPV: no es una recomendación ni una predicción. */
+export interface IpoRiskProfile {
+  symbol: string
+  name: string | null
+  entry: IpoEntry | null
+  prospectus: IpoProspectusRef | null
+  indicators: IpoRiskIndicator[]
+  baseRate: IpoBaseRate | null
+  warnings: string[]
+  disclaimer: string
+  generatedAt: string
+}
