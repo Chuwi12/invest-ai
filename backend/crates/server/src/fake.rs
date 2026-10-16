@@ -850,14 +850,17 @@ impl domain::IpoData for FakeIpo {
 
     async fn base_rate(&self, months: u32) -> Result<domain::IpoBaseRate> {
         let cutoff = self.today - chrono::Duration::days(i64::from(months) * 30);
-        let perfs: Vec<IpoPerformance> = FAKE_IPOS
+        let perfs: Vec<market::ipo_risk::SizedPerf> = FAKE_IPOS
             .iter()
             .filter(|s| s.status == domain::IpoStatus::Priced && !s.spac)
             .map(|s| (s, self.entry(s)))
             .filter(|(_, e)| e.date >= cutoff && e.date <= self.today)
-            .map(|(s, e)| self.fake_performance(s, e.date, e.price_low.unwrap_or(10.0), "SPY"))
+            .map(|(s, e)| market::ipo_risk::SizedPerf {
+                size_usd: market::ipo_risk::offer_size_usd(&e),
+                perf: self.fake_performance(s, e.date, e.price_low.unwrap_or(10.0), "SPY"),
+            })
             .collect();
-        let mut b = market::ipo_risk::compute_base_rate(&perfs, months, "SPY", fixed_time());
+        let mut b = market::ipo_risk::compute_base_rate_sized(&perfs, months, "SPY", fixed_time());
         b.source = "fake".into();
         b.caveats.insert(0, "Datos simulados (INVEST_AI_FAKE): no son OPV reales.".into());
         Ok(b)

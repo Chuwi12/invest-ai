@@ -558,7 +558,16 @@ async fn ipo_risk_profile_of_recent_real_ipos() {
         }
     }
     assert!(extracted_total >= picks.len() * 5, "pocos indicadores extraídos: {extracted_total}");
+    let t0 = std::time::Instant::now();
     let b = ipo.base_rate(12).await.expect("tasa base");
+    println!("TASA BASE en frío: {:.1} s para {} OPV (2 peticiones a Yahoo por OPV)", t0.elapsed().as_secs_f64(), b.sample);
+    for t in &b.tiers {
+        println!(
+            "  TRAMO {:16} n={} (día 1) n3m={} mediana día 1 {:?} % al alza {:?} % mediana 3m {:?} % fusionado de {:?}",
+            t.label, t.n_day1, t.n_3m, t.median_day1_pct, t.positive_day1_pct, t.median_3m_pct, t.merged_from
+        );
+    }
+    println!("  NOTAS: {:?}", b.tier_notes);
     println!(
         "TASA BASE 12m: muestra {} (día 1: n={}, 3m: n={}); mediana día 1 {:?} %, al alza día 1 {:?} %, mediana 3m {:?} %, exceso 3m {:?} %; símbolos {:?}",
         b.sample, b.n_day1, b.n_3m, b.median_day1_pct, b.positive_day1_pct, b.median_3m_pct, b.median_3m_excess_pct, b.symbols

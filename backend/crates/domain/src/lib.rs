@@ -1317,6 +1317,34 @@ pub struct IpoBaseRate {
     pub as_of: DateTime<Utc>,
     /// Sesgos conocidos de la muestra.
     pub caveats: Vec<String>,
+    /// Misma estadística por tramo de tamaño de la oferta (vacío si no hay tamaños). Los tramos
+    /// con muestra pequeña se fusionan con el contiguo (`mergedFrom`).
+    pub tiers: Vec<IpoBaseRateTier>,
+    /// Avisos sobre los tramos (fusiones).
+    pub tier_notes: Vec<String>,
+}
+
+/// Tasa base de las OPV de un tramo de tamaño (importe de la oferta en USD).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpoBaseRateTier {
+    /// «< 50 M USD», «50–250 M USD», «≥ 250 M USD» o el resultado de fusionar tramos.
+    pub label: String,
+    /// Incluye este valor.
+    pub min_usd: f64,
+    /// Excluye este valor; `null` = sin tope.
+    pub max_usd: Option<f64>,
+    /// Etiquetas de los tramos originales fusionados (vacío si no hubo fusión).
+    pub merged_from: Vec<String>,
+    pub sample: usize,
+    pub n_day1: usize,
+    pub n_3m: usize,
+    pub median_day1_pct: Option<f64>,
+    pub positive_day1_pct: Option<f64>,
+    pub median_3m_pct: Option<f64>,
+    pub median_3m_excess_pct: Option<f64>,
+    pub beat_benchmark_3m_pct: Option<f64>,
+    pub symbols: Vec<String>,
 }
 
 /// Referencia del folleto del que sale el perfil.
@@ -1344,6 +1372,8 @@ pub struct IpoRiskProfile {
     pub prospectus: Option<IpoProspectusRef>,
     pub indicators: Vec<IpoRiskIndicator>,
     pub base_rate: Option<IpoBaseRate>,
+    /// Tramo de la tasa base que corresponde al tamaño de ESTA OPV (la global queda en `baseRate`).
+    pub base_rate_tier: Option<IpoBaseRateTier>,
     /// Avisos: folleto preliminar, SPAC probable, folleto o tasa base no disponibles...
     pub warnings: Vec<String>,
     pub disclaimer: String,

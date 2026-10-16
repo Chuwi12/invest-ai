@@ -328,7 +328,7 @@ Los errores de proveedor se devuelven genéricos (`502 upstream` «el proveedor 
 | GET | `/ipo/calendar?from=&to=` | `IpoEntry[]` ordenado por fecha. `from`/`to` = `YYYY-MM-DD`. Sin parámetros: hoy−30 → hoy+60 días. Con solo `from`: `from` → `from`+90. **400** si `from > to`, rango > 180 días, fecha inexistente o fuera de [hoy−5 años, hoy+1 año]. Caché 30 min en `market`. |
 | GET | `/ipo/{symbol}/prospectus?maxChars=` | `Prospectus` del folleto de la OPV (424B4/424B1; si no hay definitivo, el último S-1/A o F-1/A con `preliminary: true`). Cada sección se recorta a `maxChars` (def. 12 000; 500–60 000; `truncated`/`originalChars` lo indican). **404** si no hay folleto. Caché 6 h. |
 | GET | `/ipo/{symbol}/performance?date=&offerPrice=&benchmark=SPY` | `IpoPerformance`: día 1 y 1/3/6/12 meses frente a `SPY`, `IWM` o `QQQ`. Sin `date`, la del calendario (debe estar con precio fijado); `offerPrice` opcional (0–100 000). **400** si `date` es futura o `benchmark` no admitido; **404** si la OPV no está en el calendario. Caché 1 h. |
-| GET | `/ipo/recent-performance?months=12` | `IpoBaseRate`: **tasa base** = medianas del primer día y de los 3 meses de las OPV con precio definitivo (sin SPAC) de los últimos `months` meses (1–24, def. 12), con el tamaño de muestra de cada una (`nDay1`, `n3m`). Muestra de hasta 30 OPV repartidas por la ventana. Se calcula una vez y se cachea 6 h; en frío tarda ~15–25 s (si supera el tiempo de espera, **503** y el cálculo sigue en segundo plano: reintenta). |
+| GET | `/ipo/recent-performance?months=12` | `IpoBaseRate`: **tasa base** = medianas del primer día y de los 3 meses de las OPV con precio definitivo (sin SPAC) de los últimos `months` meses (1–24, def. 12), con el tamaño de muestra de cada una (`nDay1`, `n3m`). Muestra de hasta 60 OPV repartidas por la ventana, con la misma estadística por tramo de tamaño de la oferta (`tiers`; tramos con < 10 OPV se fusionan con el contiguo y `tierNotes` lo dice). En frío tarda ~30 s. Se calcula una vez y se cachea 6 h; en frío tarda ~30 s (si supera el tiempo de espera, **503** y el cálculo sigue en segundo plano: reintenta). |
 | GET | `/ipo/{symbol}/risk-profile?date=` | `IpoRiskProfile`: indicadores + tasa base + avisos. `date` (opcional) acota la búsqueda en el calendario (±7 días). Si el folleto no está, devuelve el perfil con lo que haya (calendario) y todo lo demás `not_extracted`, más un aviso. **404** solo si no hay ni calendario ni folleto. Si la tasa base tarda más de 12 s se sirve sin ella (aviso) y se completa en la siguiente petición. |
 
 ```ts
@@ -344,7 +344,11 @@ type IpoRiskIndicator = { key: "offer_size" | "use_of_proceeds" | "secondary_sal
   evidence: string | null;         // cita literal del folleto
   note: string | null;             // limitación del indicador o motivo de «no extraído»
   source: { kind: "prospectus" | "calendar"; section: string | null; label: string; url: string | null } };
-type IpoBaseRate = { months: number; benchmark: string; sample: number; nDay1: number; n3m: number;
+type IpoBaseRateTier = { label: string /* «< 50 M USD», «50–250 M USD», «≥ 250 M USD» o fusión */; minUsd: number; maxUsd: number | null;
+  mergedFrom: string[]; sample: number; nDay1: number; n3m: number; medianDay1Pct: number | null; positiveDay1Pct: number | null;
+  median3mPct: number | null; median3mExcessPct: number | null; beatBenchmark3mPct: number | null; symbols: string[] };
+// IpoRiskProfile.baseRateTier = tramo de ESTA OPV según el importe de su oferta (la global sigue en baseRate).
+type IpoBaseRate = { months: number; tiers: IpoBaseRateTier[]; tierNotes: string[]; benchmark: string; sample: number; nDay1: number; n3m: number;
   medianDay1Pct: number | null; positiveDay1Pct: number | null; median3mPct: number | null;
   median3mExcessPct: number | null; beatBenchmark3mPct: number | null;   // puntos porcentuales / % de OPV
   symbols: string[]; source: string; asOf: string; caveats: string[] };

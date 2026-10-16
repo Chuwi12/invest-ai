@@ -16,7 +16,7 @@
 
 use chrono::{DateTime, Utc};
 use domain::{
-    IpoBaseRate, IpoEntry, IpoIndicatorSource, IpoIndicatorStatus, IpoPerformance, IpoProspectusRef, IpoRiskFlag,
+    IpoBaseRate, IpoBaseRateTier, IpoEntry, IpoIndicatorSource, IpoIndicatorStatus, IpoPerformance, IpoProspectusRef, IpoRiskFlag,
     IpoRiskIndicator, IpoRiskProfile, IpoStatus, Prospectus,
 };
 
@@ -76,6 +76,11 @@ pub fn build_profile(input: ProfileInput<'_>) -> IpoRiskProfile {
     } else {
         warnings.push("No se encontró la OPV en el calendario: faltan los datos de tamaño y fecha.".to_string());
     }
+    let size = input.entry.and_then(offer_size_usd);
+    let base_rate_tier: Option<IpoBaseRateTier> = input.base_rate.as_ref().zip(size).and_then(|(b, sz)| tier_for(b, sz).cloned());
+    if input.base_rate.is_some() && base_rate_tier.is_none() {
+        warnings.push("No se pudo calcular el tamaño de la oferta: se muestra solo la tasa base global.".to_string());
+    }
     if input.base_rate.is_none() {
         warnings.push("La tasa base de OPV recientes no está disponible ahora.".to_string());
     }
@@ -95,6 +100,7 @@ pub fn build_profile(input: ProfileInput<'_>) -> IpoRiskProfile {
         }),
         indicators,
         base_rate: input.base_rate,
+        base_rate_tier,
         warnings,
         disclaimer: DISCLAIMER.to_string(),
         generated_at: input.now,
@@ -1247,9 +1253,67 @@ fn pct_of(count: usize, n: usize) -> Option<f64> {
     (n > 0).then(|| count as f64 / n as f64 * 100.0)
 }
 
-/// Medianas de las OPV recientes. `perfs` son OPV ya cotizadas (sin SPAC); las que aún no
-/// llegan a 3 meses cuentan para el primer día pero no para el horizonte de 3 meses.
-pub fn compute_base_rate(perfs: &[IpoPerformance], months: u32, benchmark: &str, now: DateTime<Utc>) -> IpoBaseRate {
+/// Cortes de tamaño (importe de la oferta, USD) de la tasa base. Fijados ANTES de mirar resultados,
+/// con criterio de mercado: por debajo de 50 M es micro-OPV (flotante diminuto, colocadores
+/// pequeños); de 50 a 250 M, pequeña; desde 250 M, mediana y grande (con cobertura institucional).
+pub const TIER_CUTS_USD: [f64; 2] = [50e6, 250e6];
+/// Muestra mínima (con dato del primer día) para que un tramo se publique solo; si no, se fusiona.
+pub const MIN_TIER_SAMPLE: usize = 10;
+
+/// Importe de la oferta en USD para asignar el tramo: con precio fijado, el del calendario o
+/// acciones × precio; si aún no hay precio definitivo, acciones × punto medio del rango (sin el
+/// 15 % de sobreasignación que el calendario suma al máximo). `None` si no se puede calcular.
+pub fn offer_size_usd(e: &IpoEntry) -> Option<f64> {
+    let v = if e.status == IpoStatus::Priced {
+        e.total_value.or_else(|| Some(e.shares? as f64 * e.price_low?))
+    } else {
+        let mid = match (e.price_low, e.price_high) {
+            (Some(l), Some(h)) => Some((l + h) / 2.0),
+            (Some(p), None) | (None, Some(p)) => Some(p),
+            _ => None,
+        };
+        Some(e.shares? as f64 * mid?)
+    };
+    v.filter(|x| x.is_finite() && *x > 0.0)
+}
+
+/// Índice del tramo original (0 = < 50 M, 1 = 50–250 M, 2 = ≥ 250 M).
+pub fn tier_index(size_usd: f64) -> usize {
+    TIER_CUTS_USD.iter().filter(|c| size_usd >= **c).count()
+}
+
+fn tier_label(lo: usize, hi: usize) -> String {
+    let (a, b) = (TIER_CUTS_USD[0] / 1e6, TIER_CUTS_USD[1] / 1e6);
+    match (lo, hi) {
+        (0, 0) => format!("< {a:.0} M USD"),
+        (1, 1) => format!("{a:.0}–{b:.0} M USD"),
+        (2, 2) => format!("≥ {b:.0} M USD"),
+        (0, 1) => format!("< {b:.0} M USD"),
+        (1, 2) => format!("≥ {a:.0} M USD"),
+        _ => "todos los tamaños".to_string(),
+    }
+}
+
+/// Una OPV de la muestra con el importe de su oferta (si se conoce).
+#[derive(Debug, Clone)]
+pub struct SizedPerf {
+    pub size_usd: Option<f64>,
+    pub perf: IpoPerformance,
+}
+
+struct Stats {
+    sample: usize,
+    n_day1: usize,
+    n_3m: usize,
+    median_day1: Option<f64>,
+    positive_day1: Option<f64>,
+    median_3m: Option<f64>,
+    median_3m_excess: Option<f64>,
+    beat_3m: Option<f64>,
+    symbols: Vec<String>,
+}
+
+fn stats(perfs: &[&IpoPerformance]) -> Stats {
     let mut d1: Vec<f64> = perfs.iter().map(|p| p.first_day_return_pct).collect();
     let positive_d1 = d1.iter().filter(|v| **v > 0.0).count();
     let n_day1 = d1.len();
@@ -1258,29 +1322,120 @@ pub fn compute_base_rate(perfs: &[IpoPerformance], months: u32, benchmark: &str,
     let mut x3: Vec<f64> = p3.iter().filter_map(|x| x.excess_pct).collect();
     let beat = x3.iter().filter(|v| **v > 0.0).count();
     let n_3m = r3.len();
-    IpoBaseRate {
-        months,
-        benchmark: benchmark.to_string(),
+    Stats {
         sample: perfs.len(),
         n_day1,
         n_3m,
-        median_day1_pct: median(&mut d1),
-        positive_day1_pct: pct_of(positive_d1, n_day1),
-        median_3m_pct: median(&mut r3),
-        median_3m_excess_pct: {
-            let n = x3.len();
-            let m = median(&mut x3);
-            if n == 0 { None } else { m }
-        },
-        beat_benchmark_3m_pct: pct_of(beat, n_3m),
+        median_day1: median(&mut d1),
+        positive_day1: pct_of(positive_d1, n_day1),
+        median_3m: median(&mut r3),
+        median_3m_excess: median(&mut x3),
+        beat_3m: pct_of(beat, n_3m),
         symbols: perfs.iter().map(|p| p.symbol.clone()).collect(),
+    }
+}
+
+/// Tramos por tamaño con fusión: mientras algún tramo tenga menos de `MIN_TIER_SAMPLE` OPV con
+/// dato del primer día, se fusiona con el contiguo (el de menor muestra si hay dos). Devuelve los
+/// tramos finales y las notas de fusión.
+fn build_tiers(items: &[SizedPerf]) -> (Vec<IpoBaseRateTier>, Vec<String>) {
+    // (lo, hi, miembros) con lo/hi = índices de tramo original.
+    let mut groups: Vec<(usize, usize, Vec<&IpoPerformance>)> = (0..=TIER_CUTS_USD.len()).map(|k| (k, k, Vec::new())).collect();
+    let mut any = false;
+    for it in items {
+        if let Some(sz) = it.size_usd {
+            groups[tier_index(sz)].2.push(&it.perf);
+            any = true;
+        }
+    }
+    if !any {
+        return (Vec::new(), Vec::new());
+    }
+    let mut notes = Vec::new();
+    while groups.len() > 1 {
+        let Some(idx) = (0..groups.len()).filter(|&k| groups[k].2.len() < MIN_TIER_SAMPLE).min_by_key(|&k| groups[k].2.len()) else { break };
+        let nb = if idx == 0 {
+            1
+        } else if idx == groups.len() - 1 || groups[idx - 1].2.len() <= groups[idx + 1].2.len() {
+            idx - 1
+        } else {
+            idx + 1
+        };
+        let (a, b) = (idx.min(nb), idx.max(nb));
+        let (la, lb) = (tier_label(groups[a].0, groups[a].1), tier_label(groups[b].0, groups[b].1));
+        let (na, nb_) = (groups[a].2.len(), groups[b].2.len());
+        let right = groups.remove(b);
+        groups[a].1 = right.1;
+        groups[a].2.extend(right.2);
+        notes.push(format!(
+            "El tramo «{la}» (n={na}) y el «{lb}» (n={nb_}) se han fusionado en «{}» porque alguno tenía menos de {MIN_TIER_SAMPLE} OPV en la ventana.",
+            tier_label(groups[a].0, groups[a].1)
+        ));
+    }
+    let tiers = groups
+        .into_iter()
+        .map(|(lo, hi, members)| {
+            let st = stats(&members);
+            let merged_from = if lo == hi { Vec::new() } else { (lo..=hi).map(|k| tier_label(k, k)).collect() };
+            IpoBaseRateTier {
+                label: tier_label(lo, hi),
+                min_usd: if lo == 0 { 0.0 } else { TIER_CUTS_USD[lo - 1] },
+                max_usd: TIER_CUTS_USD.get(hi).copied(),
+                merged_from,
+                sample: st.sample,
+                n_day1: st.n_day1,
+                n_3m: st.n_3m,
+                median_day1_pct: st.median_day1,
+                positive_day1_pct: st.positive_day1,
+                median_3m_pct: st.median_3m,
+                median_3m_excess_pct: st.median_3m_excess,
+                beat_benchmark_3m_pct: st.beat_3m,
+                symbols: st.symbols,
+            }
+        })
+        .collect();
+    (tiers, notes)
+}
+
+/// Tramo de la tasa base al que pertenece una oferta de `size_usd`.
+pub fn tier_for(base: &IpoBaseRate, size_usd: f64) -> Option<&IpoBaseRateTier> {
+    base.tiers.iter().find(|t| size_usd >= t.min_usd && t.max_usd.is_none_or(|m| size_usd < m))
+}
+
+/// Tasa base global de las OPV recientes (sin tramos). Las que aún no llegan a 3 meses cuentan
+/// para el primer día pero no para el horizonte de 3 meses.
+pub fn compute_base_rate(perfs: &[IpoPerformance], months: u32, benchmark: &str, now: DateTime<Utc>) -> IpoBaseRate {
+    let items: Vec<SizedPerf> = perfs.iter().map(|p| SizedPerf { size_usd: None, perf: p.clone() }).collect();
+    compute_base_rate_sized(&items, months, benchmark, now)
+}
+
+/// Como `compute_base_rate`, más la misma estadística por tramo de tamaño de la oferta.
+pub fn compute_base_rate_sized(items: &[SizedPerf], months: u32, benchmark: &str, now: DateTime<Utc>) -> IpoBaseRate {
+    let all: Vec<&IpoPerformance> = items.iter().map(|i| &i.perf).collect();
+    let st = stats(&all);
+    let (tiers, tier_notes) = build_tiers(items);
+    IpoBaseRate {
+        months,
+        benchmark: benchmark.to_string(),
+        sample: st.sample,
+        n_day1: st.n_day1,
+        n_3m: st.n_3m,
+        median_day1_pct: st.median_day1,
+        positive_day1_pct: st.positive_day1,
+        median_3m_pct: st.median_3m,
+        median_3m_excess_pct: st.median_3m_excess,
+        beat_benchmark_3m_pct: st.beat_3m,
+        symbols: st.symbols,
         source: "Calendario de OPV (Finnhub) y cierres de Yahoo Finance".to_string(),
         as_of: now,
         caveats: vec![
             "Rentabilidad de precio desde el precio de la OPV: solo la obtiene quien recibe acciones en la colocación, no quien compra al abrir.".into(),
-            "Muestra limitada y sin SPAC; las OPV que se deslistaron pueden faltar (sesgo de supervivencia).".into(),
+            "Muestra limitada y sin SPAC (detección heurística); las OPV que se deslistaron pueden faltar (sesgo de supervivencia).".into(),
+            "En micro-OPV (< 50 M USD) el capital flotante es muy pequeño y la volatilidad del primer día no es representativa.".into(),
             "Mediana de otras OPV: describe el momento del mercado, no predice cómo irá una OPV concreta.".into(),
         ],
+        tiers,
+        tier_notes,
     }
 }
 
@@ -1301,7 +1456,7 @@ use crate::service::MarketService;
 /// Vida de una tasa base calculada.
 const BASE_TTL: Duration = Duration::from_secs(6 * 3600);
 /// OPV máximas que entran en la muestra (cada una cuesta 2-3 peticiones la primera vez).
-const BASE_SAMPLE: usize = 30;
+const BASE_SAMPLE: usize = 60;
 
 type BaseFlight = Shared<BoxFuture<'static, Result<Arc<IpoBaseRate>, String>>>;
 
@@ -1331,8 +1486,8 @@ impl MarketService {
                 let this = self.clone();
                 let fut: BoxFuture<'static, Result<Arc<IpoBaseRate>, String>> = async move {
                     let res = async {
-                        let perfs = this.sampled_ipo_performance(months, BASE_SAMPLE, "SPY").await.map_err(|e| e.to_string())?;
-                        Ok::<_, String>(Arc::new(compute_base_rate(&perfs, months, "SPY", Utc::now())))
+                        let items = this.sampled_ipo_performance(months, BASE_SAMPLE, "SPY").await.map_err(|e| e.to_string())?;
+                        Ok::<_, String>(Arc::new(compute_base_rate_sized(&items, months, "SPY", Utc::now())))
                     }
                     .await;
                     if let Ok(v) = &res

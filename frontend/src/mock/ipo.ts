@@ -1,6 +1,7 @@
 import { ApiError } from '@/api/client'
 import type {
   IpoBaseRate,
+  IpoBaseRateTier,
   IpoEntry,
   IpoPerformance,
   IpoReturnPoint,
@@ -40,6 +41,7 @@ const SPECS: Spec[] = [
   { symbol: 'ORFS', name: 'Orbital Freight Systems', exchange: 'NYSE', offset: -25, status: 'priced', price: [24, 24], shares: 33_000_000, drift: [-6, -18] },
   { symbol: 'CBME', name: 'Cobalt Meridian Energy', exchange: 'NYSE', offset: 9, status: 'expected', price: [18, 20], shares: 20_000_000, drift: [0, 0] },
   { symbol: 'NRWF', name: 'Nimbus Row Foods', exchange: 'NASDAQ Global Market', offset: 23, status: 'expected', price: [12, 14], shares: 12_000_000, drift: [0, 0] },
+  { symbol: 'TNYB', name: 'Tiny Bay Biologics', exchange: 'NASDAQ Capital', offset: -8, status: 'priced', price: [8, 8], shares: 2_500_000, drift: [-4, -12] },
   { symbol: 'HQACU', name: 'Helix Quarry Acquisition Corp.', exchange: 'NASDAQ Global', offset: -5, status: 'priced', price: [10, 10], shares: 20_000_000, spac: true, drift: [0.5, 0] },
   { symbol: 'VLPM', name: 'Verdant Loop Mobility', exchange: 'NASDAQ', offset: -3, status: 'filed', price: null, shares: null, drift: [0, 0] },
   { symbol: 'STRB', name: 'Saffron Tide Robotics', exchange: 'NASDAQ', offset: 15, status: 'withdrawn', price: null, shares: null, drift: [0, 0] },
@@ -239,6 +241,16 @@ const LABELS: Record<string, string> = {
 
 // --- Tasa base y rendimiento -----------------------------------------------------------------
 
+const tier = (label: string, minUsd: number, maxUsd: number | null, n: number, n3m: number, d1: number, up: number, m3: number): IpoBaseRateTier => ({
+  label, minUsd, maxUsd, mergedFrom: [], sample: n, nDay1: n, n3m, medianDay1Pct: d1, positiveDay1Pct: up, median3mPct: m3,
+  median3mExcessPct: m3 - 1.5, beatBenchmark3mPct: 50, symbols: [],
+})
+const MOCK_TIERS: IpoBaseRateTier[] = [
+  tier('< 50 M USD', 0, 50e6, 14, 8, -2.3, 43, -29),
+  tier('50–250 M USD', 50e6, 250e6, 19, 15, 0, 47, 1.5),
+  tier('≥ 250 M USD', 250e6, null, 25, 23, 18, 76, 12),
+]
+
 export function mockIpoBaseRate(months = 12): IpoBaseRate {
   return {
     months,
@@ -254,8 +266,11 @@ export function mockIpoBaseRate(months = 12): IpoBaseRate {
     symbols: ['LHTX', 'ORFS', 'GPKS', 'AMBR', 'KLRN', 'PNDL'],
     source: 'fake',
     asOf: AS_OF,
+    tiers: MOCK_TIERS,
+    tierNotes: [],
     caveats: [
       'Datos simulados (modo demostración): no son OPV reales.',
+      'En micro-OPV (< 50 M USD) el capital flotante es muy pequeño y la volatilidad del primer día no es representativa.',
       'Rentabilidad de precio desde el precio de la OPV: solo la obtiene quien recibe acciones en la colocación, no quien compra al abrir.',
       'Muestra limitada y sin SPAC; las OPV que se deslistaron pueden faltar (sesgo de supervivencia).',
       'Mediana de otras OPV: describe el momento del mercado, no predice cómo irá una OPV concreta.',
@@ -363,6 +378,7 @@ export function mockIpoRiskProfile(symbol: string): IpoRiskProfile {
       : null,
     indicators: indicatorsFor(s.symbol, e),
     baseRate: mockIpoBaseRate(12),
+    baseRateTier: e.totalValue === null ? null : (MOCK_TIERS.find((t) => e.totalValue! >= t.minUsd && (t.maxUsd === null || e.totalValue! < t.maxUsd)) ?? null),
     warnings,
     disclaimer:
       'Perfil de riesgo, no una recomendación ni una predicción. Resume hechos leídos del folleto y del calendario con reglas fijas; lo que no se pudo leer figura como «no extraído». La tasa base de OPV recientes describe lo ocurrido con otras OPV y no predice cómo irá esta.',

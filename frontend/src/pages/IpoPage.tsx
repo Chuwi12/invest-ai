@@ -2,7 +2,7 @@ import { ArrowLeft, ExternalLink as ExternalIcon, Info, ShieldAlert } from 'luci
 import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useIpoBaseRate, useIpoCalendar, useIpoPerformance, useIpoProspectus, useIpoRiskProfile } from '@/api/hooks'
-import type { IpoBaseRate, IpoEntry, IpoPerformance, IpoRiskIndicator, IpoRiskProfile, Prospectus } from '@/api/types'
+import type { IpoBaseRate, IpoBaseRateTier, IpoEntry, IpoPerformance, IpoRiskIndicator, IpoRiskProfile, Prospectus } from '@/api/types'
 import { ExternalLink } from '@/components/ExternalLink'
 import { Empty, ErrorNotice, Section, SkeletonRows } from '@/components/states'
 import { useTitle } from '@/hooks/useTitle'
@@ -151,42 +151,70 @@ function IndicatorCard({ i }: { i: IpoRiskIndicator }) {
   )
 }
 
-function BaseRatePanel({ b }: { b: IpoBaseRate }) {
+type RateStats = Pick<IpoBaseRateTier, 'nDay1' | 'n3m' | 'medianDay1Pct' | 'positiveDay1Pct' | 'median3mPct' | 'median3mExcessPct' | 'beatBenchmark3mPct'>
+
+function RateGrid({ s, bench }: { s: RateStats; bench: string }) {
   const pp = (v: number | null) => formatPoints(v, 1)
+  return (
+    <dl className="stat-grid">
+      <div>
+        <dt>Mediana día 1 (n={s.nDay1})</dt>
+        <dd className="num">{pp(s.medianDay1Pct)}</dd>
+      </div>
+      <div>
+        <dt>Cerraron al alza el día 1</dt>
+        <dd className="num">{s.positiveDay1Pct === null ? '—' : `${formatNumber(s.positiveDay1Pct, 0)} %`}</dd>
+      </div>
+      <div>
+        <dt>Mediana a 3 meses (n={s.n3m})</dt>
+        <dd className="num">{pp(s.median3mPct)}</dd>
+      </div>
+      <div>
+        <dt>Exceso mediano vs {bench} a 3 meses</dt>
+        <dd className="num">{pp(s.median3mExcessPct)}</dd>
+      </div>
+      <div>
+        <dt>Batieron a {bench} a 3 meses</dt>
+        <dd className="num">{s.beatBenchmark3mPct === null ? '—' : `${formatNumber(s.beatBenchmark3mPct, 0)} %`}</dd>
+      </div>
+    </dl>
+  )
+}
+
+function BaseRatePanel({ b, tier }: { b: IpoBaseRate; tier: IpoBaseRateTier | null }) {
+  const main: RateStats = tier ?? b
   return (
     <div className="stack">
       <p className="small">
-        Tasa base de las <strong className="num">{formatInt(b.sample)}</strong> OPV (sin SPAC) de los últimos {b.months} meses, frente a {b.benchmark}.{' '}
-        <strong>No predice esta OPV:</strong> solo dice cómo le ha ido de media al mercado de OPV recientemente.
+        Tasa base de las <strong className="num">{formatInt(tier?.sample ?? b.sample)}</strong> OPV (sin SPAC) de los últimos {b.months} meses
+        {tier ? (
+          <>
+            {' '}
+            de tamaño comparable: <strong>OPV de {tier.label}</strong>
+          </>
+        ) : null}
+        , frente a {b.benchmark}. <strong>No predice esta OPV:</strong> solo dice cómo le ha ido de media al mercado de OPV recientemente.
         {isSimulated(b.source) ? ' (Datos simulados.)' : ''}
       </p>
-      <dl className="stat-grid">
-        <div>
-          <dt>Mediana día 1 (n={b.nDay1})</dt>
-          <dd className="num">{pp(b.medianDay1Pct)}</dd>
-        </div>
-        <div>
-          <dt>Cerraron al alza el día 1</dt>
-          <dd className="num">{b.positiveDay1Pct === null ? '—' : `${formatNumber(b.positiveDay1Pct, 0)} %`}</dd>
-        </div>
-        <div>
-          <dt>Mediana a 3 meses (n={b.n3m})</dt>
-          <dd className="num">{pp(b.median3mPct)}</dd>
-        </div>
-        <div>
-          <dt>Exceso mediano vs {b.benchmark} a 3 meses</dt>
-          <dd className="num">{pp(b.median3mExcessPct)}</dd>
-        </div>
-        <div>
-          <dt>Batieron a {b.benchmark} a 3 meses</dt>
-          <dd className="num">{b.beatBenchmark3mPct === null ? '—' : `${formatNumber(b.beatBenchmark3mPct, 0)} %`}</dd>
-        </div>
-      </dl>
-      {b.n3m < 10 ? (
+      <RateGrid s={main} bench={b.benchmark} />
+      {main.n3m < 10 ? (
         <div className="notice warn" role="status">
           <Info aria-hidden="true" />
-          <span>Muestra pequeña a 3 meses (n={b.n3m}): la mediana es poco fiable.</span>
+          <span>Muestra pequeña a 3 meses (n={main.n3m}): la mediana es poco fiable.</span>
         </div>
+      ) : null}
+      {b.tierNotes.map((n) => (
+        <p key={n} className="small muted">{n}</p>
+      ))}
+      {!tier && b.tiers.length > 0 ? (
+        <p className="small muted">No se pudo asignar esta OPV a un tramo de tamaño: se muestra la tasa global.</p>
+      ) : null}
+      {tier ? (
+        <details className="ind-evidence">
+          <summary>Referencia: todas las OPV (n={b.sample})</summary>
+          <RateGrid s={b} bench={b.benchmark} />
+          <p className="small muted">Mezcla micro-OPV y grandes, que se comportan distinto: por eso se compara con el tramo de tamaño.</p>
+        </details>
       ) : null}
       <ul className="caveats small muted">
         {b.caveats.map((c) => (
@@ -374,7 +402,7 @@ function Detail({ symbol, date }: { symbol: string; date: string | undefined }) 
 
       <Section title="Momento de mercado: tasa base" hint="Otras OPV recientes, no esta" id="ipo-base">
         {base ? (
-          <BaseRatePanel b={base} />
+          <BaseRatePanel b={base} tier={p.baseRateTier ?? null} />
         ) : fallbackBase.isError ? (
           <ErrorNotice error={fallbackBase.error} onRetry={() => void fallbackBase.refetch()} title="No se pudo calcular la tasa base" />
         ) : (

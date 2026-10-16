@@ -999,6 +999,28 @@ export interface IpoBaseRate {
   source: string
   asOf: string
   caveats: string[]
+  /** Misma estadística por tramo de tamaño de la oferta (vacío si no hay tamaños). */
+  tiers: IpoBaseRateTier[]
+  /** Fusiones de tramos por muestra pequeña. */
+  tierNotes: string[]
+}
+
+/** Tasa base de las OPV de un tramo de tamaño (< 50 M, 50–250 M, ≥ 250 M USD, o fusiones). */
+export interface IpoBaseRateTier {
+  label: string
+  minUsd: number
+  maxUsd: number | null
+  /** Etiquetas de los tramos originales fusionados (vacío si no hubo fusión). */
+  mergedFrom: string[]
+  sample: number
+  nDay1: number
+  n3m: number
+  medianDay1Pct: number | null
+  positiveDay1Pct: number | null
+  median3mPct: number | null
+  median3mExcessPct: number | null
+  beatBenchmark3mPct: number | null
+  symbols: string[]
 }
 
 export interface IpoProspectusRef {
@@ -1019,6 +1041,8 @@ export interface IpoRiskProfile {
   prospectus: IpoProspectusRef | null
   indicators: IpoRiskIndicator[]
   baseRate: IpoBaseRate | null
+  /** Tramo de la tasa base que corresponde al tamaño de esta OPV (`baseRate` es la global). */
+  baseRateTier: IpoBaseRateTier | null
   warnings: string[]
   disclaimer: string
   generatedAt: string

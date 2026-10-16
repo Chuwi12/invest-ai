@@ -1373,15 +1373,15 @@ impl MarketService {
     /// (hasta `limit`, en el orden del calendario). Las que fallan se omiten.
     pub async fn recent_ipo_performance(&self, months: u32, limit: usize, benchmark: &str) -> domain::Result<Vec<IpoPerformance>> {
         let wanted: Vec<IpoEntry> = self.priced_ipos(months).await?.into_iter().take(limit.clamp(1, 50)).collect();
-        Ok(self.performances_of(wanted, benchmark).await)
+        Ok(self.performances_of(wanted, benchmark).await.into_iter().map(|x| x.perf).collect())
     }
 
     /// Como `recent_ipo_performance`, pero con la muestra repartida de forma uniforme por toda la
     /// ventana (en vez de las primeras): así incluye OPV lo bastante antiguas para tener ya el
     /// dato de 3 o 6 meses. Es la base de la tasa base de `ipo_risk`.
-    pub async fn sampled_ipo_performance(&self, months: u32, limit: usize, benchmark: &str) -> domain::Result<Vec<IpoPerformance>> {
+    pub async fn sampled_ipo_performance(&self, months: u32, limit: usize, benchmark: &str) -> domain::Result<Vec<crate::ipo_risk::SizedPerf>> {
         let all = self.priced_ipos(months).await?;
-        let limit = limit.clamp(1, 50);
+        let limit = limit.clamp(1, 80);
         let wanted: Vec<IpoEntry> = if all.len() <= limit {
             all
         } else {
@@ -1403,11 +1403,12 @@ impl MarketService {
 
     /// Rendimiento de varias OPV, cuatro a la vez (cada una son 2-3 peticiones); conserva el
     /// orden y omite las que fallan.
-    async fn performances_of(&self, wanted: Vec<IpoEntry>, benchmark: &str) -> Vec<IpoPerformance> {
+    async fn performances_of(&self, wanted: Vec<IpoEntry>, benchmark: &str) -> Vec<crate::ipo_risk::SizedPerf> {
         futures::stream::iter(wanted)
             .map(|e| async move {
                 let sym = e.symbol.clone().unwrap_or_default();
-                self.inner.ipo_performance(&sym, e.date, e.price_low, benchmark).await.ok()
+                let size_usd = crate::ipo_risk::offer_size_usd(&e);
+                self.inner.ipo_performance(&sym, e.date, e.price_low, benchmark).await.ok().map(|perf| crate::ipo_risk::SizedPerf { size_usd, perf })
             })
             .buffered(4)
             .filter_map(|p| async move { p })

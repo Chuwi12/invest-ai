@@ -25,7 +25,7 @@ Además, `warnings` avisa de folleto preliminar (cifras que pueden cambiar), pro
 ## Tasa base («momento de mercado»)
 
 `IpoBaseRate`: mediana del rendimiento del primer día y a 3 meses (y exceso frente a SPY) de hasta 30 OPV con precio definitivo, sin SPAC, de los últimos 12 meses, repartidas uniformemente por la ventana (`sampled_ipo_performance`), con `nDay1`, `n3m` y los sesgos conocidos (rendimiento desde el precio de colocación, que solo recibe quien obtiene acciones; supervivencia). **Describe lo ocurrido con otras OPV; no predice la OPV en pantalla.** La UI avisa si `n3m < 10`.
-Rendimiento: ~15–25 s en frío (2–3 peticiones por OPV, 4 a la vez); se cachea 6 h con un único cálculo en vuelo que sigue aunque el cliente se vaya.
+Rendimiento: ~30 s en frío para 58 OPV (2 peticiones a Yahoo por OPV, 4 a la vez, medido con red real el 16-oct-2026); se cachea 6 h con un único cálculo en vuelo que sigue aunque el cliente se vaya.
 
 ## Cómo se ha probado
 
@@ -46,6 +46,20 @@ Tasa base real a 12 meses, antes y después (misma consulta, vía `ipo_risk_prof
 
 Calendario de 12 meses: 330 OPV con precio, 195 marcadas SPAC; la única a 10,00 USD sin marcar es HYNE (operativa). Las cifras siguen siendo una muestra de 30, no una estadística robusta.
 
+### Tramos por tamaño de la oferta
+La mediana global mezcla poblaciones distintas (micro-OPV y grandes). La tasa base se calcula además por tramos del importe de la oferta (`offer_size_usd`: total del calendario con precio fijado; acciones × punto medio del rango si aún no hay precio): **< 50 M**, **50–250 M** y **≥ 250 M USD**. Los cortes se fijaron antes de ver resultados, con criterio de mercado: micro-OPV (flotante diminuto, colocadores pequeños), pequeña y mediana-grande (cobertura institucional). El corte pertenece al tramo de arriba (50 M exactos → 50–250 M). Un tramo con menos de 10 OPV con dato del primer día se fusiona con el contiguo (el de menor muestra si hay dos) y la nota lo dice (`tierNotes`, `mergedFrom`); si todo se fusiona queda «todos los tamaños». El perfil de una OPV usa SU tramo (`baseRateTier`) y la global queda como referencia; sin tamaño calculable, solo la global y un aviso. La muestra sube a 60 OPV repartidas por la ventana.
+
+Resultado real a 12 meses (16-oct-2026, 58 OPV muestreadas, sin SPAC por la heurística):
+
+| Tramo | n día 1 | n a 3 m | Mediana día 1 | % al alza | Mediana a 3 m |
+|---|---|---|---|---|---|
+| < 50 M USD | 14 | 10 | −2,3 % | 43 % | −29,0 % |
+| 50–250 M USD | 19 | 15 | 0,0 % | 47 % | +1,5 % |
+| ≥ 250 M USD | 25 | 23 | +18,1 % | 76 % | +12,0 % |
+| Global | 58 | 48 | +3,3 % | 59 % | +0,8 % |
+
+La global (+3,3 %) no describe a ninguno de los tres tramos. Con n = 10–25 por tramo las medianas siguen siendo ruidosas. Coste en frío: ~30 s con `buffered(4)`, por debajo del umbral de 45 s; si hiciera falta bajarlo, se podría lanzar `base_rate(12)` en una tarea de fondo tras el arranque (no bloquea el servidor y hoy no se hace para no gastar peticiones a Yahoo en cada arranque).
+
 ## Límites
 
 - Idioma: las reglas buscan texto en **inglés** de folletos de EE. UU.; un folleto en otro formato (PDF, antiguo, 253G2) no se ha probado.
@@ -57,3 +71,5 @@ Calendario de 12 meses: 330 OPV con precio, 195 marcadas SPAC; la única a 10,00
 - **Análisis con LLM:** que el modelo reciba las secciones relevantes (`risk_factors`, `use_of_proceeds`, `summary`) **y** el `IpoRiskProfile` ya calculado como hechos verificados, y devuelva solo una lectura estructurada con cita por afirmación (como en `ai/analysis`); nunca debe corregir ni reemplazar los indicadores. Las secciones con `parent` no se indexan dos veces en el RAG (`knowledge`).
 - **Aprendizaje:** guardar el perfil (indicadores + tasa base en la fecha) junto a cada OPV vista y, cuando madure el rendimiento a 3/6/12 meses (`IpoPerformance`), medir si cada bandera (venta secundaria alta, deuda, voto múltiple, dilución > X %) se asocia a peor exceso frente a SPY, con la misma disciplina que `learning` (intervalos, muestra independiente, puerta de mínimos). Con unas decenas de OPV al año, hará falta mucho tiempo para que sea significativo: hasta entonces la tasa base es descriptiva.
 - La detección de SPAC es heurística (precio 10,00 + nombre/símbolo). El sesgo que queda va en dos direcciones pequeñas: alguna SPAC sin palabras clave ni sufijo de unidades puede colarse (infla la mezcla con rendimientos pegados a 10 USD) y una empresa operativa a 10 USD con «Holdings», «Special» o un símbolo de 5 letras acabado en `U` se excluiría. Ni la UI ni la tasa base filtran «unidades» por otra vía: solo esta regla.
+- La mediana del día 1 se mide desde el **precio de colocación**, que solo obtiene quien recibe acciones; quien compra al abrir parte de otro precio.
+- En micro-OPV (< 50 M USD) el capital flotante es muy pequeño y la volatilidad del primer día no es representativa; aun así sale en su tramo, con aviso.

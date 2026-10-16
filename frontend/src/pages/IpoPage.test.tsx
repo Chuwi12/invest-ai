@@ -67,8 +67,11 @@ describe('OPV', () => {
   it('tasa base con tamaños de muestra y advertencia de que no predice', async () => {
     renderApp(<App />, '/ipo/ORFS')
     await screen.findByRole('heading', { name: 'Momento de mercado: tasa base' })
-    expect(await screen.findByText(/Mediana día 1 \(n=27\)/)).toBeInTheDocument()
-    expect(screen.getByText(/Mediana a 3 meses \(n=22\)/)).toBeInTheDocument()
+    // ORFS (792 M USD): se compara con SU tramo (≥ 250 M, n=25), con la global como referencia.
+    expect(await screen.findByText(/OPV de ≥ 250 M USD/)).toBeInTheDocument()
+    expect(screen.getByText(/Mediana día 1 \(n=25\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Mediana a 3 meses \(n=23\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Referencia: todas las OPV \(n=27\)/)).toBeInTheDocument()
     expect(screen.getByText(/No predice esta OPV/)).toBeInTheDocument()
   })
 
@@ -108,5 +111,14 @@ describe('OPV', () => {
     renderApp(<App />, '/ipo/ZZZZ')
     expect(await screen.findByText(/No se pudo cargar el perfil de ZZZZ/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Reintentar/ })).toBeInTheDocument()
+  })
+
+  it('una OPV micro usa el tramo pequeño y avisa de muestra pequeña a 3 meses', async () => {
+    renderApp(<App />, '/ipo/TNYB')
+    await screen.findByRole('heading', { name: 'Tiny Bay Biologics' })
+    expect(await screen.findByText(/OPV de < 50 M USD/)).toBeInTheDocument()
+    expect(screen.getByText(/Mediana día 1 \(n=14\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Muestra pequeña a 3 meses \(n=8\)/)).toBeInTheDocument()
+    expect(screen.getByText(/volatilidad del primer día no es representativa/)).toBeInTheDocument()
   })
 })

@@ -344,3 +344,158 @@ fn rule_144_waiting_period_is_not_taken_as_a_lockup() {
     let pr = profile(&p, None);
     assert_eq!(ind(&pr, "lock_up").status, IpoIndicatorStatus::NotExtracted);
 }
+
+// ---- Tasa base por tramos de tamaño ------------------------------------------------------------
+
+fn perf(sym: &str, d1: f64, r3: Option<f64>) -> domain::IpoPerformance {
+    let d = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
+    domain::IpoPerformance {
+        symbol: sym.into(),
+        ipo_date: d,
+        offer_price: 10.0,
+        offer_price_source: "calendar".into(),
+        first_day_close: 10.0,
+        first_day_return_pct: d1,
+        first_day_high_pct: d1,
+        points: vec![domain::IpoReturnPoint {
+            horizon: "3m".into(),
+            target_date: d,
+            price_date: r3.map(|_| d),
+            price: None,
+            return_pct: r3,
+            since_first_close_pct: None,
+            benchmark_return_pct: None,
+            excess_pct: r3,
+        }],
+        latest_price: 10.0,
+        latest_date: d,
+        latest_return_pct: 0.0,
+        max_drawdown_pct: 0.0,
+        benchmark: "SPY".into(),
+        source: "yahoo".into(),
+        source_url: None,
+        warnings: vec![],
+        as_of: now(),
+    }
+}
+
+fn sized(n: usize, size: f64, d1: f64, tag: &str) -> Vec<market::ipo_risk::SizedPerf> {
+    (0..n).map(|k| market::ipo_risk::SizedPerf { size_usd: Some(size), perf: perf(&format!("{tag}{k}"), d1, Some(d1 / 2.0)) }).collect()
+}
+
+#[test]
+fn tier_assignment_edges_and_offer_size() {
+    use market::ipo_risk::{offer_size_usd, tier_index};
+    assert_eq!(tier_index(1.0), 0);
+    assert_eq!(tier_index(49_999_999.99), 0);
+    assert_eq!(tier_index(50_000_000.0), 1, "el corte pertenece al tramo de arriba");
+    assert_eq!(tier_index(249_999_999.0), 1);
+    assert_eq!(tier_index(250_000_000.0), 2);
+    assert_eq!(tier_index(5e9), 2);
+    let mut e = IpoEntry {
+        date: NaiveDate::from_ymd_opt(2026, 10, 9).unwrap(),
+        symbol: Some("X".into()),
+        name: "X".into(),
+        exchange: None,
+        status: IpoStatus::Priced,
+        price_low: Some(14.0),
+        price_high: Some(14.0),
+        shares: Some(1_000_000),
+        total_value: Some(14_000_000.0),
+        spac_likely: false,
+        source: "finnhub".into(),
+        source_url: None,
+        as_of: now(),
+    };
+    assert_eq!(offer_size_usd(&e), Some(14_000_000.0));
+    e.total_value = None;
+    assert_eq!(offer_size_usd(&e), Some(14_000_000.0), "acciones × precio");
+    e.status = IpoStatus::Expected;
+    e.price_low = Some(12.0);
+    e.price_high = Some(16.0);
+    assert_eq!(offer_size_usd(&e), Some(14_000_000.0), "punto medio, sin el 15 % de sobreasignación");
+    e.shares = None;
+    assert_eq!(offer_size_usd(&e), None);
+}
+
+#[test]
+fn tiers_with_enough_sample_stay_separate() {
+    let mut items = sized(12, 20e6, -2.0, "S");
+    items.extend(sized(11, 100e6, 5.0, "M"));
+    items.extend(sized(10, 400e6, 9.0, "L"));
+    let b = market::ipo_risk::compute_base_rate_sized(&items, 12, "SPY", now());
+    assert_eq!(b.tiers.len(), 3);
+    assert!(b.tier_notes.is_empty());
+    assert_eq!(b.tiers[0].label, "< 50 M USD");
+    assert_eq!(b.tiers[1].label, "50–250 M USD");
+    assert_eq!(b.tiers[2].label, "≥ 250 M USD");
+    assert_eq!((b.tiers[0].sample, b.tiers[1].sample, b.tiers[2].sample), (12, 11, 10));
+    assert_eq!(b.tiers[2].median_day1_pct, Some(9.0));
+    assert_eq!(b.tiers[2].max_usd, None);
+    assert_eq!(b.sample, 33, "la global incluye todo");
+}
+
+#[test]
+fn small_tiers_are_merged_with_the_adjacent_one_and_say_so() {
+    // Micro con 4 (< 10): se fusiona con el tramo contiguo (50–250).
+    let mut items = sized(4, 20e6, -3.0, "S");
+    items.extend(sized(15, 100e6, 5.0, "M"));
+    items.extend(sized(12, 400e6, 9.0, "L"));
+    let b = market::ipo_risk::compute_base_rate_sized(&items, 12, "SPY", now());
+    assert_eq!(b.tiers.len(), 2);
+    assert_eq!(b.tiers[0].label, "< 250 M USD");
+    assert_eq!(b.tiers[0].merged_from, vec!["< 50 M USD", "50–250 M USD"]);
+    assert_eq!(b.tiers[0].sample, 19);
+    assert_eq!(b.tiers[1].label, "≥ 250 M USD");
+    assert!(b.tier_notes[0].contains("fusionado"), "{:?}", b.tier_notes);
+    // El tramo grande con poca muestra se fusiona con el anterior (más pequeño en n entre vecinos).
+    let mut items = sized(15, 20e6, -3.0, "S");
+    items.extend(sized(15, 100e6, 5.0, "M"));
+    items.extend(sized(3, 400e6, 9.0, "L"));
+    let b = market::ipo_risk::compute_base_rate_sized(&items, 12, "SPY", now());
+    assert_eq!(b.tiers.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), vec!["< 50 M USD", "≥ 50 M USD"]);
+    // Todo pequeño: acaba en un único tramo «todos los tamaños».
+    let items = sized(5, 20e6, 1.0, "S");
+    let b = market::ipo_risk::compute_base_rate_sized(&items, 12, "SPY", now());
+    assert_eq!(b.tiers.len(), 1);
+    assert_eq!(b.tiers[0].label, "todos los tamaños");
+    // Sin tamaños: sin tramos.
+    let b = compute_base_rate(&[perf("A", 1.0, None)], 12, "SPY", now());
+    assert!(b.tiers.is_empty());
+}
+
+#[test]
+fn profile_uses_the_tier_of_its_own_offer_size() {
+    let mut items = sized(12, 20e6, -2.0, "S");
+    items.extend(sized(11, 100e6, 5.0, "M"));
+    items.extend(sized(10, 400e6, 9.0, "L"));
+    let base = market::ipo_risk::compute_base_rate_sized(&items, 12, "SPY", now());
+    let mk = |total: f64| IpoEntry {
+        date: NaiveDate::from_ymd_opt(2026, 9, 18).unwrap(),
+        symbol: Some("ETRA".into()),
+        name: "Electra".into(),
+        exchange: None,
+        status: IpoStatus::Priced,
+        price_low: Some(15.0),
+        price_high: Some(15.0),
+        shares: Some(23_333_334),
+        total_value: Some(total),
+        spac_likely: false,
+        source: "finnhub".into(),
+        source_url: None,
+        as_of: now(),
+    };
+    let tier_of = |e: &IpoEntry| {
+        build_profile(ProfileInput { symbol: "ETRA", entry: Some(e), prospectus: None, base_rate: Some(base.clone()), now: now() }).base_rate_tier.map(|t| t.label)
+    };
+    assert_eq!(tier_of(&mk(350_000_000.0)).as_deref(), Some("≥ 250 M USD"));
+    assert_eq!(tier_of(&mk(249_000_000.0)).as_deref(), Some("50–250 M USD"));
+    assert_eq!(tier_of(&mk(3_500_000.0)).as_deref(), Some("< 50 M USD"));
+    // Sin tamaño: sin tramo y con aviso; la global sigue disponible.
+    let mut e = mk(1.0);
+    e.total_value = None;
+    e.shares = None;
+    let pr = build_profile(ProfileInput { symbol: "ETRA", entry: Some(&e), prospectus: None, base_rate: Some(base), now: now() });
+    assert!(pr.base_rate_tier.is_none() && pr.base_rate.is_some());
+    assert!(pr.warnings.iter().any(|w| w.contains("solo la tasa base global")));
+}

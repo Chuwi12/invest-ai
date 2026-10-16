@@ -148,6 +148,9 @@ async fn risk_profile_is_computed_by_the_real_extractor() {
     assert_eq!(indicator(&p, "controlled")["numeric"], 71.0);
     assert!(indicator(&p, "offer_size")["value"].as_str().unwrap().contains("M USD"));
     assert!(p["baseRate"]["sample"].as_u64().unwrap() > 0);
+    // La muestra simulada es pequeña: los tramos se fusionan y el perfil recibe el que le toca.
+    assert!(p["baseRateTier"]["label"].is_string(), "{}", p["baseRateTier"]);
+    assert!(!p["baseRate"]["tierNotes"].as_array().unwrap().is_empty());
     // Folleto preliminar de una OPV sin cotizar: avisos y sin inventar lo que no hay.
     let (s, p) = app.get("/api/ipo/CBME/risk-profile").await;
     assert_eq!(s, StatusCode::OK, "{p}");
