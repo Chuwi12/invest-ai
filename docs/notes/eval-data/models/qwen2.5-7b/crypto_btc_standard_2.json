@@ -1,0 +1,187 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El MACD muestra un histograma negativo de -554.2, indicando una tendencia bajista [Técnico]. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "La caída máxima a 1 año es de -48.8%, lo que implica un riesgo significativo [Macro]. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "Bitcoin cae 2,15% el 14 de octubre y pone a prueba soportes clave [Noticias]. [N7]"
+    ],
+    "bullCase": [
+      "La tendencia alcista fuerte sugiere que el precio supera la SMA200 en +13.2% [Técnico].",
+      "El precio está cerca del soporte 79939.61 (-2.3%) y la resistencia 82850 (+1.3%) [Técnico]. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": "2026-10-14",
+        "description": "La caída máxima a 1 año es de -48.8%, lo que implica un riesgo significativo [Macro].",
+        "impact": null
+      }
+    ],
+    "completionTokens": 1579,
+    "confidence": 0.6600000262260437,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 33717,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-19T10:48:08.242399466Z",
+    "horizon": "short",
+    "horizonNote": "La volatilidad 30d anualizada es del 39.4%, lo que sugiere un mercado volátil.",
+    "id": "01a153c6-9f32-74da-a649-b1c6a7999efc",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 5,
+    "method": "Modelo qwen2.5:7b, profundidad standard, 5 llamadas, 9598 tokens de entrada y 1579 de salida, 34 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 9598,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 50 (en los datos es «», no «caída máxima»)"
+    ],
+    "risks": [
+      "La oferta circulante es del 95.7% de la máxima, lo que podría presionar el precio [Fundamental]."
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "DiarioBitcoin",
+        "publishedAt": "2026-10-14T16:05:42Z",
+        "title": "Bitcoin (BTC) cae 2,15% el 14 de octubre y pone a prueba soportes clave",
+        "url": "https://news.google.com/rss/articles/CBMiqwFBVV95cUxPamlOV2NVX3RxRUxiaHFKT09FYXlJNWdnVjlmdnFDdjVnVDBDY1RrV19LZ1h4TlUtMm9uTmZUdFFVb3BFbDRTemFYb1JkM1hhMlRhTUNSWnZxWHFVM0lHN0kwWXR0cUItWS1vSUpWeldEdDlEMWZaWU1EVVhuVGRSb294Y2UwNXhTYnJ0Qmd0UHVRZGhUNm9ZVXZMQ0hmY3Z0VGltWlZQV2g1a0U?oc=5"
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Puntuación cuantitativa determinista crypto:BTC",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Comprar en el rango de entrada 81295.91 – 81782.31, con stop en 79086.54 y objetivos en 82850 / 83853.27 / 86410.63.\nSalida: Salir si el precio cae por debajo del stop de 79086.54.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "Se mantiene la posición debido a la tendencia alcista fuerte y la proximidad al soporte. Sin embargo, el MACD muestra una tendencia bajista y la caída máxima a 1 año es significativa.",
+    "thesis": "La distancia al máximo histórico es de -35.1%, precio al 64.9% de su ATH [Fundamental]. La oferta circulante sobre máxima es del 95.7%, indicando baja disponibilidad [Fundamental]. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC)\n\nLa tendencia alcista fuerte sugiere que el precio supera la SMA200 en +13.2% [Técnico]. El RSI14 de 47.1 indica una zona neutra, sin signos de sobrecompra o sobreventa [Técnico]. El MACD muestra un histograma negativo de -554.2, indicando una tendencia bajista [Técnico]. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)\n\nLa caída máxima a 1 año es de -48.8%, lo que implica un riesgo significativo [Macro]. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)\n\nIncertidumbre: El mercado muestra señales contradictorias, lo que aumenta la incertidumbre.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "Si el RSI14 se sitúa por encima de 70, lo que indica sobrecompra [Técnico].",
+      "Si el precio cierra por debajo del stop de 79086.54, lo que podría indicar una corrección significativa [Técnico].",
+      "Si la caída máxima a 1 año supera el 50%⚠, lo que aumentaría el riesgo [Macro]."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1579,
+      "confidence": 0.6600000262260437,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 20,
+      "figuresAllTotal": 28,
+      "figuresThesisDistinct": 7,
+      "figuresThesisTotal": 7,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 20,
+      "llmCalls": 5,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 9598,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 6,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 6,
+      "unverifiedNotes": 1,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 1,
+      "wrongLabelExamples": [
+        {
+          "actual": "",
+          "figure": "50",
+          "said": "caída máxima",
+          "snippet": "Si la caída máxima a 1 año supera el 50%, lo que aumentaría el riesgo [Macro]."
+        }
+      ]
+    },
+    "depth": "standard",
+    "events": [
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=2"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 33.718071774,
+    "wordingFixCalls": 0
+  }
+}

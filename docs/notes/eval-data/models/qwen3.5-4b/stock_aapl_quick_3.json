@@ -1,0 +1,179 @@
+{
+  "analysis": {
+    "asset": "stock:AAPL",
+    "bearCase": [
+      "El litigio de 5.700 millones USD [N9] amenaza la rentabilidad por FCF del 2.2%. [N8]"
+    ],
+    "bullCase": [
+      "La tendencia alcista con RSI14 de 62.1 y margen operativo del 32.6% impulsa el precio. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 871,
+    "confidence": 0.75,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 16424,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-19T10:49:29.398610828Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a153c7-dc36-7478-8b7a-263d040c15a1",
+    "keyLevels": {
+      "entryZone": [
+        336.80750274658203,
+        342.96
+      ],
+      "resistances": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ],
+      "stopLoss": 330.13080444827784,
+      "supports": [
+        336.80750274658203,
+        334.989990234375,
+        329.4581021780075,
+        325.80999755859375
+      ],
+      "targets": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ]
+    },
+    "levelsNote": "Zona de entrada 336,81 – 342,96 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 330,13 = SMA20 336,81 − 1×ATR14 6,6767 (Yahoo Finance, 14 oct 2026). Objetivos: 344,16 = banda de Bollinger superior; 348,15 = máximo de 52 semanas; 405 = precio objetivo máximo de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.4 (entrada en el punto medio de la zona, 339,88).",
+    "llmCalls": 3,
+    "method": "Modelo qwen3.5:4b, profundidad quick, 3 llamadas, 7909 tokens de entrada y 871 de salida, 16 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3.5:4b",
+    "positionSizing": {
+      "atrPct": 1.95,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 2.9,
+      "volatility30d": 0.19883421620277855
+    },
+    "priceAtAnalysis": 342.96,
+    "promptTokens": 7909,
+    "qualityNotes": [],
+    "risks": [
+      "El PER de 35.76 sugiere una valoración exigente para el sector Technology. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La caída máxima a 1 año del 13.8% limita el recorrido al alza en crisis. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El litigio de 5.700 millones USD [N9] introduce incertidumbre sobre los resultados trimestrales. [N8]"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 77.19999694824219,
+      "macroScore": 58.400001525878906,
+      "momentum": 69.9000015258789,
+      "overall": 61.79999923706055,
+      "risk": 30.700000762939453,
+      "sentiment": 57.0,
+      "technical": 65.9000015258789,
+      "valuation": 34.900001525878906
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.866245838Z",
+        "title": "Fundamentales stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "MarketScreener España",
+        "publishedAt": "2026-10-14T18:13:29Z",
+        "title": "Apple intenta revocar el fallo de 5.700 millones USD en el litigio contra Taction Technology",
+        "url": "https://news.google.com/rss/articles/CBMi4gFBVV95cUxPME4welZuV3hySlk1RXRGVDdyVnI2bEVTY0tNS0ZkZjJEWFZmYUotWVhoODlFWjBCMzUwYW9pa3F2TUh6TEZvR3lSNzZUUW05d2dqc2NBbTJnZjJQMHRkRms0WmNRc04zVFQ1dGpzNHlwcHR2T3pvUXp1eGVGVTJBSzhMb3lYN2VuMUpDX1F2WW5ZUWRfR3ZybXY0S0ZxV0NhNlowX2RLVHZoQlZORUdjb3YxV196RmtYR01GZjlDNmJlaThyQ0xROWV2akZUa0lhZDUzTEd2QUx5QWpHQ3MyTW9n?oc=5"
+      },
+      {
+        "provider": "MT Newswires",
+        "publishedAt": "2026-10-14T18:12:25Z",
+        "title": "Apple Reportedly Seeks to Overturn $5.7 Billion Taction Technology Verdict",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/apple-reportedly-seeks-overturn-5-181225000.html"
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:15.894470797Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "Yahoo",
+        "publishedAt": "2026-10-14T19:08:56Z",
+        "title": "OpenAI Employee Allegedly Took Secret AI Device Files to Apple, Presented it to Top Executives.",
+        "url": "https://finnhub.io/api/news?id=252335dc37040956d687a3d63f615a7fa10bb89532c0075e58f641cd35267f21"
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+    "summary": "Acumular la acción debido a su margen operativo del 32.6% y el RSI14 de 62.1 que indica momentum moderado.",
+    "thesis": "El PER de 35.76 y el crecimiento de beneficios del 28.7% justifican la rentabilidad por FCF del 2.2%, pero la deuda/capital de 0.78x añade presión sobre los resultados trimestrales. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nEl histograma del MACD positivo junto al soporte en 334.99 ofrecen un escenario favorable para operar, mientras que la resistencia en 344.96 define el siguiente nivel clave. La distancia al stop del -3.7% y la recompensa/riesgo de 0.4 sugieren una operación con buen perfil. [N4] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nEl PER de 35.76 y el crecimiento de ingresos del 16.4% sitúan la valoración en zona exigente, aunque los márgenes operativos del 32.6% sostienen la rentabilidad por FCF del 2.2%. El RSI14 de 62.1 y la SMA50 de 324.46 confirman una tendencia alcista con el precio por encima de la media móvil. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nIncertidumbre: La incertidumbre del litigio de 5.700 millones USD [N9] reduce la confianza en el crecimiento futuro.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "el precio cierra por debajo de SMA200 291.77",
+      "la noticia del litigio de 5.700 millones USD [N9] confirma daños mayores"
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 871,
+      "confidence": 0.75,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 15,
+      "figuresAllTotal": 26,
+      "figuresThesisDistinct": 13,
+      "figuresThesisTotal": 15,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 22,
+      "llmCalls": 3,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 7909,
+      "qualityNotesCount": 0,
+      "thesisLabeledOk": 14,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 4,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3.5:4b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 16.464626689,
+    "wordingFixCalls": 0
+  }
+}

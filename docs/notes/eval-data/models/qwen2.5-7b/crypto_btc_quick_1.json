@@ -1,0 +1,198 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "La caída máxima a 1 año de 48.8% podría indicar una fuerte corrección. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "bullCase": [
+      "La SMA50 sobre la SMA200 (+12.4%) sugiere una tendencia alcista. (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 857,
+    "confidence": 0.7300000190734863,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 22337,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T15:47:53.802580483Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a14565-fb4a-771c-ae2d-8109f27eaf5d",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 4,
+    "method": "Modelo qwen2.5:7b, profundidad quick, 4 llamadas, 7479 tokens de entrada y 857 de salida, 22 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen2.5:7b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 7479,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «tesis»: 70 (en los datos es «Valoración», no «FDV»)",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 50 (en los datos es «», no «caída máxima»)"
+    ],
+    "risks": [
+      "La noticia [N5] indica un riesgo alto con Bitcoin cayendo por debajo de $82,000. [N2]",
+      "La volatilidad a 30 días de 39.4% implica un alto nivel de riesgo. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Niveles de entrada, stop y objetivos calculados crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Puntuación cuantitativa determinista crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "Benzinga",
+        "publishedAt": "2026-10-14T19:10:16Z",
+        "title": "Bitcoin Dips to $82,000 on Inflation Scare: Where Does BTC Go Next?",
+        "url": "https://news.google.com/rss/articles/CBMiwwFBVV95cUxQdmZ4dW5UMDdXeTZsMWRwdmIxU05qTkJLYWt6azVCUHhBbjZVdGdRVmdWTE9KMTRHa3Y0cTZlbEREM2RmdzNmekF2Y1BfejF4RkdJMHVOdkZucnVkSjBRLURZUkkwZlg3Q3ZnSkFxSG4yUWtzdC1TMVMtOGtiVEM1Tm8yS1I2XzNWN1I0WGRtdmd6UUVyeXFNUFRqM3h1ZzhXMDV4RmsySVp6WDB5Tmo0RFFtVjNnNW5Cd2dRYVg5azZlUDg?oc=5"
+      },
+      {
+        "provider": "The Block",
+        "publishedAt": "2026-10-14T16:51:00Z",
+        "title": "Bitcoin falls below $82,000 as hotter core CPI revives Fed hike concerns",
+        "url": "https://news.google.com/rss/articles/CBMirgFBVV95cUxPYndQbXBQRnBmR2RWQjV1Mlh3cGlwdW5jWXktaTJUbzJ6WlNYSkg2YVFjZmJrbnQxRWlOUWFpVlcwVGt3Tjdya3NsbnBOWndoVEFjWHdFdXJWQm1jMHNjWjZHaE5sMU0tXzRNdWJwR29zRy11WW8xTjRKUlN3UElsM3dsSjJpbkg2SDhjdEZWdUFqUkVqeHlnUzV1bmtUV1p4Y0NhMTRPY3c5YjF3cFE?oc=5"
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "Se mantiene, con una tendencia alcista y una rentabilidad a 1 año de -27.6%. La SMA50 sobre la SMA200 y el histograma del MACD sugieren un momentum positivo.",
+    "thesis": "La valoración de 70⚠ y la FDV / capitalización de 1.00x indican un precio justo. La rentabilidad a 1 año de -27.6% sugiere un rendimiento negativo. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)\n\nEl RSI14 de 47.1 y la SMA200 de 72243.67 indican una tendencia alcista y momentum moderado. El histograma del MACD -554.2 sugiere una tendencia bajista. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)\n\nEl precio al 64.9% de su máximo histórico y la caída máxima a 1 año de 48.8% indican un perfil de riesgo moderado. La volatilidad a 30 días de 39.4% implica un alto nivel de riesgo. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC; indicadores técnicos 2026-10-14 00:00 UTC)\n\nIncertidumbre: Los datos son sólidos, pero la caída máxima a 1 año de 48.8% y la volatilidad a 30 días de 39.4% son factores de incertidumbre.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "el precio cierra por debajo de la SMA200 72243.67",
+      "la caída máxima a 1 año supera el 50%⚠"
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 857,
+      "confidence": 0.7300000190734863,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 12,
+      "figuresAllTotal": 18,
+      "figuresThesisDistinct": 9,
+      "figuresThesisTotal": 11,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 14,
+      "llmCalls": 4,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 7479,
+      "qualityNotesCount": 2,
+      "thesisLabeledOk": 9,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 2,
+      "unverifiedNotes": 2,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 4,
+      "wrongLabel": 2,
+      "wrongLabelExamples": [
+        {
+          "actual": "Valoración",
+          "figure": "70",
+          "said": "FDV",
+          "snippet": "La valoración de 70 y la FDV / capitalización de 1.00x indican un "
+        },
+        {
+          "actual": "",
+          "figure": "50",
+          "said": "caída máxima",
+          "snippet": "la caída máxima a 1 año supera el 50%"
+        }
+      ]
+    },
+    "depth": "quick",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=1",
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=1"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen2.5:7b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 22.339442314,
+    "wordingFixCalls": 1
+  }
+}

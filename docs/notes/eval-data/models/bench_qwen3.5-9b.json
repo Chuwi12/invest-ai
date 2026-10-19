@@ -1,0 +1,56 @@
+{
+ "model": "qwen3.5:9b",
+ "numCtx": 16384,
+ "capabilities": [
+  "completion",
+  "vision",
+  "tools",
+  "thinking"
+ ],
+ "loadSeconds": 8.5,
+ "ps": {
+  "size": 6486344330,
+  "sizeVram": 5395898693,
+  "gpuShare": 0.8318859466099296,
+  "contextLength": 16384
+ },
+ "nvidiaMiB": {
+  "baseline": 848,
+  "withModel": 7036,
+  "model": 6188,
+  "total": 8188
+ },
+ "speed": [
+  {
+   "promptTokens": 2630,
+   "prefillTokPerS": 1812.4756211691638,
+   "genTokens": 126,
+   "genTokPerS": 27.877210181553647,
+   "loadS": 0.000535608
+  },
+  {
+   "promptTokens": 2630,
+   "prefillTokPerS": 1813.1003740639785,
+   "genTokens": 111,
+   "genTokPerS": 27.851141420066973,
+   "loadS": 0.000554115
+  },
+  {
+   "promptTokens": 2630,
+   "prefillTokPerS": 1834.1611467482346,
+   "genTokens": 111,
+   "genTokPerS": 27.263824662659292,
+   "loadS": 0.000607055
+  }
+ ],
+ "thinkProbe": {
+  "thinkParamSent": {
+   "think": false
+  },
+  "thinkingChars": 0,
+  "thinkTagInContent": false,
+  "evalTokens": 600,
+  "contentChars": 1604,
+  "doneReason": "length"
+ }
+}

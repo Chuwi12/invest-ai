@@ -1,0 +1,211 @@
+{
+  "analysis": {
+    "asset": "stock:MSFT",
+    "bearCase": [
+      "El precio está 3.6% por debajo del máximo de 52 semanas, lo que sugiere una posible corrección si no se rompe la resistencia de 553.72 (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El RSI14 está en 62.4, lo que indica una zona neutra, pero si cae por debajo de 515, se activaría una sobreventa (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "La volatilidad anualizada es del 22.6%, lo que implica un riesgo moderado si el precio se desvía de la media móvil (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El consenso de analistas es de 1.3/5, pero si el precio cierra por debajo del stop de 504.81, se reduciría la confianza (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "El precio está 22.7% por encima de la SMA200, lo que refleja una tendencia alcista fuerte",
+      "El P/E forward es de 22.54, lo que indica una valoración razonable en el sector Tecnología (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El margen neto es del 40.3%, lo que muestra una rentabilidad sólida y una capacidad de generación de valor (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El volumen es 1.08 veces el promedio de 20 días, lo que sugiere una actividad moderada pero positiva (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": "2026-10-14",
+        "description": "Ruptura de la resistencia de 553.72",
+        "impact": null
+      },
+      {
+        "date": "2026-10-14",
+        "description": "Cierre del precio por encima del stop de 504.81",
+        "impact": null
+      },
+      {
+        "date": "2026-10-14",
+        "description": "Alcance del objetivo de 546.68",
+        "impact": null
+      },
+      {
+        "date": "2026-10-14",
+        "description": "Cierre del precio por debajo del stop de 504.81",
+        "impact": null
+      }
+    ],
+    "completionTokens": 2466,
+    "confidence": 0.6800000071525574,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 77377,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T15:53:53.637388562Z",
+    "horizon": "medium",
+    "horizonNote": "El horizonte es medio debido a la volatilidad del 22.6% y la tendencia alcista que se mantiene por encima de la SMA200.",
+    "id": "01a1456b-78e5-70d3-91ee-95dccfbd7706",
+    "keyLevels": {
+      "entryZone": [
+        522.1318105669318,
+        533.69
+      ],
+      "resistances": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527,
+        870.0
+      ],
+      "stopLoss": 504.81431117728334,
+      "supports": [
+        516.3725006103516,
+        503.90899963378905,
+        493.5,
+        489.6375045776367
+      ],
+      "targets": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527
+      ]
+    },
+    "levelsNote": "Zona de entrada 522,13 – 533,69 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 504,81 = SMA20 516,37 − 1×ATR14 11,56 (Yahoo Finance, 14 oct 2026). Objetivos: 546,68 = banda de Bollinger superior; 553,72 = resistencia; 590,28 = precio objetivo medio de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.8 (entrada en el punto medio de la zona, 527,91).",
+    "llmCalls": 6,
+    "method": "Modelo qwen3:8b, profundidad standard, 6 llamadas, 11555 tokens de entrada y 2466 de salida, 77 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3:8b",
+    "positionSizing": {
+      "atrPct": 2.17,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 4.4,
+      "volatility30d": 0.22580403329215804
+    },
+    "priceAtAnalysis": 533.69,
+    "promptTokens": 11555,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (0.42 (en los datos es «Rentabilidad por FCF / FCF», no «VIX»)): «El entorno macro es estable, con una curva de rendimiento de 10 años menos 2 años de…»",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 515 (en los datos es «EMA12 / EMA26 / Soportes (de mayor a menor)», no «RSI14»)",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 25"
+    ],
+    "risks": [
+      "La caída máxima anual es del 34.9%, lo que indica una posible corrección si no se rompe la resistencia (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El beta es de 1.1, lo que sugiere que el activo es moderadamente sensible a los movimientos del mercado (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El interés corto representa el 0.8% del free float, lo que sugiere una baja presión de venta en el mercado (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 73.9000015258789,
+      "macroScore": 58.400001525878906,
+      "momentum": 66.80000305175781,
+      "overall": 63.0,
+      "risk": 41.099998474121094,
+      "sentiment": 68.4000015258789,
+      "technical": 69.5,
+      "valuation": 45.29999923706055
+    },
+    "sources": [
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.982381547Z",
+        "title": "Fundamentales stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "Simply Wall St.",
+        "publishedAt": "2026-10-14T20:14:33Z",
+        "title": "Should Honeywell’s AI Push and Kenya Megarefinery Win Require Action From Honeywell International (HON) Investors?",
+        "url": "https://finance.yahoo.com/technology/ai/articles/honeywell-ai-push-kenya-megarefinery-201433873.html"
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:MSFT",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Entrar en la zona de entrada entre 522.13 y 533.69, con un stop en 504.81. Condición de invalidación: si el precio cierra por debajo del stop, se activa una señal de venta.\nSalida: Salir al alcanzar el primer objetivo de 546.68, o si el precio rompe la resistencia de 553.72. Si el precio cae por debajo del stop, se reduce la posición.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+    "summary": "El veredicto es acumular debido a una tendencia alcista fuerte y una valoración razonable. El precio está 22.7% por encima de la SMA200 y el P/E forward es de 22.54.",
+    "thesis": "El P/E forward es de 22.54, lo que indica una valoración razonable en el sector Tecnología. El margen neto es del 40.3%, lo que muestra una rentabilidad sólida y una capacidad de generación de valor. La rentabilidad por FCF es del +0.4%, lo que refleja una generación de valor estable. El crecimiento de beneficios implícito en el P/E es del +33.4%, lo que sugiere una mejora en la rentabilidad a largo plazo. [N2] (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nEl precio está 22.7% por encima de la SMA200 y 5.9% por encima de la SMA50, lo que refleja una tendencia alcista fuerte. El RSI14 está en 62.4, lo que indica una zona neutra, pero el MACD muestra un histograma positivo de 1.5, lo que sugiere una posible continuación alcista. La distancia al soporte más cercano es de -3.5% y la distancia a la resistencia más cercana es de +3.8%, lo que indica una posible ruptura si el precio rompe la resistencia de 553.72. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nLos riesgos y factores macroeconómicos son moderados, con una volatilidad del 22.6% y una caída máxima anual del 34.9%. El RSI14 está en 62.4, lo que indica una zona neutra, pero si cae por debajo de 515, se activaría una sobreventa. El beta es de 1.1, lo que sugiere que el activo es moderadamente sensible a los movimientos del mercado. La presión de venta es baja, ya que el interés corto representa el 0.8% del free float. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: La confianza es moderada debido a la posibilidad de una corrección si el precio no rompe la resistencia de 553.72.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "El RSI14 cae por debajo de 515⚠, lo que activaría una señal de sobreventa",
+      "El precio cierra por debajo del stop de 504.81, lo que reduciría la confianza",
+      "El precio rompe la resistencia de 553.72, lo que confirmaría una tendencia alcista fuerte",
+      "El P/E forward supera los 25⚠, lo que indicaría una sobrevaloración"
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2466,
+      "confidence": 0.6800000071525574,
+      "droppedClaims": 1,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 1,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 1,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 24,
+      "figuresAllTotal": 48,
+      "figuresThesisDistinct": 16,
+      "figuresThesisTotal": 18,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 2,
+      "labeledOk": 39,
+      "llmCalls": 6,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 63.0,
+      "promptTokens": 11555,
+      "qualityNotesCount": 3,
+      "thesisLabeledOk": 16,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 2,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 7,
+      "unverifiedNotes": 2,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 4,
+      "wrongLabel": 1,
+      "wrongLabelExamples": [
+        {
+          "actual": "EMA12 / EMA26 / Soportes (de mayor a menor)",
+          "figure": "515",
+          "said": "RSI14",
+          "snippet": "El RSI14 cae por debajo de 515, lo que activaría una señal de sobreventa"
+        }
+      ]
+    },
+    "depth": "standard",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=1",
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=2"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3:8b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 77.378738444,
+    "wordingFixCalls": 1
+  }
+}

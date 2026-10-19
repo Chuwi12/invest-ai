@@ -1,0 +1,168 @@
+{
+  "analysis": {
+    "asset": "stock:MSFT",
+    "bearCase": [
+      "La caída máxima a 1 año del 34,9% limita el recorrido al alza. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "bullCase": [
+      "El margen operativo del 45,1% respalda la rentabilidad por FCF del 0,4%. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 747,
+    "confidence": 0.7699999809265137,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 15456,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T15:58:55.569880463Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a14570-1451-77ad-96fa-8442f7b31a9b",
+    "keyLevels": {
+      "entryZone": [
+        522.1318105669318,
+        533.69
+      ],
+      "resistances": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527,
+        870.0
+      ],
+      "stopLoss": 504.81431117728334,
+      "supports": [
+        516.3725006103516,
+        503.90899963378905,
+        493.5,
+        489.6375045776367
+      ],
+      "targets": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527
+      ]
+    },
+    "levelsNote": "Zona de entrada 522,13 – 533,69 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 504,81 = SMA20 516,37 − 1×ATR14 11,56 (Yahoo Finance, 14 oct 2026). Objetivos: 546,68 = banda de Bollinger superior; 553,72 = resistencia; 590,28 = precio objetivo medio de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.8 (entrada en el punto medio de la zona, 527,91).",
+    "llmCalls": 3,
+    "method": "Modelo qwen3.5:4b, profundidad quick, 3 llamadas, 7968 tokens de entrada y 747 de salida, 15 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3.5:4b",
+    "positionSizing": {
+      "atrPct": 2.17,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 4.4,
+      "volatility30d": 0.22580403329215804
+    },
+    "priceAtAnalysis": 533.69,
+    "promptTokens": 7968,
+    "qualityNotes": [],
+    "risks": [
+      "La volatilidad anualizada del 22,6% exige un stop ajustado. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El PER de 22,54 sugiere una valoración exigente en el sector. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "Las noticias recientes muestran un sentimiento medio ligeramente positivo."
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 73.9000015258789,
+      "macroScore": 58.400001525878906,
+      "momentum": 66.80000305175781,
+      "overall": 63.0,
+      "risk": 41.099998474121094,
+      "sentiment": 68.4000015258789,
+      "technical": 69.5,
+      "valuation": 45.29999923706055
+    },
+    "sources": [
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.982381547Z",
+        "title": "Fundamentales stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "Simply Wall St.",
+        "publishedAt": "2026-10-14T20:14:33Z",
+        "title": "Should Honeywell’s AI Push and Kenya Megarefinery Win Require Action From Honeywell International (HON) Investors?",
+        "url": "https://finance.yahoo.com/technology/ai/articles/honeywell-ai-push-kenya-megarefinery-201433873.html"
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+    "summary": "Acumular la acción por su margen operativo del 45,1% y tendencia alcista sobre la SMA200. El PER de 22,54 y caída máxima del 34,9% definen el perfil de riesgo.",
+    "thesis": "El PER de 22,54 y el crecimiento de beneficios del 31,7% sugieren fundamentos sólidos pero exigentes. La rentabilidad por FCF del 0,4% confirma la eficiencia operativa actual. [N2] (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nEl RSI14 de 62,4 y la SMA200 de 434,78 indican una tendencia alcista con momentum moderado. El precio cerca del soporte en 515 ofrece un nivel de entrada potencial si se rompe la resistencia. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nEl PER de 22,54 y el crecimiento de ingresos del 17,7% sitúan la valoración en zona razonable para tecnología. El margen operativo del 45,1% implica una capacidad sólida de generación de beneficios sostenidos. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: La presión sobre los márgenes si Azure no supera sus gastos añade incertidumbre al análisis.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "El precio cierra por debajo de soporte 515",
+      "El PER supera el nivel de 22,54"
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 747,
+      "confidence": 0.7699999809265137,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 10,
+      "figuresAllTotal": 19,
+      "figuresThesisDistinct": 8,
+      "figuresThesisTotal": 9,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 19,
+      "llmCalls": 3,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 63.0,
+      "promptTokens": 7968,
+      "qualityNotesCount": 0,
+      "thesisLabeledOk": 9,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 0,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 0,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3.5:4b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 15.457896594,
+    "wordingFixCalls": 0
+  }
+}

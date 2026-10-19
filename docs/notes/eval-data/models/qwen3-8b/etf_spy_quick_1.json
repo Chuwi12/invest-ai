@@ -1,0 +1,179 @@
+{
+  "analysis": {
+    "asset": "etf:SPY",
+    "bearCase": [
+      "La caída máxima a 1 año de 9.1% y el PER de 24.43 sugieren sobrevaloración. [N10] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "bullCase": [
+      "La rentabilidad a 1 año de 16.2% y la SMA200 de 724.21 indican tendencia alcista. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 825,
+    "confidence": 0.6700000166893005,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 26895,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T15:56:03.360068377Z",
+    "horizon": "short",
+    "horizonNote": null,
+    "id": "01a1456d-73a0-742f-810b-44c14dc29fcb",
+    "keyLevels": {
+      "entryZone": [
+        768.5679968261719,
+        769.6
+      ],
+      "resistances": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ],
+      "stopLoss": 762.1355791363812,
+      "supports": [
+        768.5679968261719,
+        762.0399780273438,
+        755.7228567940848,
+        733.3800048828125
+      ],
+      "targets": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ]
+    },
+    "levelsNote": "Zona de entrada 768,57 – 769,6 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 762,14 = SMA50 768,57 − 1×ATR14 6,4324 (Yahoo Finance, 14 oct 2026). Objetivos: 770,65 = SMA20; 777,66 = resistencia; 781,62 = máximo de 52 semanas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.2 (entrada en el punto medio de la zona, 769,08).",
+    "llmCalls": 3,
+    "method": "Modelo qwen3:8b, profundidad quick, 3 llamadas, 6883 tokens de entrada y 825 de salida, 27 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3:8b",
+    "positionSizing": {
+      "atrPct": 0.84,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 0.9,
+      "volatility30d": 0.10135132749641854
+    },
+    "priceAtAnalysis": 769.6,
+    "promptTokens": 6883,
+    "qualityNotes": [],
+    "risks": [
+      "La caída del 10% en Unity Software reflejada en [N6] afecta el sector. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El PER de 24.43 y la rentabilidad por dividendo de 0.1% indican sobrevaloración. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La volatilidad anualizada de 10.1% y el ATR14 de 0.8% sugieren riesgo. [N6] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 60.79999923706055,
+      "overall": 61.79999923706055,
+      "risk": 14.100000381469727,
+      "sentiment": 44.400001525878906,
+      "technical": 65.5,
+      "valuation": 50.70000076293945
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:00Z",
+        "title": "Cotización etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:19.119856148Z",
+        "title": "Fundamentales etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T17:57:55Z",
+        "title": "Unity Software Sinks 10% Despite Wedbush Target Hike on Vector Ad Platform; AppLovin Falls 3%, Trade Desk Slips",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/unity-software-sinks-10-despite-175755690.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:35:58Z",
+        "title": "Applied Optoelectronics Dives 9% as AI Funding Fears Hit Optical Stocks; Coherent Slides 7%, Lumentum Drops 7%",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/applied-optoelectronics-dives-9-ai-163558871.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:47:49Z",
+        "title": "Affirm Falls 10% as Inflation Print Lifts Yields; Klarna Drops 3%, PayPal Barely Budges",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/affirm-falls-10-inflation-print-164749757.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:45:18Z",
+        "title": "Taiwan Semiconductor’s Top Line Growth is Starting to Raise Eyebrows",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/taiwan-semiconductor-top-line-growth-164518154.html"
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+    "summary": "Acumular. La rentabilidad a 1 año de 16.2% y la SMA200 de 724.21 indican tendencia alcista.",
+    "thesis": "El PER de 24.43 y la rentabilidad por dividendo de 0.1% indican sobrevaloración. La rentabilidad a 1 año de 16.2% y la caída máxima a 1 año de 9.1% sugieren potencial de recuperación. [N10] (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nEl RSI14 de 49.6 y la SMA200 de 724.21 indican tendencia neutra. La volatilidad anualizada de 10.1% y el soporte de 762.04 sugieren corrección. [N6] [N7] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa caída máxima a 1 año de 9.1% y el ATR14 de 0.8% sugieren riesgo. [N10] [N8] (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nIncertidumbre: La falta de datos sobre BPA y flujo de caja libre limita la evaluación.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "el precio cierra por debajo de SMA200 724.21",
+      "el precio cierra por encima de resistencia 777.66"
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 825,
+      "confidence": 0.6700000166893005,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 11,
+      "figuresAllTotal": 23,
+      "figuresThesisDistinct": 9,
+      "figuresThesisTotal": 10,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 22,
+      "llmCalls": 3,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 6883,
+      "qualityNotesCount": 0,
+      "thesisLabeledOk": 10,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 0,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 1,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3:8b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 26.8970111,
+    "wordingFixCalls": 0
+  }
+}

@@ -1,0 +1,161 @@
+{
+  "analysis": {
+    "asset": "stock:AAPL",
+    "bearCase": [
+      "El precio cierra por debajo de soporte 334.99 y la caída máxima a 1 año es del 13.8%. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "El crecimiento de beneficios del 28.7% y el margen operativo del 32.6% impulsan la rentabilidad. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 839,
+    "confidence": 0.7400000095367432,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 28143,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T15:50:36.295374716Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a14568-7607-7666-9872-ad90eb987ebf",
+    "keyLevels": {
+      "entryZone": [
+        336.80750274658203,
+        342.96
+      ],
+      "resistances": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ],
+      "stopLoss": 330.13080444827784,
+      "supports": [
+        336.80750274658203,
+        334.989990234375,
+        329.4581021780075,
+        325.80999755859375
+      ],
+      "targets": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ]
+    },
+    "levelsNote": "Zona de entrada 336,81 – 342,96 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 330,13 = SMA20 336,81 − 1×ATR14 6,6767 (Yahoo Finance, 14 oct 2026). Objetivos: 344,16 = banda de Bollinger superior; 348,15 = máximo de 52 semanas; 405 = precio objetivo máximo de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.4 (entrada en el punto medio de la zona, 339,88).",
+    "llmCalls": 3,
+    "method": "Modelo qwen3:8b, profundidad quick, 3 llamadas, 7972 tokens de entrada y 839 de salida, 28 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3:8b",
+    "positionSizing": {
+      "atrPct": 1.95,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 2.9,
+      "volatility30d": 0.19883421620277855
+    },
+    "priceAtAnalysis": 342.96,
+    "promptTokens": 7972,
+    "qualityNotes": [],
+    "risks": [
+      "El PER de 35.76 y el PEG de 2.73 indican sobrevaloración relativa. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El ex-empleado de OpenAI acusa de filtración de información confidencial [N2].",
+      "La volatilidad anualizada del 19.9% y el ATR14 del 1.9% aumentan el riesgo. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 77.19999694824219,
+      "macroScore": 58.400001525878906,
+      "momentum": 69.9000015258789,
+      "overall": 61.79999923706055,
+      "risk": 30.700000762939453,
+      "sentiment": 57.0,
+      "technical": 65.9000015258789,
+      "valuation": 34.900001525878906
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.866245838Z",
+        "title": "Fundamentales stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:15.894470797Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:AAPL",
+        "url": null
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+    "summary": "Acumular. El crecimiento de beneficios del 28.7% y el margen operativo del 32.6% impulsan la rentabilidad.",
+    "thesis": "El PER de 35.76 y el crecimiento de ingresos del 16.4% dejan la valoración en zona exigente. El margen operativo del 32.6% implica rentabilidad sostenible. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nEl precio está 17.5% por encima de la SMA200 y 5.7% por encima de la SMA50. La volatilidad anualizada del 19.9% y el ATR14 del 1.9% aumentan el riesgo. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nEl PER de 35.76 y el PEG de 2.73 indican sobrevaloración relativa. El ex-empleado de OpenAI acusa de filtración de información confidencial [N2]. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: La caída máxima a 1 año del 13.8% y la sobrevaloración del PER 35.76 aumentan la incertidumbre.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "El precio cierra por debajo de SMA200 291.77",
+      "El precio cierra por encima de resistencia 344.96"
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 839,
+      "confidence": 0.7400000095367432,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 13,
+      "figuresAllTotal": 23,
+      "figuresThesisDistinct": 9,
+      "figuresThesisTotal": 11,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 22,
+      "llmCalls": 3,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 7972,
+      "qualityNotesCount": 0,
+      "thesisLabeledOk": 10,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 1,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3:8b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 28.145160897,
+    "wordingFixCalls": 0
+  }
+}

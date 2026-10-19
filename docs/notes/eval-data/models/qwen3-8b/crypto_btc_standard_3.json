@@ -1,0 +1,233 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El precio está 2.3% por debajo del soporte más cercano de 79939.61 y 1.3% por debajo de la resistencia más cercana de 82850. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El RSI14 se encuentra en 47.1, lo que indica una zona neutra, pero el MACD muestra un histograma negativo de -554.2, señalizando presión bajista. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "La caída máxima del año es del -48.8%, lo que refleja una posible corrección significativa si el precio cae más del 50%. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "La volatilidad 30d anualizada es del 39.4%, y el ATR14 es de 2209.36, lo que refleja una alta volatilidad en el rango de precios. (fuente: indicadores técnicos 2026-10-14 00:00 UTC; niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "El precio está 0.7% por encima de la SMA50 (81195.12), lo que sugiere una tendencia moderada alcista. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El precio está al 64.9% de su máximo histórico de 126080, lo que sugiere una posible recuperación del 35.1%. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC)",
+      "La oferta circulante representa el 95.7% de la oferta máxima, lo que refleja que el 4.3% aún no ha sido liberado. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)",
+      "El índice de riesgo es de 54 puntos, lo que indica un entorno de moderado riesgo, principalmente por la volatilidad y la caída máxima. (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": "2026-10-14",
+        "description": "Bitcoin cae 2,15% el 14 de octubre y pone a prueba soportes clave",
+        "impact": null
+      },
+      {
+        "date": "2026-10-14",
+        "description": "Bitcoin cae por debajo de $82,000 debido a preocupaciones sobre subidas de tipos de interés",
+        "impact": null
+      },
+      {
+        "date": "2026-10-14",
+        "description": "Bitcoin y Ethereum caen tras inflación de EE.UU.",
+        "impact": null
+      },
+      {
+        "date": "2026-10-14",
+        "description": "Bitcoin cae a $81K después de que la inflación de EE.UU. supere las expectativas",
+        "impact": null
+      }
+    ],
+    "completionTokens": 2669,
+    "confidence": 0.6600000262260437,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 64957,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-19T11:06:25.418749620Z",
+    "horizon": "short",
+    "horizonNote": "La volatilidad del 39.4% y la caída máxima del año del -48.8% sugieren una posible corrección significativa en el corto plazo.",
+    "id": "01a153d7-5d0a-77d0-88c0-396a363547d7",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 6,
+    "method": "Modelo qwen3:8b, profundidad standard, 6 llamadas, 10391 tokens de entrada y 2669 de salida, 65 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3:8b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 10391,
+    "qualityNotes": [
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: -50"
+    ],
+    "risks": [],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Niveles de entrada, stop y objetivos calculados crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "DiarioBitcoin",
+        "publishedAt": "2026-10-14T16:05:42Z",
+        "title": "Bitcoin (BTC) cae 2,15% el 14 de octubre y pone a prueba soportes clave",
+        "url": "https://news.google.com/rss/articles/CBMiqwFBVV95cUxPamlOV2NVX3RxRUxiaHFKT09FYXlJNWdnVjlmdnFDdjVnVDBDY1RrV19LZ1h4TlUtMm9uTmZUdFFVb3BFbDRTemFYb1JkM1hhMlRhTUNSWnZxWHFVM0lHN0kwWXR0cUItWS1vSUpWeldEdDlEMWZaWU1EVVhuVGRSb294Y2UwNXhTYnJ0Qmd0UHVRZGhUNm9ZVXZMQ0hmY3Z0VGltWlZQV2g1a0U?oc=5"
+      },
+      {
+        "provider": "Benzinga",
+        "publishedAt": "2026-10-14T19:10:16Z",
+        "title": "Bitcoin Dips to $82,000 on Inflation Scare: Where Does BTC Go Next?",
+        "url": "https://news.google.com/rss/articles/CBMiwwFBVV95cUxQdmZ4dW5UMDdXeTZsMWRwdmIxU05qTkJLYWt6azVCUHhBbjZVdGdRVmdWTE9KMTRHa3Y0cTZlbEREM2RmdzNmekF2Y1BfejF4RkdJMHVOdkZucnVkSjBRLURZUkkwZlg3Q3ZnSkFxSG4yUWtzdC1TMVMtOGtiVEM1Tm8yS1I2XzNWN1I0WGRtdmd6UUVyeXFNUFRqM3h1ZzhXMDV4RmsySVp6WDB5Tmo0RFFtVjNnNW5Cd2dRYVg5azZlUDg?oc=5"
+      },
+      {
+        "provider": "The Block",
+        "publishedAt": "2026-10-14T16:51:00Z",
+        "title": "Bitcoin falls below $82,000 as hotter core CPI revives Fed hike concerns",
+        "url": "https://news.google.com/rss/articles/CBMirgFBVV95cUxPYndQbXBQRnBmR2RWQjV1Mlh3cGlwdW5jWXktaTJUbzJ6WlNYSkg2YVFjZmJrbnQxRWlOUWFpVlcwVGt3Tjdya3NsbnBOWndoVEFjWHdFdXJWQm1jMHNjWjZHaE5sMU0tXzRNdWJwR29zRy11WW8xTjRKUlN3UElsM3dsSjJpbkg2SDhjdEZWdUFqUkVqeHlnUzV1bmtUV1p4Y0NhMTRPY3c5YjF3cFE?oc=5"
+      },
+      {
+        "provider": "Yahoo Finance",
+        "publishedAt": "2026-10-14T17:19:00Z",
+        "title": "Bitcoin Falls To $81K After Hotter-Than-Expected US Inflation Breaks BTC Below Tight Trading Range",
+        "url": "https://news.google.com/rss/articles/CBMinwFBVV95cUxOQVU5elFKRzRxY2xIdHpuRE0zeXQ1WWs5T3hyc3FTLTVMQ3FxMVUyN1RvWWRDTW0xVjNzSFIwWGNKQ1ppaUxYOFVLbHhpUjBZQklieGdMQ3E5a1JkZmlfdGZBVFFMMm5vSG8wTUZLMjJZdUU1ai1BMzE5VURqT3pqdTd6STYzeHVNWEI5dk5XRzZlakEyUUVhUU5fMThPaW8?oc=5"
+      },
+      {
+        "provider": "Robinhood",
+        "publishedAt": "2026-10-14T20:04:32Z",
+        "title": "BTC price range on Oct 15, 2026 at 5pm EDT Crypto Prediction Market",
+        "url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOSzNyS1JjV1dkX0xzaEtpNnlQWnh4WUx3ck9YUGV4VFZLdko3V2I0UlhlREtnbUFEMEVqT3RDRVRES3dHTXF3ME5PNlF3NVVQWUJ2a01PaE9KNjNrQ2lwOEhfb0pZODhaZUNCVk5zV3BGZ0dxUEYxQWhDVC1lOGhnckI2M0h4NFRrMFJsYTN2YnY2MVRKOThTOTZacTg3Y01OcTZmR1hhNnZaWlB6ejFnMy1RS2dFZw?oc=5"
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Puntuación cuantitativa determinista crypto:BTC",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Entrar en la zona de entrada de 81295.91 – 81782.31, con stop en 79086.54. Condición de invalidación: cierre por debajo del stop.\nSalida: Salir al alcanzar el primer objetivo de 82850. Si el precio no rompe el nivel de resistencia, mantener el stop activo.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "El veredicto es mantener. El precio está al 64.9% de su máximo histórico de 126080, lo que sugiere una posible recuperación del 35.1%, y la volatilidad del 39.4% refleja un entorno de moderado riesgo.",
+    "thesis": "El precio actual del Bitcoin está al 64.9% de su máximo histórico de 126080, lo que sugiere una posible recuperación del 35.1%. La oferta circulante representa el 95.7% de la oferta máxima, lo que refleja que el 4.3% aún no ha sido liberado. La distancia al máximo histórico es del -35.1%, lo que indica una caída significativa desde su punto más alto. La volatilidad del 39.4% y el ATR de 2209.36 sugieren que el rango diario típico es del 2.7% del precio. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)\n\nEl precio está 2.5% por debajo de la SMA20 y 0.7% por encima de la SMA50, lo que sugiere una tendencia moderada alcista. El RSI14 se encuentra en 47.1, lo que indica una zona neutra, y el MACD muestra un histograma negativo de -554.2, señalizando presión bajista. El precio está 2.3% por debajo del soporte más cercano de 79939.61 y 1.3% por debajo de la resistencia más cercana de 82850, lo que sugiere una posible corrección si el precio cae más del 50%. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC; indicadores técnicos 2026-10-14 00:00 UTC)\n\nEl entorno macro es de moderado riesgo, con un VIX de 15.27 y una volatilidad anualizada del 39.4%. La caída máxima del año es del -48.8%, lo que refleja una posible corrección significativa si el precio cae más del 50%. La presión bajista se refleja en el MACD con un histograma de -554.2, lo que sugiere una posible corrección en el corto plazo. La volatilidad y la caída máxima son factores que pueden influir en la decisión de mantener o reducir la exposición. [N1] (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC; indicadores técnicos 2026-10-14 00:00 UTC)\n\nIncertidumbre: La volatilidad del 39.4% y la caída máxima del año del -48.8% sugieren una posible corrección significativa en el corto plazo, pero no se puede predecir con certeza el comportamiento del precio en el futuro.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "El RSI14 se sitúa por encima de 70, lo que indicaría sobrecompra y una posible corrección",
+      "El precio cierra por debajo del stop de 79086.54, lo que confirmaría una pérdida significativa",
+      "La caída del precio supera el -50%⚠, lo que indicaría una corrección significativa"
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2669,
+      "confidence": 0.6600000262260437,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 30,
+      "figuresAllTotal": 59,
+      "figuresThesisDistinct": 20,
+      "figuresThesisTotal": 25,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 34,
+      "llmCalls": 6,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 10391,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 16,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 9,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 23,
+      "unverifiedNotes": 1,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=1",
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=5"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3:8b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 64.958588562,
+    "wordingFixCalls": 1
+  }
+}

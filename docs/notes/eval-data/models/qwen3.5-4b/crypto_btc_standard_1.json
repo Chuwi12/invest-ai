@@ -1,0 +1,227 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El precio actual de 81782.31 USDT representa una distancia del -35.1% respecto al máximo histórico, lo que sugiere una valoración extremadamente baja y un potencial de corrección adicional. (fuente: cotización Binance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "La oferta circulante totaliza 20.1M unidades con un 95.7% de la oferta máxima disponible, indicando presión bajista por el agotamiento de nuevos emisores. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC)",
+      "El sentimiento general es negativo con una puntuación de 35 basada en seis noticias negativas frente a cero positivas recientes. (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)",
+      "La caída del precio un 2,15% el 14 de octubre según DiarioBitcoin [N7] pone a prueba soportes clave tras la inflación de EE. UU."
+    ],
+    "bullCase": [
+      "El precio actual de 81782.31 USDT está por encima de la SMA200 (72243.67) con una distancia del +13.2%, lo que confirma una tendencia alcista a largo plazo. (fuente: cotización Binance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El RSI14 se sitúa en 47.1 dentro de la zona neutra, evitando la sobrecompra y permitiendo un margen para una continuación alcista. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "La distancia al máximo de 52 semanas es del -29.7%, lo que indica que el activo aún tiene recorrido significativo hacia los máximos históricos."
+    ],
+    "catalysts": [
+      {
+        "date": "2026-10-14",
+        "description": "Datos de inflación core CPI",
+        "impact": null
+      }
+    ],
+    "completionTokens": 2538,
+    "confidence": 0.5899999737739563,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 46868,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T16:00:45.391441922Z",
+    "horizon": "medium",
+    "horizonNote": "El horizonte medio se justifica por la distancia actual del -29.7% al máximo de 52 semanas y la volatilidad anualizada del 39.4% que requiere tiempo para consolidar tendencias.",
+    "id": "01a14571-c14f-73ca-ba32-dbb9fe77a05c",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 5,
+    "method": "Modelo qwen3.5:4b, profundidad standard, 5 llamadas, 9913 tokens de entrada y 2538 de salida, 47 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3.5:4b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 9913,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (+12.4 (en los datos es «SMA200», no «margen»)): «La tendencia técnica se clasifica como strong_up debido a que la SMA50 (81195.12) supera…»",
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (64.9 (en los datos es «ATH / máximo histórico», no «valor de mercado»)): «El valor de mercado actual es el 64.9% del máximo histórico registrado en octubre de 2025.»",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 70 (en los datos es «Valoración», no «RSI14»)"
+    ],
+    "risks": [
+      "La caída máxima a un año del -48.8% genera una puntuación de riesgo de 54, indicando una historia reciente de alta volatilidad. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El diferencial de la curva de rendimientos a 10a-2a de +0.42 pp sugiere un entorno macroeconómico estable pero con tensiones inflacionarias. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)",
+      "La relación FDV/market cap de 1.00x implica dilución futura significativa que podría presionar el precio a la baja. (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Niveles de entrada, stop y objetivos calculados crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Puntuación cuantitativa determinista crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "Robinhood",
+        "publishedAt": "2026-10-14T20:04:32Z",
+        "title": "BTC price range on Oct 15, 2026 at 5pm EDT Crypto Prediction Market",
+        "url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOSzNyS1JjV1dkX0xzaEtpNnlQWnh4WUx3ck9YUGV4VFZLdko3V2I0UlhlREtnbUFEMEVqT3RDRVRES3dHTXF3ME5PNlF3NVVQWUJ2a01PaE9KNjNrQ2lwOEhfb0pZODhaZUNCVk5zV3BGZ0dxUEYxQWhDVC1lOGhnckI2M0h4NFRrMFJsYTN2YnY2MVRKOThTOTZacTg3Y01OcTZmR1hhNnZaWlB6ejFnMy1RS2dFZw?oc=5"
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "DiarioBitcoin",
+        "publishedAt": "2026-10-14T16:05:42Z",
+        "title": "Bitcoin (BTC) cae 2,15% el 14 de octubre y pone a prueba soportes clave",
+        "url": "https://news.google.com/rss/articles/CBMiqwFBVV95cUxPamlOV2NVX3RxRUxiaHFKT09FYXlJNWdnVjlmdnFDdjVnVDBDY1RrV19LZ1h4TlUtMm9uTmZUdFFVb3BFbDRTemFYb1JkM1hhMlRhTUNSWnZxWHFVM0lHN0kwWXR0cUItWS1vSUpWeldEdDlEMWZaWU1EVVhuVGRSb294Y2UwNXhTYnJ0Qmd0UHVRZGhUNm9ZVXZMQ0hmY3Z0VGltWlZQV2g1a0U?oc=5"
+      },
+      {
+        "provider": "Benzinga",
+        "publishedAt": "2026-10-14T19:10:16Z",
+        "title": "Bitcoin Dips to $82,000 on Inflation Scare: Where Does BTC Go Next?",
+        "url": "https://news.google.com/rss/articles/CBMiwwFBVV95cUxQdmZ4dW5UMDdXeTZsMWRwdmIxU05qTkJLYWt6azVCUHhBbjZVdGdRVmdWTE9KMTRHa3Y0cTZlbEREM2RmdzNmekF2Y1BfejF4RkdJMHVOdkZucnVkSjBRLURZUkkwZlg3Q3ZnSkFxSG4yUWtzdC1TMVMtOGtiVEM1Tm8yS1I2XzNWN1I0WGRtdmd6UUVyeXFNUFRqM3h1ZzhXMDV4RmsySVp6WDB5Tmo0RFFtVjNnNW5Cd2dRYVg5azZlUDg?oc=5"
+      },
+      {
+        "provider": "The Block",
+        "publishedAt": "2026-10-14T16:51:00Z",
+        "title": "Bitcoin falls below $82,000 as hotter core CPI revives Fed hike concerns",
+        "url": "https://news.google.com/rss/articles/CBMirgFBVV95cUxPYndQbXBQRnBmR2RWQjV1Mlh3cGlwdW5jWXktaTJUbzJ6WlNYSkg2YVFjZmJrbnQxRWlOUWFpVlcwVGt3Tjdya3NsbnBOWndoVEFjWHdFdXJWQm1jMHNjWjZHaE5sMU0tXzRNdWJwR29zRy11WW8xTjRKUlN3UElsM3dsSjJpbkg2SDhjdEZWdUFqUkVqeHlnUzV1bmtUV1p4Y0NhMTRPY3c5YjF3cFE?oc=5"
+      },
+      {
+        "provider": "Yahoo Finance",
+        "publishedAt": "2026-10-14T17:19:00Z",
+        "title": "Bitcoin Falls To $81K After Hotter-Than-Expected US Inflation Breaks BTC Below Tight Trading Range",
+        "url": "https://news.google.com/rss/articles/CBMinwFBVV95cUxOQVU5elFKRzRxY2xIdHpuRE0zeXQ1WWs5T3hyc3FTLTVMQ3FxMVUyN1RvWWRDTW0xVjNzSFIwWGNKQ1ppaUxYOFVLbHhpUjBZQklieGdMQ3E5a1JkZmlfdGZBVFFMMm5vSG8wTUZLMjJZdUU1ai1BMzE5VURqT3pqdTd6STYzeHVNWEI5dk5XRzZlakEyUUVhUU5fMThPaW8?oc=5"
+      }
+    ],
+    "strategy": "Entrada: Utilice la zona de entrada 81295.91 – 81782.31 para comprar por tramos, con un stop en 79086.54 y objetivos en 82850, 83853.27 y 86410.63.\nSalida: Saliendo al primer objetivo de 82850 o ajustando la posición si el precio cierra por debajo del stop de 79086.54, invalidando la estrategia.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "El veredicto es acumular debido a la distancia del -29.7% al máximo de 52 semanas y el RSI14 neutro en 47.1, aunque el sentimiento negativo con seis noticias negativas reduce la confianza.",
+    "thesis": "El precio actual de 81782.31 USDT representa una distancia del -35.1% respecto al máximo histórico de 126080, lo que sugiere un margen de seguridad amplio frente a correcciones bajistas. La oferta circulante totaliza 20.1M unidades con un 95.7% de la oferta máxima disponible, indicando una presión estructural por el agotamiento de nuevos emisores. El FDV/market cap de 1.00x implica dilución futura significativa que podría presionar el precio a la baja si no se generan nuevos flujos de capital. (fuente: cotización Binance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nEl precio actual de 81782.31 USDT se sitúa por encima de la SMA200 (72243.67) con una distancia del +13.2%, confirmando una tendencia alcista a pesar de estar -2.5% por debajo de la SMA20 (83853.27). El RSI14 en 47.1 mantiene la neutralidad técnica mientras que el MACD histograma de -554.2 señala presión bajista, situando al activo entre un soporte en 79939.61 (-2.3%) y una resistencia en 82850 (+1.3%). La distancia al stop de -3.3% y la recompensa/riesgo de 0.5 hasta el primer objetivo definen los niveles críticos para la gestión del riesgo. (fuente: cotización Binance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 00:00 UTC)\n\nLa valoración fundamental muestra una distancia del -35.1% respecto al máximo histórico de 126080 y un 95.7% de oferta circulante sobre la máxima, lo que implica un valor intrínseco bajo pero riesgo de dilución futura con FDV/market cap de 1.00x. La tendencia técnica presenta una distancia del +13.2% respecto a la SMA200 (72243.67) y un RSI14 de 47.1, mientras que el MACD histograma de -554.2 indica presión bajista inmediata cerca de la resistencia en 82850. Los riesgos macroeconómicos incluyen una caída máxima del -48.8% a un año y volatilidad anualizada del 39.4%, exacerbados por seis noticias negativas recientes que generan un sentimiento de 35. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC; indicadores técnicos 2026-10-14 00:00 UTC)\n\nIncertidumbre: La conclusión se ve afectada por la contradicción entre la tendencia alcista a largo plazo y la presión bajista inmediata, con una confianza reducida debido al sentimiento negativo predominante.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "El RSI14 supera el umbral de sobrecompra de 70⚠, lo que indicaría un agotamiento del impulso alcista actual.",
+      "El precio cierra por debajo del stop de 79086.54, invalidando la estrategia y confirmando una ruptura de soporte estructural.",
+      "La inflación interanual sube por encima del 4.0% actual, exacerbando las preocupaciones macroeconómicas sobre tasas de interés."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2538,
+      "confidence": 0.5899999737739563,
+      "droppedClaims": 2,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 2,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 2,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 31,
+      "figuresAllTotal": 62,
+      "figuresThesisDistinct": 21,
+      "figuresThesisTotal": 31,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 4,
+      "labeledOk": 47,
+      "llmCalls": 5,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 9913,
+      "qualityNotesCount": 3,
+      "thesisLabeledOk": 25,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 6,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 13,
+      "unverifiedNotes": 1,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": false,
+      "verdictRankDelta": 1,
+      "warnMarks": 2,
+      "wrongLabel": 1,
+      "wrongLabelExamples": [
+        {
+          "actual": "Valoración",
+          "figure": "70",
+          "said": "RSI14",
+          "snippet": "El RSI14 supera el umbral de sobrecompra de 70, lo que indicaría un agotamiento del impulso a"
+        }
+      ]
+    },
+    "depth": "standard",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3.5:4b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 46.869960847,
+    "wordingFixCalls": 0
+  }
+}

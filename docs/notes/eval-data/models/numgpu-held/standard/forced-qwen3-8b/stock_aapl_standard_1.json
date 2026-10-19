@@ -1,0 +1,202 @@
+{
+  "analysis": {
+    "asset": "stock:AAPL",
+    "bearCase": [
+      "El precio está en -1.5% respecto al máximo de 52 semanas, lo que sugiere una posible corrección si el RSI14 cae por debajo de 30.",
+      "El stop está en 330.13, lo que representa una caída del -3.7% respecto al precio actual, un nivel que podría ser invadido si el volumen se reduce. (fuente: niveles calculados 2026-10-14 20:54 UTC)",
+      "El consenso de analistas es de 2.2/5, lo que indica una opinión moderada, pero si el precio objetivo medio cae por debajo del 329.38, podría generar desconfianza. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "El precio está +17.5% por encima de la SMA200, lo que sugiere una tendencia alcista fuerte.",
+      "El RSI14 se encuentra en 62.1, lo que indica una zona neutra, pero el MACD muestra un histograma positivo de 0.14, lo que apoya la continuidad del alza. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El volumen es 1.05 veces el promedio de 20 días, lo que sugiere una actividad moderada y potencialmente alcista. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El P/E forward es de 35.76, lo que indica una valoración exigente, pero si el crecimiento de beneficios se mantiene en +10.0%, podría justificar el precio actual. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": null,
+        "description": "Resultados trimestrales",
+        "impact": null
+      },
+      {
+        "date": null,
+        "description": "Anuncio de nuevos productos",
+        "impact": null
+      },
+      {
+        "date": null,
+        "description": "Publicación de informe de analistas",
+        "impact": null
+      }
+    ],
+    "completionTokens": 2363,
+    "confidence": 0.6200000047683716,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 59506,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-19T12:37:49.694912240Z",
+    "horizon": "medium",
+    "horizonNote": "El horizonte es medio debido a la volatilidad del 19.9% y la tendencia alcista moderada.",
+    "id": "01a1542b-0bfe-7627-bd3c-3374383a9abd",
+    "keyLevels": {
+      "entryZone": [
+        336.80750274658203,
+        342.96
+      ],
+      "resistances": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ],
+      "stopLoss": 330.13080444827784,
+      "supports": [
+        336.80750274658203,
+        334.989990234375,
+        329.4581021780075,
+        325.80999755859375
+      ],
+      "targets": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ]
+    },
+    "levelsNote": "Zona de entrada 336,81 – 342,96 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 330,13 = SMA20 336,81 − 1×ATR14 6,6767 (Yahoo Finance, 14 oct 2026). Objetivos: 344,16 = banda de Bollinger superior; 348,15 = máximo de 52 semanas; 405 = precio objetivo máximo de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.4 (entrada en el punto medio de la zona, 339,88).",
+    "llmCalls": 6,
+    "method": "Modelo qwen3:8b, profundidad standard, 6 llamadas, 11421 tokens de entrada y 2363 de salida, 60 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3:8b",
+    "positionSizing": {
+      "atrPct": 1.95,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 2.9,
+      "volatility30d": 0.19883421620277855
+    },
+    "priceAtAnalysis": 342.96,
+    "promptTokens": 11421,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (0.42 (en los datos es «Recompensa/riesgo hasta el primer objetivo / Curva», no «volatilidad»)): «El entorno macro es estable, con una curva de rendimiento de 10 años menos 2 años de…»",
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (20 (en los datos es «Volatilidad 30d (anualizada) / Volatilidad», no «FCF»)): «La rentabilidad por FCF es del +2.2%, pero si el margen de FCF cae por debajo del 20%,…»",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 2.0",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 0.8 (en los datos es «Caja y deuda (debt) / short % float», no «volumen»)",
+      "Se quitó la fecha de 3 catalizador(es): no figura en los datos.",
+      "Se quitaron 3 cita(s) a noticias inexistentes; las cifras de esas frases sí están en los datos."
+    ],
+    "risks": [
+      "La volatilidad anualizada es del 19.9%, lo que indica un riesgo moderado. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "La caída máxima en un año es del 13.8%, lo que sugiere una posible corrección si el volumen se reduce. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "El beta es de 1.07, lo que indica exposición moderada al mercado. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La capitalización bursátil es de 5.01T, lo que le otorga una puntuación de 15 en términos de tamaño. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC)",
+      "El P/E forward es de 35.76, lo que sugiere una valoración exigente. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 77.19999694824219,
+      "macroScore": 58.400001525878906,
+      "momentum": 69.9000015258789,
+      "overall": 61.79999923706055,
+      "risk": 30.700000762939453,
+      "sentiment": 57.0,
+      "technical": 65.9000015258789,
+      "valuation": 34.900001525878906
+    },
+    "sources": [
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.866245838Z",
+        "title": "Fundamentales stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:15.894470797Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:AAPL",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Entrar entre 336.81 y 342.96, con stop en 330.13. Condiciones de invalidación: si el precio cierra por debajo del stop.\nSalida: Salir si el precio alcanza el primer objetivo de 344.16, o si el RSI14 cae por debajo de 70.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+    "summary": "El veredicto es acumular debido a la tendencia alcista fuerte y la valoración exigente. El precio está +17.5% por encima de la SMA200, lo que refleja una tendencia alcista sólida.",
+    "thesis": "El P/E forward es de 35.76, lo que indica una valoración exigente, pero el crecimiento de beneficios implícito en el P/E es del +10.0%, lo que refleja expectativas de crecimiento moderado en los ingresos. La rentabilidad por FCF es del +2.2%, mientras que el margen de FCF es del 23.1%, lo que indica una generación sólida de cash flow. La capitalización bursátil es de 5.01T, lo que le otorga una puntuación de 15 en términos de tamaño. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC)\n\nEl precio está +17.5% por encima de la SMA200 y +5.7% por encima de la SMA50, lo que refleja una tendencia alcista fuerte. El RSI14 se encuentra en 62.1, lo que indica una zona neutra, pero el MACD muestra un histograma positivo de 0.14, lo que apoya la continuidad del alza. La distancia al soporte cercano es de -2.3%, lo que sugiere una posible corrección si el volumen se reduce. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)\n\nLos riesgos y factores macroeconómicos son moderados, con una volatilidad del 19.9% y una caída máxima del 13.8% en un año. El beta de 1.07 indica exposición moderada al mercado, pero el consenso de analistas es de 2.2/5, lo que sugiere una opinión moderadamente positiva. La caída del precio respecto al máximo de 52 semanas es del -1.5%, lo que podría generar desconfianza si el volumen se reduce. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: La incertidumbre radica en la posible corrección si el RSI14 cae por debajo de 30 o si el volumen se reduce significativamente.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "El RSI14 se sitúa por encima de 70, lo que indicaría sobrecompra y posibilidad de corrección.",
+      "El precio cierra por debajo del stop de 330.13, lo que invalidaría la estrategia de entrada.",
+      "El consenso de analistas cae por debajo de 2.0⚠/5, lo que sugiere una opinión negativa.",
+      "El volumen se reduce a menos de 0.8⚠ veces el promedio de 20 días, lo que indicaría falta de interés en el mercado."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 3,
+      "completionTokens": 2363,
+      "confidence": 0.6200000047683716,
+      "droppedClaims": 2,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 2,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 2,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 24,
+      "figuresAllTotal": 42,
+      "figuresThesisDistinct": 15,
+      "figuresThesisTotal": 16,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 4,
+      "labeledOk": 34,
+      "llmCalls": 6,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 11421,
+      "qualityNotesCount": 6,
+      "thesisLabeledOk": 15,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 1,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 6,
+      "unverifiedNotes": 2,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 4,
+      "wrongLabel": 1,
+      "wrongLabelExamples": [
+        {
+          "actual": "Caja y deuda (debt) / short % float",
+          "figure": "0.8",
+          "said": "volumen",
+          "snippet": "El volumen se reduce a menos de 0.8 veces el promedio de 20 días, lo que indicarí"
+        }
+      ]
+    },
+    "depth": "standard",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=1"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3:8b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 59.50858179,
+    "wordingFixCalls": 1
+  }
+}

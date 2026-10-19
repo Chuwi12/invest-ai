@@ -1,0 +1,202 @@
+{
+  "analysis": {
+    "asset": "stock:MSFT",
+    "bearCase": [
+      "La valoración exige con un PER forward de 22.54 y un PEG de 1.76 frente al crecimiento implícito del +33.4%. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El margen operativo del 45.1% y el ROE del 34.0% son sólidos pero la rentabilidad por flujo de caja libre es solo del 0.4% sobre la capitalización. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La volatilidad anualizada del 22.6% y un beta de 1.1 sugieren una exposición al riesgo superior a la media del mercado. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El ratio deuda/equity de 0.29x es conservador, pero el margen de flujo de caja libre del 5.0% indica presión sobre los fondos propios. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "La tendencia alcista se sostiene con un precio +22.7% por encima de la media móvil de 200 sesiones (434.78) y una RSI14 de 62.4 en zona neutra. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El crecimiento de ingresos del +17.7% y el aumento de beneficios del +31.7% respaldan la rentabilidad con márgenes operativos del 45.1%. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "El consenso de analistas es fuerte con un puntaje de 86 sobre 100 basado en 53 votos y un precio objetivo medio de 590.28 (+10.6%). (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La posición financiera es sólida con liquidez corriente de 1.23 y una caída máxima histórica del -34.9% a 1 año. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": "2026-10-28",
+        "description": "Resultados trimestrales",
+        "impact": null
+      }
+    ],
+    "completionTokens": 2450,
+    "confidence": 0.7099999785423279,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 45266,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T15:59:40.946290004Z",
+    "horizon": "medium",
+    "horizonNote": "El horizonte es mediano porque los resultados trimestrales se publican el 2026-10-28 y la volatilidad anualizada del 22.6% requiere un periodo para confirmar la tendencia.",
+    "id": "01a14570-c592-72af-9e4c-a46a8edfcb46",
+    "keyLevels": {
+      "entryZone": [
+        522.1318105669318,
+        533.69
+      ],
+      "resistances": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527,
+        870.0
+      ],
+      "stopLoss": 504.81431117728334,
+      "supports": [
+        516.3725006103516,
+        503.90899963378905,
+        493.5,
+        489.6375045776367
+      ],
+      "targets": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527
+      ]
+    },
+    "levelsNote": "Zona de entrada 522,13 – 533,69 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 504,81 = SMA20 516,37 − 1×ATR14 11,56 (Yahoo Finance, 14 oct 2026). Objetivos: 546,68 = banda de Bollinger superior; 553,72 = resistencia; 590,28 = precio objetivo medio de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.8 (entrada en el punto medio de la zona, 527,91).",
+    "llmCalls": 5,
+    "method": "Modelo qwen3.5:4b, profundidad standard, 5 llamadas, 11147 tokens de entrada y 2450 de salida, 45 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3.5:4b",
+    "positionSizing": {
+      "atrPct": 2.17,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 4.4,
+      "volatility30d": 0.22580403329215804
+    },
+    "priceAtAnalysis": 533.69,
+    "promptTokens": 11147,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (553.72 (en los datos es «Rango 52 semanas / Resistencias (de menor a mayor)», no «recompensa/riesgo»)): «El objetivo más cercano está a +3.8% (553.72 USD) pero la recompensa/riesgo hasta ese…»",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «qué cambiaría»: 70 (en los datos es «Técnico / 52 semanas», no «RSI14»)"
+    ],
+    "risks": [
+      "La distancia al stop de -5.4% implica una caída necesaria del 5.4% desde el precio actual para activar la salida. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)",
+      "La distancia al máximo de 52 semanas del -3.6% indica que el precio aún tiene recorrido alcista por delante antes de un posible reboté."
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 73.9000015258789,
+      "macroScore": 58.400001525878906,
+      "momentum": 66.80000305175781,
+      "overall": 63.0,
+      "risk": 41.099998474121094,
+      "sentiment": 68.4000015258789,
+      "technical": 69.5,
+      "valuation": 45.29999923706055
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.982381547Z",
+        "title": "Fundamentales stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Puntuación cuantitativa determinista stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "Simply Wall St.",
+        "publishedAt": "2026-10-14T20:14:33Z",
+        "title": "Should Honeywell’s AI Push and Kenya Megarefinery Win Require Action From Honeywell International (HON) Investors?",
+        "url": "https://finance.yahoo.com/technology/ai/articles/honeywell-ai-push-kenya-megarefinery-201433873.html"
+      }
+    ],
+    "strategy": "Entrada: Comprar en la zona entre 522.13 y 533.69 USD con un stop en 504.81 USD; si el precio cierra por debajo del stop se invalida la operación.\nSalida: Vender en los objetivos de 546.68 USD, 553.72 USD o 590.28 USD según la ruptura de resistencia o el cumplimiento del objetivo medio de analistas.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+    "summary": "El veredicto es acumular porque la tendencia alcista fuerte (+22.7% sobre la SMA200) y los márgenes operativos del 45.1% superan las preocupaciones de valoración (PER 22.54). La incertidumbre se mantiene moderada debido a la proximidad de los resultados el 2026-10-28 y la volatilidad anualizada del 22.6%.",
+    "thesis": "La rentabilidad fundamental se sustenta en márgenes operativos del 45.1% y un ROE del 34.0%, generando un crecimiento de beneficios del +31.7% frente a una capitalización bursátil de 3.96T. El consenso de analistas otorga un puntaje de 86 sobre 100 con un precio objetivo medio de 590.28 USD, lo que representa un potencial aumento del 10.6% respecto al precio actual de 533.69 USD. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nLa tendencia alcista se confirma con un precio +22.7% por encima de la media móvil de 200 sesiones (434.78) y una RSI14 de 62.4 en zona neutra, reforzada por un MACD histograma positivo de 1.5. El precio se encuentra a +3.8% por debajo de la resistencia de 553.72 USD y a -3.5% por encima del soporte de 515 USD, con una distancia al stop de -5.4% que define el riesgo inmediato. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nLa valoración presenta un equilibrio entre exigencia y fundamentos sólidos, donde un PER forward de 22.54 y un PEG de 1.76 coexisten con márgenes operativos del 45.1% y un ROE del 34.0%. El crecimiento de ingresos del +17.7% y el aumento de beneficios del +31.7% justifican la rentabilidad por flujo de caja libre del 0.4% sobre una capitalización bursátil de 3.96T, aunque la deuda/capital de 0.29x mantiene un perfil conservador. [N2] (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: La conclusión se ve afectada por la proximidad de los resultados trimestrales el 2026-10-28 y la volatilidad anualizada del 22.6%, que podrían alterar la distancia al máximo de 52 semanas del -3.6%.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "La RSI14 superaría el umbral de sobrecompra (70⚠), lo que indicaría un agotamiento del impulso alcista actual.",
+      "El precio cerrara por debajo del stop calculado en 504.81 USD, invalidando la estructura de soporte y tendencia.",
+      "La fecha de los resultados trimestrales se adelantara significativamente antes del 2026-10-28, introduciendo incertidumbre sobre el margen neto."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2450,
+      "confidence": 0.7099999785423279,
+      "droppedClaims": 1,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 1,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 1,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 36,
+      "figuresAllTotal": 68,
+      "figuresThesisDistinct": 25,
+      "figuresThesisTotal": 29,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 2,
+      "labeledOk": 53,
+      "llmCalls": 5,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 63.0,
+      "promptTokens": 11147,
+      "qualityNotesCount": 2,
+      "thesisLabeledOk": 24,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 5,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 14,
+      "unverifiedNotes": 1,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 1,
+      "wrongLabelExamples": [
+        {
+          "actual": "Técnico / 52 semanas",
+          "figure": "70",
+          "said": "RSI14",
+          "snippet": "La RSI14 superaría el umbral de sobrecompra (70), lo que indicaría un agotamiento del impulso "
+        }
+      ]
+    },
+    "depth": "standard",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3.5:4b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 45.268828755,
+    "wordingFixCalls": 0
+  }
+}

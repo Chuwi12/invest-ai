@@ -196,7 +196,9 @@ def main():
         roots = roots[1:]
         data = {v: load(roots[0], v) for v in VARS}
         alltime = {v: [r for root in roots for r in (data[v] if root == roots[0] else load(root, v))] for v in VARS}
-        for depth in ("quick", "standard"):
+        for depth in ("quick", "standard", "deep"):
+            if not any(r["depth"] == depth for v in VARS for r in data[v]):
+                continue
             print("### %s\n" % depth)
             print(summary(data, alltime, depth))
             print()

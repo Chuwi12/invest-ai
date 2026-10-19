@@ -1,0 +1,216 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El precio está 2.3% por debajo del soporte más cercano (79939.61) y 1.3% por debajo de la resistencia más cercana (82850). (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "La caída máxima del último año fue del -48.8%, lo que indica un riesgo significativo si se repite una corrección. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El índice de volatilidad VIX está en 15.27 puntos, lo que refleja una calma en los mercados, pero no descarta fluctuaciones. [N1] (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)",
+      "El tipo de interés efectivo de los fondos federales es del 3.88%, lo que mantiene una política monetaria apretada y puede afectar la liquidez. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)"
+    ],
+    "bullCase": [
+      "El precio está 0.7% por encima de la SMA50 (81195.12), lo que sugiere una tendencia moderadamente alcista. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "La distancia al máximo histórico es de -35.1%, lo que indica que el precio aún está por debajo de su nivel más alto.",
+      "El RSI14 se encuentra en 47.1, lo que indica una zona neutra, y el MACD muestra un histograma de -554.2, señalizando presión bajista. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "La volatilidad 30d anualizada es del 39.4%, lo que refleja una alta volatilidad en el rango de precios. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "catalysts": [
+      {
+        "date": "2026-10-14",
+        "description": "Bitcoin cae 2,15% el 14 de octubre y pone a prueba soportes clave",
+        "impact": null
+      },
+      {
+        "date": "2026-10-14",
+        "description": "Bitcoin cae por debajo de $82,000 debido a preocupaciones sobre subidas de tipos de interés",
+        "impact": null
+      },
+      {
+        "date": "2026-10-14",
+        "description": "Bitcoin cae tras una inflación más alta de lo esperado, lo que rompe el rango de trading ajustado",
+        "impact": null
+      }
+    ],
+    "completionTokens": 2482,
+    "confidence": 0.6299999952316284,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 76513,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T15:55:36.347813280Z",
+    "horizon": "short",
+    "horizonNote": "El horizonte es corto debido a la alta volatilidad y la presión bajista reflejada en el MACD y el RSI14.",
+    "id": "01a1456d-0a1b-71b7-9cbd-da620ba621e1",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 6,
+    "method": "Modelo qwen3:8b, profundidad standard, 6 llamadas, 10372 tokens de entrada y 2482 de salida, 77 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3:8b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 10372,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (4.3 (en los datos es «Rendimiento de la letra de EE. UU. a 3 meses», no «suministro»)): «La oferta circulante representa el 95.7% de la oferta máxima, lo que muestra que el 4.3%…»"
+    ],
+    "risks": [],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Niveles de entrada, stop y objetivos calculados crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "DiarioBitcoin",
+        "publishedAt": "2026-10-14T16:05:42Z",
+        "title": "Bitcoin (BTC) cae 2,15% el 14 de octubre y pone a prueba soportes clave",
+        "url": "https://news.google.com/rss/articles/CBMiqwFBVV95cUxPamlOV2NVX3RxRUxiaHFKT09FYXlJNWdnVjlmdnFDdjVnVDBDY1RrV19LZ1h4TlUtMm9uTmZUdFFVb3BFbDRTemFYb1JkM1hhMlRhTUNSWnZxWHFVM0lHN0kwWXR0cUItWS1vSUpWeldEdDlEMWZaWU1EVVhuVGRSb294Y2UwNXhTYnJ0Qmd0UHVRZGhUNm9ZVXZMQ0hmY3Z0VGltWlZQV2g1a0U?oc=5"
+      },
+      {
+        "provider": "Benzinga",
+        "publishedAt": "2026-10-14T19:10:16Z",
+        "title": "Bitcoin Dips to $82,000 on Inflation Scare: Where Does BTC Go Next?",
+        "url": "https://news.google.com/rss/articles/CBMiwwFBVV95cUxQdmZ4dW5UMDdXeTZsMWRwdmIxU05qTkJLYWt6azVCUHhBbjZVdGdRVmdWTE9KMTRHa3Y0cTZlbEREM2RmdzNmekF2Y1BfejF4RkdJMHVOdkZucnVkSjBRLURZUkkwZlg3Q3ZnSkFxSG4yUWtzdC1TMVMtOGtiVEM1Tm8yS1I2XzNWN1I0WGRtdmd6UUVyeXFNUFRqM3h1ZzhXMDV4RmsySVp6WDB5Tmo0RFFtVjNnNW5Cd2dRYVg5azZlUDg?oc=5"
+      },
+      {
+        "provider": "The Block",
+        "publishedAt": "2026-10-14T16:51:00Z",
+        "title": "Bitcoin falls below $82,000 as hotter core CPI revives Fed hike concerns",
+        "url": "https://news.google.com/rss/articles/CBMirgFBVV95cUxPYndQbXBQRnBmR2RWQjV1Mlh3cGlwdW5jWXktaTJUbzJ6WlNYSkg2YVFjZmJrbnQxRWlOUWFpVlcwVGt3Tjdya3NsbnBOWndoVEFjWHdFdXJWQm1jMHNjWjZHaE5sMU0tXzRNdWJwR29zRy11WW8xTjRKUlN3UElsM3dsSjJpbkg2SDhjdEZWdUFqUkVqeHlnUzV1bmtUV1p4Y0NhMTRPY3c5YjF3cFE?oc=5"
+      },
+      {
+        "provider": "Robinhood",
+        "publishedAt": "2026-10-14T20:04:32Z",
+        "title": "BTC price range on Oct 15, 2026 at 5pm EDT Crypto Prediction Market",
+        "url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOSzNyS1JjV1dkX0xzaEtpNnlQWnh4WUx3ck9YUGV4VFZLdko3V2I0UlhlREtnbUFEMEVqT3RDRVRES3dHTXF3ME5PNlF3NVVQWUJ2a01PaE9KNjNrQ2lwOEhfb0pZODhaZUNCVk5zV3BGZ0dxUEYxQWhDVC1lOGhnckI2M0h4NFRrMFJsYTN2YnY2MVRKOThTOTZacTg3Y01OcTZmR1hhNnZaWlB6ejFnMy1RS2dFZw?oc=5"
+      }
+    ],
+    "strategy": "Entrada: Entrar en la zona de entrada 81295.91 – 81782.31 con stop en 79086.54. Condiciones de invalidación: cierre por debajo del stop.\nSalida: Salir al alcanzar el primer objetivo de 82850. Condiciones de invalidación: cierre por debajo del stop.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "El veredicto es mantener. La distancia al máximo histórico es de -35.1% y la volatilidad 30d anualizada es del 39.4%, lo que refleja una alta volatilidad y un riesgo significativo.",
+    "thesis": "El precio actual del Bitcoin está en el 64.9% de su máximo histórico, lo que indica una posible corrección del 35.1% desde su nivel más alto. La distancia al máximo de 52 semanas es de -29.7%, lo que sugiere una caída del 29.7% desde su nivel más alto en ese periodo. La capitalización bursátil es de 1.64T, lo que refleja una liquidez moderada. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC; indicadores técnicos 2026-10-14 00:00 UTC)\n\nEl precio está 2.5% por debajo de la SMA20 y 0.7% por encima de la SMA50, lo que sugiere una tendencia moderadamente alcista. El RSI14 se encuentra en 47.1, lo que indica una zona neutra, y el MACD muestra un histograma de -554.2, señalizando presión bajista. La volatilidad 30d anualizada es del 39.4%, lo que refleja una alta volatilidad en el rango de precios. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC; indicadores técnicos 2026-10-14 00:00 UTC)\n\nLos riesgos macro y el sentimiento negativo en las noticias indican una presión bajista. La caída máxima del último año fue del -48.8%, el tipo de interés efectivo de los fondos federales es del 3.88%, y el índice de volatilidad VIX está en 15.27 puntos. Estos factores sugieren que el entorno es de alto riesgo, pero la tendencia alcista moderada y la proximidad al soporte más cercano pueden equilibrar la situación. [N1] (fuente: indicadores técnicos 2026-10-14 00:00 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)\n\nIncertidumbre: La incertidumbre radica en la posibilidad de que la presión bajista se intensifique debido a factores macroeconómicos y noticias negativas.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "El RSI14 se sitúe por encima de 70, lo que indicaría sobrecompra y una posible corrección.",
+      "El precio cierre por debajo del stop (79086.54), lo que confirmaría una ruptura de la zona de entrada.",
+      "El tipo de interés efectivo de los fondos federales suba por encima de 4.0%, lo que intensificaría la presión bajista."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2482,
+      "confidence": 0.6299999952316284,
+      "droppedClaims": 1,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 1,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 1,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 26,
+      "figuresAllTotal": 37,
+      "figuresThesisDistinct": 13,
+      "figuresThesisTotal": 13,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 2,
+      "labeledOk": 24,
+      "llmCalls": 6,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 10372,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 8,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 5,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 12,
+      "unverifiedNotes": 0,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=2",
+      "INFO viñetas repetidas quitadas de bullCase/bearCase/risks removed=5"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3:8b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 76.51470202,
+    "wordingFixCalls": 1
+  }
+}

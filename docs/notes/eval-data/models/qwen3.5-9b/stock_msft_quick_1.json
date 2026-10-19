@@ -1,0 +1,168 @@
+{
+  "analysis": {
+    "asset": "stock:MSFT",
+    "bearCase": [
+      "El crecimiento de beneficios del +31.7% podría ser insostenible si Azure no mantiene su expansión. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "bullCase": [
+      "El margen operativo del 45.1% y el PER forward de 22.54 sugieren una valoración razonable para el sector. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 899,
+    "confidence": 0.7599999904632568,
+    "dataWarnings": [],
+    "depth": "quick",
+    "durationMs": 37301,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T16:04:49.608356062Z",
+    "horizon": "medium",
+    "horizonNote": null,
+    "id": "01a14575-7b48-7214-abac-e29abd1df660",
+    "keyLevels": {
+      "entryZone": [
+        522.1318105669318,
+        533.69
+      ],
+      "resistances": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527,
+        870.0
+      ],
+      "stopLoss": 504.81431117728334,
+      "supports": [
+        516.3725006103516,
+        503.90899963378905,
+        493.5,
+        489.6375045776367
+      ],
+      "targets": [
+        546.6830651497736,
+        553.719970703125,
+        590.27527
+      ]
+    },
+    "levelsNote": "Zona de entrada 522,13 – 533,69 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 504,81 = SMA20 516,37 − 1×ATR14 11,56 (Yahoo Finance, 14 oct 2026). Objetivos: 546,68 = banda de Bollinger superior; 553,72 = resistencia; 590,28 = precio objetivo medio de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.8 (entrada en el punto medio de la zona, 527,91).",
+    "llmCalls": 3,
+    "method": "Modelo qwen3.5:9b, profundidad quick, 3 llamadas, 8018 tokens de entrada y 899 de salida, 37 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3.5:9b",
+    "positionSizing": {
+      "atrPct": 2.17,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 4.4,
+      "volatility30d": 0.22580403329215804
+    },
+    "priceAtAnalysis": 533.69,
+    "promptTokens": 8018,
+    "qualityNotes": [],
+    "risks": [
+      "La volatilidad anualizada del 22.6% implica movimientos bruscos que pueden erosionar ganancias rápidas. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El precio objetivo medio de los analistas de 590.28 (+10.6%) no garantiza una subida automática. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La deuda sobre capital del 0.29x es baja, pero el margen de FCF del 5.0% limita la flexibilidad financiera. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 73.9000015258789,
+      "macroScore": 58.400001525878906,
+      "momentum": 66.80000305175781,
+      "overall": 63.0,
+      "risk": 41.099998474121094,
+      "sentiment": 68.4000015258789,
+      "technical": 69.5,
+      "valuation": 45.29999923706055
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.982381547Z",
+        "title": "Fundamentales stock:MSFT",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:16.758006585Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:MSFT",
+        "url": null
+      }
+    ],
+    "strategy": "Tamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 4.4 % de la entrada, el cálculo daría 22.9 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 41/100). Orientativo, no es asesoramiento.",
+    "summary": "Se recomienda acumular MSFT por su tendencia alcista y márgenes sólidos, aunque la volatilidad del 22.6% exige prudencia.",
+    "thesis": "El PER forward de 22.54 y el crecimiento de ingresos del +17.7% sitúan la valoración en zona razonable para tecnología. El PEG de 1.76 indica que el precio no está excesivamente desinflado respecto al crecimiento esperado. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nEl RSI14 de 62.4 y el MACD histograma de 1.5 confirman una tendencia alcista con el precio por encima de la SMA50 de 503.91. El soporte en 515 y la resistencia en 553.72 definen el rango inmediato de operación. (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nEl crecimiento de beneficios del +31.7% y el margen operativo del 45.1% fundamentan la inversión a pesar de los gastos de Azure. El riesgo principal reside en la incertidumbre sobre la expansión de Azure frente a sus altos costes, según las noticias recientes. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)\n\nIncertidumbre: La incertidumbre sobre la expansión futura de Azure introduce un riesgo desconocido no cuantificado en los datos actuales.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "El precio cierra por debajo del soporte 515, lo que sugeriría una pausa técnica antes de continuar.",
+      "Si el RSI14 supera 70, la sobrecompra podría limitar las ganancias a corto plazo."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 899,
+      "confidence": 0.7599999904632568,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 15,
+      "figuresAllTotal": 20,
+      "figuresThesisDistinct": 10,
+      "figuresThesisTotal": 10,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 19,
+      "llmCalls": 3,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 63.0,
+      "promptTokens": 8018,
+      "qualityNotesCount": 0,
+      "thesisLabeledOk": 10,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 0,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 1,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "quick",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3.5:9b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 37.30312471,
+    "wordingFixCalls": 0
+  }
+}

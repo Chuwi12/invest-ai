@@ -64,6 +64,7 @@ for r in $(seq 1 "$REPS"); do
         echo -n "$label "; "$bin" "$FIX/$a.json" "$MODEL" "$d" "$f" 2>&1 | tail -1
         kill $sp 2>/dev/null; wait $sp 2>/dev/null
         t1=$(date -Is); acafter=$(cat $AC); kv1=$(kvtype)
+        ollps=$(curl -s -m 5 localhost:11434/api/ps | jq -c '[.models[]? | {name, size, size_vram}]' 2>/dev/null || echo '[]')
         stats=$(awk '{if(NR==1||$1<m)m=$1; c+=$2; p+=$3; l+=$4; n++; if($5!="-"){split($5,xs,";"); for(i in xs) seen[xs[i]]=1}} END {fg=""; for(k in seen) fg=fg (fg==""?"":"|") k; if(n) printf "\"acMin\":%d,\"clockMeanMHz\":%.0f,\"powerMeanW\":%.1f,\"loadMean\":%.1f,\"samples\":%d,\"gpuForeign\":\"%s\"", m, c/n, p/n, l/n, n, fg; else printf "\"acMin\":-1,\"samples\":0,\"gpuForeign\":\"\""}' "$samples")
         rm -f "$samples"
         reason=""
@@ -71,7 +72,7 @@ for r in $(seq 1 "$REPS"); do
         [ "$acafter" != 1 ] && reason="battery"
         if [ -z "$reason" ]; then case "$stats" in *'"gpuForeign":""'*) ;; *) reason="gpu_shared";; esac; fi
         ok=true; [ -n "$reason" ] && ok=false
-        echo "{\"file\":\"$name\",\"start\":\"$t0\",\"end\":\"$t1\",\"acAfter\":$acafter,$stats,\"timingValid\":$ok,\"invalidReason\":\"$reason\",\"kvCache\":\"$kv0\",\"kvCacheAfter\":\"$kv1\",\"kvChanged\":$([ "$kv0" = "$kv1" ] && echo false || echo true)}" >> "$OUT/$label/_env.jsonl"
+        echo "{\"file\":\"$name\",\"start\":\"$t0\",\"end\":\"$t1\",\"acAfter\":$acafter,$stats,\"timingValid\":$ok,\"invalidReason\":\"$reason\",\"kvCache\":\"$kv0\",\"kvCacheAfter\":\"$kv1\",\"kvChanged\":$([ "$kv0" = "$kv1" ] && echo false || echo true),\"ollamaPs\":${ollps:-[]}}" >> "$OUT/$label/_env.jsonl"
         if [ "$reason" = battery ] && [ "${ALLOW_BATTERY:-0}" != 1 ]; then
           mv "$f" "$OUT/$label/$name.battery.json" 2>/dev/null
           echo "PASO A BATERIA durante $label/$name: salida guardada como $name.battery.json; me detengo" >&2

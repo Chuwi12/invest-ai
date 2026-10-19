@@ -1,0 +1,176 @@
+{
+  "analysis": {
+    "asset": "etf:SPY",
+    "bearCase": [],
+    "bullCase": [],
+    "catalysts": [],
+    "completionTokens": 1695,
+    "confidence": 0.6700000166893005,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 45984,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-19T07:12:27.783430484Z",
+    "horizon": "medium",
+    "horizonNote": "La tendencia alcista a largo plazo respaldada por una rentabilidad anual de +16.2% sugiere un horizonte medio, aunque la volatilidad actual del 10.1% requiere paciencia para entrar en los niveles óptimos.",
+    "id": "01a15301-2a87-740c-96e8-59e9b9a89ba8",
+    "keyLevels": {
+      "entryZone": [
+        768.5679968261719,
+        769.6
+      ],
+      "resistances": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ],
+      "stopLoss": 762.1355791363812,
+      "supports": [
+        768.5679968261719,
+        762.0399780273438,
+        755.7228567940848,
+        733.3800048828125
+      ],
+      "targets": [
+        770.6464965820312,
+        777.6559936523438,
+        781.6199951171875
+      ]
+    },
+    "levelsNote": "Zona de entrada 768,57 – 769,6 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 762,14 = SMA50 768,57 − 1×ATR14 6,4324 (Yahoo Finance, 14 oct 2026). Objetivos: 770,65 = SMA20; 777,66 = resistencia; 781,62 = máximo de 52 semanas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.2 (entrada en el punto medio de la zona, 769,08).",
+    "llmCalls": 6,
+    "method": "Modelo qwen3.5:9b, profundidad standard, 6 llamadas, 10345 tokens de entrada y 1695 de salida, 46 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3.5:9b",
+    "positionSizing": {
+      "atrPct": 0.84,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 0.9,
+      "volatility30d": 0.10135132749641854
+    },
+    "priceAtAnalysis": 769.6,
+    "promptTokens": 10345,
+    "qualityNotes": [],
+    "risks": [],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 60.79999923706055,
+      "overall": 61.79999923706055,
+      "risk": 14.100000381469727,
+      "sentiment": 44.400001525878906,
+      "technical": 65.5,
+      "valuation": 50.70000076293945
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:00Z",
+        "title": "Cotización etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:22.709947687Z",
+        "title": "Niveles de entrada, stop y objetivos calculados etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T18:06:43Z",
+        "title": "Walmart Advances 3% as Inflation Data Sends Money Into Defensives; Costco and Target Edge Higher",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/walmart-advances-3-inflation-data-180643511.html"
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T17:57:55Z",
+        "title": "Unity Software Sinks 10% Despite Wedbush Target Hike on Vector Ad Platform; AppLovin Falls 3%, Trade Desk Slips",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/unity-software-sinks-10-despite-175755690.html"
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:19.119856148Z",
+        "title": "Fundamentales etf:SPY",
+        "url": null
+      },
+      {
+        "provider": "24/7 Wall St.",
+        "publishedAt": "2026-10-14T16:35:58Z",
+        "title": "Applied Optoelectronics Dives 9% as AI Funding Fears Hit Optical Stocks; Coherent Slides 7%, Lumentum Drops 7%",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/applied-optoelectronics-dives-9-ai-163558871.html"
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      }
+    ],
+    "strategy": "Entrada: Entrar en la zona de 768.57 a 769.6 USD con un stop en 762.14 USD y objetivos en 770.65, 777.66 y 781.62 USD.\nSalida: Cerrar posiciones progresivamente al alcanzar los objetivos de 770.65, 777.66 y 781.62 USD, o liquidar totalmente si el precio rompe por debajo del stop en 762.14 USD.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 0.9 % de la entrada, el cálculo daría 110.7 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 14/100). Orientativo, no es asesoramiento.",
+    "summary": "El análisis recomienda acumular el activo debido a su tendencia alcista consolidada y una relación recompensa/riesgo favorable, aunque la valoración elevada del PER de 24.43 exige cautela.",
+    "thesis": "Los fundamentos presentan una valoración exigente con un PER de 24.43 y un coste anual bajo del 0.1%, lo que compensa parcialmente la falta de margen de seguridad en los precios actuales. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)\n\nLa técnica muestra una estructura robusta con un RSI14 neutro en 49.6 y un MACD histograma positivo de 0.31, confirmando la fuerza del impulso alcista frente a la media móvil de 20 sesiones (770.65). [N5] (fuente: indicadores técnicos 2026-10-14 13:30 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nEl equilibrio entre los fundamentos y la técnica favorece la compra parcial: el precio actual de 769.6 USD está por encima de la media móvil de 50 sesiones (768.57) pero cerca de la resistencia inmediata de 777.66, lo que limita el espacio alcista a corto plazo (+1.0%). (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nIncertidumbre: La incertidumbre reside en la posible rotación hacia valores defensivos ante datos de inflación del 4.0% y la volatilidad reciente, que podría erosionar las ganancias acumuladas en un año (+16.2%).",
+    "verdict": "accumulate",
+    "wouldChangeIf": []
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 1695,
+      "confidence": 0.6700000166893005,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 14,
+      "figuresAllTotal": 24,
+      "figuresThesisDistinct": 11,
+      "figuresThesisTotal": 11,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 16,
+      "llmCalls": 6,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 10345,
+      "qualityNotesCount": 0,
+      "thesisLabeledOk": 7,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 4,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 8,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=2"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3.5:9b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 45.985752586,
+    "wordingFixCalls": 1
+  }
+}

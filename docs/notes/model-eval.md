@@ -322,3 +322,209 @@ reintentos por tesis genérica, correcciones de redacción, errores finales del 
 
 qwen3:8b: AAPL 125 s, BTC 109 s (una de ellas con «Se quitaron 3 cita(s) a noticias inexistentes…», sin ningún descarte por `[N#]`);
 qwen2.5:7b: AAPL 55 s, BTC 77 s (9 llamadas). Ningún descarte por cita inexistente en ninguna de las cuatro.
+
+---
+
+## 2026-10-19: comparación de cuatro modelos sobre el pipeline actual (q8_0, `num_ctx` 16384)
+
+Compara; **no cambia nada** (ni el modelo activo ni el catálogo). Estado: matriz de `quick` y `standard` completa y prueba de forzar todas las capas en GPU hecha; `deep` no se midió.
+
+### Condiciones
+
+- Código: `2d50cc6` (quick arreglado + verificador con plazos «a 30 días»); un único binario `compare_models` compilado de ese commit (`~/.cache/invest-ai/eval/models`). `qwen2.5:7b`, `qwen3:8b`, `qwen3.5:4b`, `qwen3.5:9b`; Ollama **0.40.4** en todas las ejecuciones (el paquete se actualizó a 0.40.6 el 19-oct a las 13:07 y el servidor no se reinició hasta después de acabar la matriz), `OLLAMA_FLASH_ATTENTION=1`, **caché KV `q8_0`** (`--cache-type-k/-v q8_0` en las 96 ejecuciones, `kvChanged=false`), `think` apagado como en la app (se envía `think:false` a los modelos con capacidad «thinking»), temperatura 0,2, timeout 180 s, español. Snapshots congelados `tests/fixtures/eval/*.json` (los mismos de la ablación).
+- Matriz: 4 modelos × {quick, standard} × 4 activos × 3 repeticiones = 96 ejecuciones (n = 12 por modelo y profundidad). Cada modelo se precarga antes de su bloque y los bloques se rotan entre repeticiones (los modelos no se intercalan ejecución a ejecución: cada cambio recargaría el modelo y la carga entraría en el tiempo). Enchufado y GPU sin procesos ajenos en las 96 (`timingValid=true` en todas).
+- Tres sesiones: **16-oct tarde** (24 ejecuciones), **19-oct mañana** (~16) y **19-oct tarde** (~56), con dos reinicios del equipo en medio. Los lotes se declaran porque **no son equivalentes en tiempo** (siguiente apartado).
+- Métricas: las de la ablación (definiciones en `ablation.md`), calculadas por `ablation_report.py`. n pequeño: `*` = IC 95 % bootstrap de la diferencia frente a `qwen2.5:7b` (el modelo actual) excluye 0.
+
+### Hallazgo previo: los tiempos dependen de la sesión, y de cuánto del modelo cae en la CPU
+
+| | 16-oct tarde | 19-oct (mañana y tarde) |
+|---|---|---|
+| `qwen3:8b` en GPU (`/api/ps`: `size_vram/size`) | **91 %** (ya con q8_0) | **100 %** |
+| `qwen3.5:9b` en GPU | **83 %** | **100 %** |
+| `qwen2.5:7b`, `qwen3.5:4b` en GPU | 100 % | 100 % |
+| reloj SM medio / potencia media / carga de CPU | 2106–2342 MHz / 69–83 W / 8–11 | 2254–2443 MHz / 85–103 W / 4–11 |
+
+Tiempos medios por lote (s):
+
+| modelo, profundidad | 16-oct (n) | 19-oct mañana (n) | 19-oct tarde (n) |
+|---|---|---|---|
+| qwen2.5:7b quick | 21,2 (4) | 19,5 (1) | 18,0 (7) |
+| qwen2.5:7b standard | 54,3 (4) | – | 37,4 (8) |
+| qwen3:8b quick / standard | 27,2 (4) / 84,3 (4) | 22,1 (4) / 63,1 (4) | 22,0 (4) / 64,1 (4) |
+| qwen3.5:4b quick / standard | 16,5 (4) / 43,6 (4) | 15,5 (4) / 36,2 (4) | 14,7 (4) / 37,0 (4) |
+| qwen3.5:9b quick / standard | 37,2 (2) / 100,6 (2) | 27,0 (6) / 55,2 (6) | 27,3 (4) / 55,8 (4) |
+
+- Los modelos que **ya iban enteros en GPU el 16-oct** (qwen2.5:7b, qwen3.5:4b) tampoco son iguales entre lotes (qwen2.5:7b standard 54 s frente a 37 s; qwen3.5:4b standard 44 s frente a 37 s): coincide con un reloj y una potencia de GPU menores (82 W frente a 100 W) y más carga de CPU el 16-oct. No sé qué la causó (plan de energía, temperatura, otros agentes compilando); solo lo registro.
+- En `qwen3:8b` y `qwen3.5:9b` se suma el reparto GPU/CPU: el 16-oct `qwen3.5:9b` standard tardaba 101 s (83 % en GPU) y el 19-oct 55 s (100 %).
+- **Conclusión de método: los tiempos se comparan solo con las ejecuciones del 19-oct** (todas con el modelo entero en GPU, reloj ~2300–2440 MHz, ~90–100 W). Las del 16-oct entran en la calidad (mismo código, misma configuración, sin diferencia de fondo: el reparto CPU/GPU no cambia el texto salvo ruido numérico) pero no en los tiempos.
+- El **reparto depende de la sesión**: en el mismo equipo y con la misma configuración (`num_ctx` 16384, q8_0) `qwen3:8b` quedó al 91 % en GPU un día y al 100 % otro. Es un caso límite del ajuste de Ollama (disponible ~7,0–7,2 GiB frente a la estimación propia de ~7,1 GiB para qwen3:8b; ver «Predicciones»), no una propiedad estable del modelo.
+
+### Resultados (calidad: las 12 ejecuciones por celda; tiempo: ver más abajo)
+
+#### quick
+
+| métrica | n (qwen2.5-7b/qwen3-8b/qwen3.5-4b/qwen3.5-9b) | qwen2.5:7b | qwen3:8b | qwen3.5:4b | qwen3.5:9b |
+|---|---|---|---|---|---|
+| llamadas LLM | 12/12/12/12 | 3.2 [3.0–4.0] | 3.0 [3.0–3.0] | 3.2 [3.0–4.0] | 3.5 [3.0–4.0] |
+| tokens in | 12/12/12/12 | 7545 [6800–8483] | 7488 [6881–8045] | 7483 [6771–8388] | 7712 [7015–8489] |
+| tokens out | 12/12/12/12 | 792 [687–904] | 834 [787–882]* | 802 [747–871] | 959 [864–1094]* |
+| cifras en tesis | 12/12/12/12 | 9.8 [7.0–14.0] | 11.5 [7.0–14.0] | 11.5 [9.0–15.0] | 11.7 [9.0–14.0]* |
+| cifras distintas en tesis | 12/12/12/12 | 8.4 [6.0–11.0] | 9.8 [7.0–12.0]* | 10.3 [8.0–13.0]* | 11.3 [9.0–13.0]* |
+| cifras (todo el texto) | 12/12/12/12 | 18.2 [14.0–25.0] | 23.1 [17.0–27.0]* | 21.0 [17.0–26.0]* | 21.2 [17.0–25.0]* |
+| verificadas por etiqueta | 12/12/12/12 | 16.9 [14.0–24.0] | 20.9 [14.0–25.0]* | 19.7 [17.0–23.0]* | 18.3 [12.0–23.0] |
+| verificadas solo por valor | 12/12/12/12 | 0.8 [0.0–2.0] | 2.2 [1.0–4.0]* | 1.3 [0.0–5.0] | 2.7 [0.0–5.0]* |
+| no verificadas (⚠) | 12/12/12/12 | 0.08 [0.00–1.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.17 [0.00–1.00] |
+| ⚠ en resumen/tesis/viñetas/riesgos/catalizadores | 12/12/12/12 | 0.17 [0.00–1.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| ⚠ en «qué cambiaría» (umbrales hipotéticos) | 12/12/12/12 | 0.25 [0.00–1.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.17 [0.00–1.00] |
+| % verificadas por etiqueta | 12/12/12/12 | 94.9 [87.5–100.0] | 90.3 [81.0–95.8]* | 94.1 [77.3–100.0] | 86.4 [70.6–95.8]* |
+| % no verificadas | 12/12/12/12 | 0.44 [0.00–5.26] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.70 [0.00–4.35] |
+| etiqueta errónea | 12/12/12/12 | 0.33 [0.00–2.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| descartes (afirm.+frases) | 12/12/12/12 | 0.00 [0.00–0.00] | 0.17 [0.00–1.00] | 0.50 [0.00–1.00]* | 0.00 [0.00–0.00] |
+| cifras inventadas atrapadas | 12/12/12/12 | 0.00 [0.00–0.00] | 0.33 [0.00–2.00] | 1.00 [0.00–2.00]* | 0.00 [0.00–0.00] |
+| tesis genérica detectada | 12/12/12/12 | 0.08 [0.00–1.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| reintentos por tesis genérica (llamada extra) | 12/12/12/12 | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| tesis genérica que queda (confianza −0,05) | 12/12/12/12 | 0.08 [0.00–1.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| correcciones de redacción | 12/12/12/12 | 0.25 [0.00–1.00] | 0.00 [0.00–0.00] | 0.17 [0.00–1.00] | 0.50 [0.00–1.00] |
+| errores lint finales | 12/12/12/12 | 0.33 [0.00–3.00] | 0.00 [0.00–0.00] | 0.25 [0.00–2.00] | 0.58 [0.00–2.00] |
+| veredicto = umbral de puntuación | 12/12/12/12 | 1.00 [1.00–1.00] | 1.00 [1.00–1.00] | 1.00 [1.00–1.00] | 1.00 [1.00–1.00] |
+| confianza | 12/12/12/12 | 0.76 [0.71–0.81] | 0.72 [0.67–0.78]* | 0.72 [0.58–0.78]* | 0.69 [0.63–0.76]* |
+| palabras de la tesis | 12/12/12/12 | 120 [71–159] | 131 [90–162] | 146 [127–179]* | 165 [144–185]* |
+| palabras del resumen | 12/12/12/12 | 22 [13–29] | 17 [15–21]* | 22 [14–31] | 19 [16–26] |
+| viñetas alcistas | 12/12/12/12 | 1.0 [1.0–1.0] | 1.0 [1.0–1.0] | 1.0 [1.0–1.0] | 1.0 [1.0–1.0] |
+| viñetas bajistas | 12/12/12/12 | 1.0 [1.0–1.0] | 0.8 [0.0–1.0] | 1.0 [1.0–1.0] | 1.0 [1.0–1.0] |
+| riesgos | 12/12/12/12 | 2.8 [2.0–3.0] | 3.0 [3.0–3.0] | 3.0 [3.0–3.0] | 3.0 [3.0–3.0] |
+| «qué cambiaría» | 12/12/12/12 | 2.0 [2.0–2.0] | 2.0 [2.0–2.0] | 1.9 [1.0–2.0] | 2.0 [2.0–2.0] |
+| catalizadores | 12/12/12/12 | 0.0 [0.0–0.0] | 0.0 [0.0–0.0] | 0.0 [0.0–0.0] | 0.0 [0.0–0.0] |
+| segundos (solo tiempos válidos) | 12/12/12/12 | 19.2 [15.8–23.0] | 23.8 [20.5–28.1]* | 15.5 [13.9–17.6]* | 28.8 [24.5–37.3]* |
+
+#### standard
+
+| métrica | n (qwen2.5-7b/qwen3-8b/qwen3.5-4b/qwen3.5-9b) | qwen2.5:7b | qwen3:8b | qwen3.5:4b | qwen3.5:9b |
+|---|---|---|---|---|---|
+| llamadas LLM | 12/12/12/12 | 5.4 [5.0–7.0] | 6.0 [6.0–6.0]* | 5.2 [5.0–6.0] | 5.6 [5.0–6.0] |
+| tokens in | 12/12/12/12 | 11024 [9436–15688] | 11002 [10372–11583] | 10534 [9685–11534] | 10866 [9936–11902] |
+| tokens out | 12/12/12/12 | 1898 [1511–2874] | 2633 [2105–2951]* | 2241 [2008–2538]* | 2148 [1691–2787] |
+| cifras en tesis | 12/12/12/12 | 12.1 [7.0–17.0] | 16.4 [11.0–25.0]* | 17.3 [8.0–31.0]* | 15.2 [9.0–29.0] |
+| cifras distintas en tesis | 12/12/12/12 | 9.1 [7.0–12.0] | 14.8 [11.0–20.0]* | 15.1 [8.0–25.0]* | 14.2 [9.0–24.0]* |
+| cifras (todo el texto) | 12/12/12/12 | 34.8 [26.0–56.0] | 45.9 [35.0–59.0]* | 49.5 [33.0–68.0]* | 38.9 [22.0–64.0] |
+| verificadas por etiqueta | 12/12/12/12 | 24.7 [15.0–31.0] | 35.2 [24.0–45.0]* | 38.5 [24.0–53.0]* | 29.9 [15.0–56.0] |
+| verificadas solo por valor | 12/12/12/12 | 9.5 [3.0–31.0] | 9.5 [5.0–23.0] | 10.6 [7.0–15.0] | 8.6 [5.0–13.0] |
+| no verificadas (⚠) | 12/12/12/12 | 0.33 [0.00–1.00] | 0.67 [0.00–3.00] | 0.08 [0.00–1.00] | 0.08 [0.00–1.00] |
+| ⚠ en resumen/tesis/viñetas/riesgos/catalizadores | 12/12/12/12 | 0.33 [0.00–2.00] | 0.08 [0.00–1.00] | 0.08 [0.00–1.00] | 0.08 [0.00–1.00] |
+| ⚠ en «qué cambiaría» (umbrales hipotéticos) | 12/12/12/12 | 0.42 [0.00–2.00] | 0.67 [0.00–2.00] | 0.17 [0.00–1.00] | 0.08 [0.00–1.00] |
+| % verificadas por etiqueta | 12/12/12/12 | 73.2 [41.8–89.3] | 78.1 [58.6–87.5] | 78.2 [72.7–85.7] | 75.6 [57.7–87.5] |
+| % no verificadas | 12/12/12/12 | 0.89 [0.00–3.57] | 1.44 [0.00–6.67] | 0.21 [0.00–2.50] | 0.19 [0.00–2.22] |
+| etiqueta errónea | 12/12/12/12 | 0.25 [0.00–1.00] | 0.08 [0.00–1.00] | 0.17 [0.00–1.00] | 0.08 [0.00–1.00] |
+| descartes (afirm.+frases) | 12/12/12/12 | 0.08 [0.00–1.00] | 0.75 [0.00–2.00]* | 0.58 [0.00–2.00]* | 0.58 [0.00–2.00]* |
+| cifras inventadas atrapadas | 12/12/12/12 | 0.17 [0.00–2.00] | 1.33 [0.00–3.00]* | 1.00 [0.00–4.00] | 0.83 [0.00–4.00] |
+| tesis genérica detectada | 12/12/12/12 | 0.17 [0.00–1.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| reintentos por tesis genérica (llamada extra) | 12/12/12/12 | 0.17 [0.00–1.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| tesis genérica que queda (confianza −0,05) | 12/12/12/12 | 0.17 [0.00–1.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] | 0.00 [0.00–0.00] |
+| correcciones de redacción | 12/12/12/12 | 0.25 [0.00–1.00] | 1.00 [1.00–1.00]* | 0.17 [0.00–1.00] | 0.58 [0.00–1.00] |
+| errores lint finales | 12/12/12/12 | 0.00 [0.00–0.00] | 0.92 [0.00–5.00]* | 0.25 [0.00–2.00] | 0.75 [0.00–3.00]* |
+| veredicto = umbral de puntuación | 12/12/12/12 | 0.92 [0.00–1.00] | 1.00 [1.00–1.00] | 0.92 [0.00–1.00] | 0.92 [0.00–1.00] |
+| confianza | 12/12/12/12 | 0.69 [0.56–0.81] | 0.66 [0.54–0.72] | 0.69 [0.59–0.77] | 0.66 [0.53–0.75] |
+| palabras de la tesis | 12/12/12/12 | 160 [114–196] | 283 [229–329]* | 228 [169–341]* | 212 [160–375]* |
+| palabras del resumen | 12/12/12/12 | 40 [24–77] | 37 [27–52] | 41 [30–55] | 43 [25–68] |
+| viñetas alcistas | 12/12/12/12 | 3.0 [2.0–4.0] | 4.0 [4.0–4.0]* | 3.6 [3.0–4.0]* | 2.2 [0.0–4.0] |
+| viñetas bajistas | 12/12/12/12 | 3.1 [3.0–4.0] | 3.9 [3.0–4.0]* | 3.9 [3.0–4.0]* | 2.3 [0.0–4.0] |
+| riesgos | 12/12/12/12 | 0.9 [0.0–2.0] | 2.7 [0.0–5.0]* | 2.8 [2.0–3.0]* | 1.9 [0.0–4.0] |
+| «qué cambiaría» | 12/12/12/12 | 3.0 [3.0–3.0] | 3.6 [3.0–4.0]* | 2.8 [1.0–3.0] | 1.8 [0.0–3.0]* |
+| catalizadores | 12/12/12/12 | 0.5 [0.0–2.0] | 3.0 [1.0–4.0]* | 0.4 [0.0–2.0] | 0.3 [0.0–2.0] |
+| segundos (solo tiempos válidos) | 12/12/12/12 | 43.0 [33.5–69.9] | 70.5 [52.8–91.6]* | 38.9 [34.4–46.9] | 62.9 [46.0–106.7]* |
+
+
+La fila de segundos de estas tablas mezcla lotes; **usa la tabla de tiempos de abajo**.
+
+### Tiempos (solo 19-oct, modelo entero en GPU, enchufado)
+
+| modelo | quick: n, media [mín–máx] | Δ vs qwen2.5:7b (IC 95 %) | standard: n, media [mín–máx] | Δ vs qwen2.5:7b (IC 95 %) | tok/s de salida en el pipeline (standard) |
+|---|---|---|---|---|---|
+| qwen2.5:7b | 8, 18,2 s [15,8–19,8] | – | 8, 37,4 s [33,5–44,3] | – | 46 |
+| qwen3:8b | 8, 22,0 s [20,5–23,2] | +2,7 a +5,1 s * | 8, 63,6 s [52,8–71,2] | +21,5 a +30,3 s * | 41 |
+| qwen3.5:4b | 8, 15,1 s [13,9–16,7] | −4,3 a −1,9 s * | 8, 36,6 s [34,4–38,4] | −3,5 a +1,6 s (ruido) | 60 |
+| qwen3.5:9b | 10, 27,1 s [24,5–30,2] | +7,5 a +10,5 s * | 10, 55,4 s [46,0–73,2] | +11,9 a +24,5 s * | 37 |
+
+(«tok/s de salida» = tokens de salida / segundo de pared, incluye prefill y llamadas; no es la velocidad pura de generación.) Medido en el 19-oct, con 100 % en GPU, la penalización de `qwen3:8b` y `qwen3.5:9b` frente a `qwen2.5:7b` es de ×1,2–1,5 en `quick` y ×1,5–1,7 en `standard` (por más tokens de salida —qwen3:8b genera un 39 % más en standard— y una generación más lenta, 37–41 tok/s frente a 46). Por activo, el ranking de `standard` se mantiene en los cuatro (qwen3:8b 58–70 s; qwen2.5:7b 34–42 s).
+
+### VRAM, reparto y velocidad medidos (`bench_model.py`, 16-oct, `num_ctx` 16384, q8_0)
+
+| modelo | `size` (GiB) | `size_vram` (GiB) / % GPU | nvidia-smi: VRAM del modelo (MiB, sin escritorio ≈ 815–848) | generación (tok/s) | prefill (tok/s, 7,7k tokens) |
+|---|---|---|---|---|---|
+| qwen2.5:7b | 4,69 | 4,69 / 100 % | 4962 | 44 | 2829 |
+| qwen3:8b | 6,27 | 5,59 / 89 % | 5939 | 30 | 2259 |
+| qwen3.5:4b | 3,20 | 3,20 / 100 % | 4088 | 60 | 3655 |
+| qwen3.5:9b | 6,04 | 5,03 / 83 % | 6188 | 27 | 1812 |
+
+El 19-oct, con el pipeline, `ollama ps` dio 100 % GPU para los cuatro (qwen3:8b: `size` 5,85 GiB; qwen3.5:9b: 5,40 GiB; qwen2.5:7b: 4,84 GiB; qwen3.5:4b: 3,20 GiB): las estimaciones propias de Ollama varían con la sesión. La velocidad de generación del 19-oct (derivada del pipeline) es mayor que la del 16-oct para qwen3:8b y qwen3.5:9b (38–41 y 36–37 tok/s frente a 30 y 27) porque pasaron de reparto parcial a entero en GPU. **Antes, con f16 (`model-eval.md`, 2026-10-14), `qwen3:8b` iba un 12 % en CPU; con q8_0 el 16-oct iba un 9–11 % y el 19-oct entero**: q8_0 mejora el ajuste pero no lo garantiza.
+
+### Predicciones de la app frente a lo medido (`LLM_KV_CACHE_TYPE=q8_0`, `num_ctx` 16384; no se cambia el catálogo)
+
+Predicción del catálogo (`catalog_pred.rs`, mismas fórmulas que `modelFit`), en GiB:
+
+| modelo | recomendada | mínima | medido: `size` de Ollama | medido: VRAM real (nvidia-smi) | ¿cabe entero? app / medido |
+|---|---|---|---|---|---|
+| qwen2.5:7b | 5,4 | 2,8 | 4,7–4,8 | 4,85 | sí / sí |
+| qwen3:8b | 6,7 | 3,7 | 5,85–6,27 | 5,80 | sí / **depende de la sesión (91 % o 100 %)** |
+| qwen3.5:4b | 4,0 | 2,1 | 3,20 | 3,99 | sí / sí |
+| qwen3.5:9b | 7,0 | 3,3 | 5,40–6,04 | 6,04 | sí (justo) / **depende de la sesión (83 % o 100 %)** |
+
+- La KV se predice bien: `qwen3:8b` 36 capas × 8 cabezas × 256 × 2 B × 16384 × 0,53125 = 1224 MiB; el journal de Ollama da `K (q8_0): 612 MiB, V (q8_0): 612 MiB, 36 layers`. En f16 predecía 7,7 GiB para qwen3:8b (12 % en CPU en la medición anterior), coherente con lo observado.
+- La «recomendada» sobreestima el uso real en 0,5–0,9 GiB para qwen2.5:7b, qwen3:8b y qwen3.5:9b (lado seguro) y acierta en qwen3.5:4b (3,99 medido frente a 4,0; ahí `size` de Ollama, 3,2, subestima lo que muestra nvidia-smi).
+- **Posible predicción errónea**: para `qwen3:8b` y `qwen3.5:9b` la app dice que caben enteros en 8 GiB, y el 16-oct no fue así. Ollama decide con su propia estimación (el journal del 19-oct registra `predicted="7.1 GiB"` justo antes de cargar `qwen3:8b` con `num_ctx` 16384 y `available="7.0 GiB"`, frente a los 6,7 GiB del catálogo), no con la del catálogo. Propuesta (solo números, sin implementarla): mantener «recomendada» como está y marcar «cabe justo / puede ir parcialmente en CPU» cuando `recomendada > VRAM_total − 1,2 GiB` (con 8188 MiB de VRAM y ~0,8 GiB de escritorio: umbral ≈ 6,0 GiB) → `qwen3:8b` (6,7) y `qwen3.5:9b` (7,0) quedarían como «justo», `qwen2.5:7b` y `qwen3.5:4b` como «cabe». Evidencia: 2 modelos × 2 sesiones; es una regla de una máquina.
+
+### «Think» en la familia qwen3 / qwen3.5
+
+Con `think:false` (lo que envía la app a los modelos con capacidad «thinking»; qwen3:8b, qwen3.5:4b y qwen3.5:9b la declaran): **no se observó razonamiento filtrado**. En la sonda de `bench_model.py` (problema de trenes, 600 tokens máx.) `thinking` vacío y sin `<think>` en el contenido en los tres; en las 96 salidas del pipeline no hay `<think>`/`thinking` en ninguna, y los tokens de salida y las latencias son coherentes entre llamadas (no hay llamadas anómalas: máx. standard 91,6 s en qwen3:8b del 16-oct con reparto parcial, 73 s el 19-oct). Los tokens de salida por análisis son normales para un modelo que no razona: quick ≈ 800–960; standard 1900–2630. Si el usuario activara `LLM_THINK=1` la situación sería otra (en la medición anterior, deep 281–314 s con qwen3:8b); no se midió aquí.
+
+### Lectura de calidad (solo lo que cabe en n = 12)
+
+- **`quick`:** los cuatro dan el mismo formato (1 viñeta alcista y 1 bajista, 3 riesgos, 2 condiciones, sin catalizadores). `qwen2.5:7b` cita menos cifras distintas en la tesis (8,4 frente a 9,8–11,3*), pero es el que más cifras verifica por etiqueta en proporción (94,9 % frente a 90,3 % qwen3:8b* y 86,4 % qwen3.5:9b*; qwen3.5:4b 94,1 %). Etiquetas erróneas: 0,33 por análisis en qwen2.5:7b frente a 0 en los otros tres. `qwen3.5:4b` es el que más afirmaciones se le descartan (0,5 por análisis*, 1,0 cifras inventadas atrapadas*): inventa más pero el verificador las quita.
+- **`standard`:** los tres modelos de la familia qwen3/3.5 citan más cifras (distintas en la tesis: 14,2–15,1 frente a 9,1*), tesis más largas (212–283 palabras frente a 160*) y más viñetas, pero también **más afirmaciones descartadas** (0,6–0,75 por análisis frente a 0,08*) y más cifras inventadas atrapadas (0,8–1,3 frente a 0,17; solo qwen3:8b con IC que excluye 0). `qwen3:8b` además necesita la llamada de corrección de redacción en el 100 % de las ejecuciones (1,00 frente a 0,25*) y deja más errores de castellano (0,92 por análisis*), y genera 3,0 catalizadores por análisis frente a 0,5*. `qwen3.5:4b` es el más limpio de los nuevos (lint 0,25, ⚠ 0,08).
+- Fiabilidad de forma: veredicto = umbral de puntuación en 12/12 salvo 1 ejecución por modelo en `crypto:BTC` standard (en qwen2.5:7b, qwen3.5:4b y qwen3.5:9b; es la aproximación por umbrales sin los ajustes de riesgo, ver `ablation.md`). Confianza similar (0,66–0,69 en standard).
+- **Qué no mide esto:** corrección financiera, utilidad ni calidad de redacción; más cifras no es mejor análisis, y cifras descartadas no son errores que lleguen al usuario (el verificador las quita). Un único evaluador automático, 4 activos, un snapshot por activo.
+
+### Recomendación para este equipo (RTX 4070 Laptop 8 GB, q8_0, `num_ctx` 16384)
+
+No hay un ganador claro con esta muestra; esto es lo que sostienen los datos:
+
+1. **Tiempo:** `qwen3.5:4b` ≈ `qwen2.5:7b` en `standard` (36,6 frente a 37,4 s, ruido) y algo más rápido en `quick` (15 frente a 18 s); `qwen3:8b` y `qwen3.5:9b` cuestan ×1,5–1,7 en standard (55–64 s) y, según la sesión, pueden ir parcialmente en CPU (y entonces tardar mucho más: qwen3.5:9b 101 s).
+2. **Calidad medible:** los qwen3/3.5 aportan más cifras y textos más largos en `standard`, a costa de más afirmaciones descartadas. `qwen2.5:7b` es el más conservador (menos descartes, lint limpio) y el menos específico. No hay evidencia, con estas métricas, de que ninguno dé mejores decisiones.
+3. **Si hubiera que elegir hoy:** `qwen2.5:7b` sigue siendo una opción segura (sin riesgo de ajuste, mismo tiempo que `qwen3.5:4b`, menos descartes); **`qwen3.5:4b` es el candidato a probar como alternativa**: igual de rápido, 3,4 GB de pesos (deja más de 4 GiB libres para el escritorio y para un contexto mayor), más cifras específicas en `standard`; sus puntos débiles medidos (más afirmaciones descartadas, 1 cifra inventada atrapada por análisis en `quick`) no llegan al usuario porque el verificador las filtra, pero indican que el modelo es menos fiel al contexto. **`qwen3:8b` y `qwen3.5:9b` no se justifican en este equipo** por tiempo y por el riesgo de reparto parcial, sin una ventaja de calidad que lo compense.
+4. Esta recomendación es **no concluyente entre `qwen2.5:7b` y `qwen3.5:4b`**: lo que decide es si se valoran más las cifras específicas (a favor de 3.5:4b) o menos descartes (a favor de 2.5:7b), y eso requiere evaluación humana ciega con más activos.
+
+### Forzar todas las capas en GPU (`options.num_gpu = 999`)
+
+Hecho el 19-oct con **Ollama 0.40.6** (el servidor se actualizó tras la matriz; no es la misma versión que las tablas anteriores), enchufado, q8_0, `num_ctx` 16384. `bench_model.py` (3 velocidades con un prompt de ~7,7k tokens + 1 petición de ~13–14k tokens con pico de VRAM muestreado cada 0,5 s) y un `standard` real de `stock:AAPL` ×2 con `num_gpu` inyectado por un proxy (`gpu_proxy.py`; el código de producción no tiene esa opción). Dos escenarios:
+
+- **A. Escritorio liberado** (79 MiB usados en la GPU antes de cargar). Es el estado del 19-oct.
+- **B. Escritorio ocupando ~1 GB**: un proceso mío (`hold_vram.cu`, 760 MiB) deja la GPU en 975 MiB usados antes de cargar, parecido a los 815–848 MiB del 16-oct (algo más exigente). Con él se **reproduce el reparto parcial del 16-oct**.
+
+| escenario | modelo | carga | `size_vram`/`size` | VRAM usada con el modelo (MiB) | pico con ~14k tokens de prompt (MiB) | VRAM libre en el pico (MiB) | generación (tok/s) | prefill (tok/s) |
+|---|---|---|---|---|---|---|---|---|
+| A | qwen3:8b | defecto | 100 % | 6245 | 6253 | 1935 | 43 | 2806 |
+| A | qwen3:8b | `num_gpu` 999 | 100 % | 6245 | 6253 | 1935 | 43 | 2752 |
+| A | qwen3.5:9b | defecto | 100 % | 6653 | 6661 | 1527 | 40 | 2667 |
+| A | qwen3.5:9b | `num_gpu` 999 | 100 % | 6653 | 6661 | 1527 | 38–40 | 2570 |
+| B | qwen3:8b | defecto | **89 %** (5,59 de 6,27 GiB) | 6878 | 6896 | 1292 | **30–31** | 2357 |
+| B | qwen3:8b | `num_gpu` 999 | 100 % | 7138 | 7146 | **1042** | **41–42** | 2727 |
+| B | qwen3.5:9b | defecto | **81 %** (4,87 de 6,05 GiB) | 7008 | 7022 | 1166 | **28–29** | 1972 |
+| B | qwen3.5:9b | `num_gpu` 999 | 100 % | 7546 | 7554 | **634** | **39–40** | 2618 |
+
+(Velocidades: 3 repeticiones cada una, rango de las tres; la petición larga tardó sin fallos en todos los casos; en B con el defecto, la generación con 14k tokens de prompt cayó a 18–20 tok/s y con `num_gpu` 999 se mantuvo en 35–39.) Respuestas a las cuatro preguntas:
+
+1. **¿Carga sin error de memoria?** Sí, en los dos escenarios y los dos modelos; ningún error ni evicción. Con `num_gpu` 999 en B usa 6163 MiB (qwen3:8b) y 6571 MiB (qwen3.5:9b) además de los 975 MiB ajenos.
+2. **Velocidad:** en A **no cambia nada** (ya iban enteros en GPU: mismo `size_vram`, 43 y 40 tok/s). En B forzar gana mucho: generación **+37 % en qwen3:8b (30 → 42 tok/s) y +40 % en qwen3.5:9b (28 → 40)**, prefill +16 % y +33 %, y con 14k tokens de prompt la generación pasa de 18–20 a 35–39 tok/s.
+3. **`standard` real con `num_gpu` forzado** (AAPL ×2 por modelo, escenario B, sin caídas ni errores de memoria con el contexto creciendo): qwen3:8b 59,5 y 59,6 s; qwen3.5:9b 70,7 y 61,8 s (6 y 5–6 llamadas). Comparación indicativa, no pareada, con los lotes de la matriz (misma máquina, otro día y otra versión de Ollama): reparto parcial del 16-oct qwen3:8b 84 s, qwen3.5:9b 101 s; entero el 19-oct 64 y 55 s. Esos dos `standard` no son tiempos válidos para comparar modelos (el proceso ajeno de 760 MiB figura como `gpu_shared`).
+4. **Margen para el escritorio:** con `num_gpu` forzado y el contexto lleno, quedan **1042 MiB libres en qwen3:8b y 634 MiB en qwen3.5:9b** por encima de los 975 MiB ya ocupados (≈1,0 y ≈0,6 GiB de margen total para usos puntuales). Ambos están por encima del umbral de ~300 MiB, pero **qwen3.5:9b queda justo**: un navegador con aceleración que pase de ~1,5 GiB en total en la GPU lo dejaría sin sitio, y con `num_gpu` forzado Ollama no tiene reparto de reserva (fallaría la carga o la petición en lugar de pasar capas a CPU). `qwen3:8b` deja más holgura. En A el margen es de ~1,5–1,9 GiB.
+
+**Qué significa:** el reparto parcial del 16-oct no era un límite del modelo sino de la memoria libre: cuando el escritorio ocupa ~1 GB, Ollama (0.40.4 y 0.40.6) deja 11–19 % de las capas en CPU y la generación cae ~30 %. Forzar todas las capas cabe y gana ~37–40 %, a costa de no tener red de seguridad.
+
+**Propuesta para la app (no implementada):** (a) una opción `LLM_NUM_GPU` (entero; vacía = decisión de Ollama) que `ChatParams::body()` incluiría en `options.num_gpu`; (b) mejor, que `modelFit` la decida por modelo: si el modelo cabe entero con ≥ ~1 GiB de margen sobre `recomendada` y la VRAM libre medida al cargar (`/api/ps` o nvidia-smi) y el reparto devuelto es parcial, reintentar con `num_gpu` = nº de capas (999) y avisar «sin margen para el escritorio» si el margen estimado en contexto lleno queda < ~600 MiB; (c) mostrar en Ajustes el % en GPU real (`size_vram/size`), que hoy no se ve. Con 8 GB, `qwen3.5:9b` forzado es viable pero justo; `qwen3:8b` forzado deja más margen.
+
+Notas y limitaciones de esta prueba: n = 3 velocidades por celda y 2 `standard` por modelo; una sola GPU con un ocupante sintético de 760 MiB (no es un navegador real: su consumo varía); Ollama 0.40.6 (matriz en 0.40.4); no se probó `num_ctx` mayor ni otros modelos; se descargaron todos los modelos (`keep_alive: 0`) y se paró el proxy al terminar. Salidas en `docs/notes/eval-data/models/numgpu/` (escenario A) y `numgpu-held/` (B); herramientas `numgpu_probe.sh`, `bench_model.py`, `gpu_proxy.py`, `hold_vram.cu` (ocupante sintético de VRAM; compilar con `nvcc`).
+
+### Pendiente
+
+- `deep` (1 repetición por activo) no se midió.

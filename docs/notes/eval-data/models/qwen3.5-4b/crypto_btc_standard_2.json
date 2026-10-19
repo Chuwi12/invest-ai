@@ -1,0 +1,212 @@
+{
+  "analysis": {
+    "asset": "crypto:BTC",
+    "bearCase": [
+      "El precio actual de 81782.31 USDT representa una distancia del -35.1% respecto al máximo histórico, lo que sugiere una valoración aún baja en el contexto cíclico. (fuente: cotización Binance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "La oferta circulante totaliza 20.1M unidades, equivalente al 95.7% del máximo teórico disponible, limitando la capacidad de expansión futura sin nueva emisión. (fuente: fundamentales CoinGecko 2026-10-14 20:52 UTC)",
+      "El ratio FDV sobre capitalización de mercado es de 1.00x, indicando una dilución significativa que podría presionar el precio hacia abajo. (fuente: puntuación cuantitativa 2026-10-14 20:54 UTC)",
+      "La volatilidad anualizada de 39.4% y la caída máxima a un año de -48.8% elevan sustancialmente el riesgo de una corrección severa. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "bullCase": [
+      "Bitcoin se encuentra +13.2% sobre la media móvil de 200 sesiones (72243.67), confirmando un soporte sólido a largo plazo. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El RSI14 en 47.1 se mantiene en zona neutra, evitando la sobrecompra del 70 y permitiendo espacio para un movimiento al alza antes de agotarse. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "La recompensa/riesgo hasta el primer objetivo es de 0.5, ofreciendo una relación aceptable para entrar en la zona de entrada calculada. (fuente: niveles calculados 2026-10-14 20:54 UTC)"
+    ],
+    "catalysts": [],
+    "completionTokens": 2126,
+    "confidence": 0.6100000143051147,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 35495,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-19T07:20:57.085982168Z",
+    "horizon": "medium",
+    "horizonNote": "El horizonte medio es adecuado debido a la tendencia alcista confirmada por la cruz dorada y la distancia del -29.7% al máximo de 52 semanas, aunque la volatilidad anualizada de 39.4% exige precaución.",
+    "id": "01a15308-effd-7628-b7e2-9c3828013c71",
+    "keyLevels": {
+      "entryZone": [
+        81295.90718290099,
+        81782.31
+      ],
+      "resistances": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904,
+        87307.83499999999
+      ],
+      "stopLoss": 79086.54469627597,
+      "supports": [
+        81295.90718290099,
+        79939.61,
+        76132.0,
+        74651.83
+      ],
+      "targets": [
+        82850.0,
+        83853.26900000001,
+        86410.63081709904
+      ]
+    },
+    "levelsNote": "Zona de entrada 81.295,91 – 81.782,31 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Binance, 14 oct 2026). Stop 79.086,54 = banda de Bollinger inferior 81.295,91 − 1×ATR14 2209,36 (Binance, 14 oct 2026). Objetivos: 82.850 = resistencia; 83.853,27 = SMA20; 86.410,63 = banda de Bollinger superior (Binance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.5 (entrada en el punto medio de la zona, 81.539,11).",
+    "llmCalls": 5,
+    "method": "Modelo qwen3.5:4b, profundidad standard, 5 llamadas, 9910 tokens de entrada y 2126 de salida, 35 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3.5:4b",
+    "positionSizing": {
+      "atrPct": 2.7,
+      "maxPortfolioPct": 8.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 3.0,
+      "volatility30d": 0.3936076045284337
+    },
+    "priceAtAnalysis": 81782.31,
+    "promptTokens": 9910,
+    "qualityNotes": [
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (+0.42 (en los datos es «Curva / Diferencial de la curva 10 años - 2 años», no «puntuación»)): «El diferencial de la curva de bonos de EE. UU. (10a-2a) de +0.42 pp sugiere una…»",
+      "Se descartó una afirmación porque citaba cifras que no aparecen en los datos (200): «La media móvil de 50 sesiones (81195.12) supera a la de 200 con un +12.4%, validando una…»",
+      "Cifras no verificables en los datos (marcadas con ⚠) en «tesis»: 200"
+    ],
+    "risks": [
+      "El precio actual de 81782.31 USDT está -2.3% por debajo del soporte cercano en 79939.61, poniendo en riesgo la tendencia si se rompe este nivel. (fuente: cotización Binance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)",
+      "La caída máxima a un año de -48.8% demuestra que los retrocesos severos son una realidad histórica para este activo. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)",
+      "El histograma de MACD muestra -554.2, señal bajista que contradice la tendencia alcista y podría indicar agotamiento del impulso actual. (fuente: indicadores técnicos 2026-10-14 00:00 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": null,
+      "macroScore": 58.400001525878906,
+      "momentum": 52.29999923706055,
+      "overall": 54.70000076293945,
+      "risk": 54.099998474121094,
+      "sentiment": 34.900001525878906,
+      "technical": 63.599998474121094,
+      "valuation": 70.0
+    },
+    "sources": [
+      {
+        "provider": "binance",
+        "publishedAt": "2026-10-14T20:54:17.001Z",
+        "title": "Cotización crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Niveles de entrada, stop y objetivos calculados crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T00:00:00Z",
+        "title": "Indicadores técnicos (velas diarias) crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "Yahoo Finance",
+        "publishedAt": "2026-10-14T17:19:00Z",
+        "title": "Bitcoin Falls To $81K After Hotter-Than-Expected US Inflation Breaks BTC Below Tight Trading Range",
+        "url": "https://news.google.com/rss/articles/CBMinwFBVV95cUxOQVU5elFKRzRxY2xIdHpuRE0zeXQ1WWs5T3hyc3FTLTVMQ3FxMVUyN1RvWWRDTW0xVjNzSFIwWGNKQ1ppaUxYOFVLbHhpUjBZQklieGdMQ3E5a1JkZmlfdGZBVFFMMm5vSG8wTUZLMjJZdUU1ai1BMzE5VURqT3pqdTd6STYzeHVNWEI5dk5XRzZlakEyUUVhUU5fMThPaW8?oc=5"
+      },
+      {
+        "provider": "coingecko",
+        "publishedAt": "2026-10-14T20:52:52Z",
+        "title": "Fundamentales crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:18.916323525Z",
+        "title": "Puntuación cuantitativa determinista crypto:BTC",
+        "url": null
+      },
+      {
+        "provider": "Robinhood",
+        "publishedAt": "2026-10-14T20:04:32Z",
+        "title": "BTC price range on Oct 15, 2026 at 5pm EDT Crypto Prediction Market",
+        "url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOSzNyS1JjV1dkX0xzaEtpNnlQWnh4WUx3ck9YUGV4VFZLdko3V2I0UlhlREtnbUFEMEVqT3RDRVRES3dHTXF3ME5PNlF3NVVQWUJ2a01PaE9KNjNrQ2lwOEhfb0pZODhaZUNCVk5zV3BGZ0dxUEYxQWhDVC1lOGhnckI2M0h4NFRrMFJsYTN2YnY2MVRKOThTOTZacTg3Y01OcTZmR1hhNnZaWlB6ejFnMy1RS2dFZw?oc=5"
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "DiarioBitcoin",
+        "publishedAt": "2026-10-14T16:05:42Z",
+        "title": "Bitcoin (BTC) cae 2,15% el 14 de octubre y pone a prueba soportes clave",
+        "url": "https://news.google.com/rss/articles/CBMiqwFBVV95cUxPamlOV2NVX3RxRUxiaHFKT09FYXlJNWdnVjlmdnFDdjVnVDBDY1RrV19LZ1h4TlUtMm9uTmZUdFFVb3BFbDRTemFYb1JkM1hhMlRhTUNSWnZxWHFVM0lHN0kwWXR0cUItWS1vSUpWeldEdDlEMWZaWU1EVVhuVGRSb294Y2UwNXhTYnJ0Qmd0UHVRZGhUNm9ZVXZMQ0hmY3Z0VGltWlZQV2g1a0U?oc=5"
+      },
+      {
+        "provider": "Benzinga",
+        "publishedAt": "2026-10-14T19:10:16Z",
+        "title": "Bitcoin Dips to $82,000 on Inflation Scare: Where Does BTC Go Next?",
+        "url": "https://news.google.com/rss/articles/CBMiwwFBVV95cUxQdmZ4dW5UMDdXeTZsMWRwdmIxU05qTkJLYWt6azVCUHhBbjZVdGdRVmdWTE9KMTRHa3Y0cTZlbEREM2RmdzNmekF2Y1BfejF4RkdJMHVOdkZucnVkSjBRLURZUkkwZlg3Q3ZnSkFxSG4yUWtzdC1TMVMtOGtiVEM1Tm8yS1I2XzNWN1I0WGRtdmd6UUVyeXFNUFRqM3h1ZzhXMDV4RmsySVp6WDB5Tmo0RFFtVjNnNW5Cd2dRYVg5azZlUDg?oc=5"
+      },
+      {
+        "provider": "The Block",
+        "publishedAt": "2026-10-14T16:51:00Z",
+        "title": "Bitcoin falls below $82,000 as hotter core CPI revives Fed hike concerns",
+        "url": "https://news.google.com/rss/articles/CBMirgFBVV95cUxPYndQbXBQRnBmR2RWQjV1Mlh3cGlwdW5jWXktaTJUbzJ6WlNYSkg2YVFjZmJrbnQxRWlOUWFpVlcwVGt3Tjdya3NsbnBOWndoVEFjWHdFdXJWQm1jMHNjWjZHaE5sMU0tXzRNdWJwR29zRy11WW8xTjRKUlN3UElsM3dsSjJpbkg2SDhjdEZWdUFqUkVqeHlnUzV1bmtUV1p4Y0NhMTRPY3c5YjF3cFE?oc=5"
+      }
+    ],
+    "strategy": "Entrada: Utilice la zona de entrada del sistema entre 81295.91 y 81782.31 para comprar por tramos, con un stop en 79086.54 como condición de invalidación.\nSalida: Dirija el capital al primer objetivo de 82850 o utilice la media móvil de 20 sesiones (83853.27) para cerrar posiciones parciales si se rompe la resistencia.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 3.0 % de la entrada, el cálculo daría 33.2 % de la cartera; se limita a 8 % por el riesgo del activo (puntuación de riesgo 54/100). Orientativo, no es asesoramiento.",
+    "summary": "La decisión es mantener debido a la tendencia alcista confirmada por la cruz dorada (+12.4%) y el soporte en 79939.61, aunque el riesgo de dilución (FDV/MC = 1.00x) y la volatilidad del 39.4% mantienen la incertidumbre alta.",
+    "thesis": "El precio actual de 81782.31 USDT se sitúa -29.7% por debajo del máximo de 52 semanas, lo que implica un margen de corrección significativo, mientras que la distancia al stop de -3.3% define el riesgo inmediato de una bajada técnica. (fuente: cotización Binance 2026-10-14 20:54 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nLa tendencia técnica se sostiene gracias a la media móvil de 50 (81195.12) sobre la de 200⚠ (72243.67), pero el RSI14 en 47.1 y el MACD negativo (-554.2) indican falta de impulso inmediato para romper la resistencia en 82850. [N4] (fuente: indicadores técnicos 2026-10-14 00:00 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nLa valoración fundamental presenta una contradicción entre la distancia histórica del -35.1% al máximo y el ratio FDV de 1.00x que sugiere dilución futura, mientras que la oferta circulante del 95.7% del máximo teórico limita la expansión sin nuevas emisiones.\n\nIncertidumbre: La conclusión es moderadamente incierta debido a la contradicción entre el momentum alcista a largo plazo y los indicadores bajistas a corto plazo como el MACD.",
+    "verdict": "hold",
+    "wouldChangeIf": [
+      "El RSI14 sube por encima de 70, confirmando sobrecompra y agotamiento del impulso alcista actual."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2126,
+      "confidence": 0.6100000143051147,
+      "droppedClaims": 2,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 2,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 2,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 24,
+      "figuresAllTotal": 40,
+      "figuresThesisDistinct": 12,
+      "figuresThesisTotal": 12,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 3,
+      "labeledOk": 30,
+      "llmCalls": 5,
+      "notInData": 1,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 54.70000076293945,
+      "promptTokens": 9910,
+      "qualityNotesCount": 3,
+      "thesisLabeledOk": 7,
+      "thesisNotInData": 1,
+      "thesisUnlabeledOk": 4,
+      "thresholdVerdict": "Hold",
+      "unknownDates": 0,
+      "unlabeledOk": 9,
+      "unverifiedNotes": 1,
+      "verdict": "Hold",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 2,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3.5:4b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 35.497176924,
+    "wordingFixCalls": 0
+  }
+}

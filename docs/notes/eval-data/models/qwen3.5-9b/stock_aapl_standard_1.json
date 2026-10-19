@@ -1,0 +1,209 @@
+{
+  "analysis": {
+    "asset": "stock:AAPL",
+    "bearCase": [
+      "La valoración es exigente con un PER forward de 35.76 y un PEG de 2.73, lo que sugiere que el precio actual de 342.96 USD ya incorpora expectativas optimistas difíciles de superar. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC)",
+      "El consenso de analistas sitúa el objetivo medio en 329.38 USD, implicando un potencial negativo del -4.0% si los resultados no superan las expectativas [Sentimiento]. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "Existe una incertidumbre legal significativa tras reportarse que Apple busca revocar un fallo judicial de 5.700 millones USD contra Taction Technology, lo que podría afectar su posición financiera [N8][N9].",
+      "La volatilidad anualizada de 30 días es del 19.9%, indicando un riesgo moderado-alto que podría amplificar las caídas en caso de malas noticias. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)"
+    ],
+    "bullCase": [
+      "Los fundamentales son sólidos con márgenes operativos del 32.6% y una rentabilidad ROE del 148.8%, impulsados por un crecimiento de beneficios del +28.7%. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC)",
+      "La acción cotiza por encima de la SMA50 (324.46) y la SMA200 (291.77), confirmando una tendencia alcista fuerte con un RSI14 de 62.1 en zona neutra. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El volumen actual de 49.73M supera al promedio de 20 días (37.11M), lo que refuerza la validez del movimiento alcista reciente. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; indicadores técnicos 2026-10-14 13:30 UTC)",
+      "Apple planea lanzar funciones de IA en China en diciembre, un catalizador potencial que podría impulsar el precio hacia los objetivos superiores."
+    ],
+    "catalysts": [],
+    "completionTokens": 2746,
+    "confidence": 0.6899999976158142,
+    "dataWarnings": [],
+    "depth": "standard",
+    "durationMs": 106721,
+    "expectedReturnPct": null,
+    "generatedAt": "2026-10-16T16:04:12.199906442Z",
+    "horizon": "medium",
+    "horizonNote": "El horizonte es medio debido a la volatilidad del 19.9% y al catalizador de lanzamiento de IA en diciembre, lo que sugiere mantener la posición mientras se desarrollan los fundamentos y la tendencia alcista.",
+    "id": "01a14574-e927-7122-8600-02fd88dbb590",
+    "keyLevels": {
+      "entryZone": [
+        336.80750274658203,
+        342.96
+      ],
+      "resistances": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ],
+      "stopLoss": 330.13080444827784,
+      "supports": [
+        336.80750274658203,
+        334.989990234375,
+        329.4581021780075,
+        325.80999755859375
+      ],
+      "targets": [
+        344.15690331515657,
+        348.1499938964844,
+        405.0
+      ]
+    },
+    "levelsNote": "Zona de entrada 336,81 – 342,96 = desde el soporte más cercano o 1×ATR14 bajo el precio (el más cercano de los dos) hasta el precio actual (Yahoo Finance, 14 oct 2026). Stop 330,13 = SMA20 336,81 − 1×ATR14 6,6767 (Yahoo Finance, 14 oct 2026). Objetivos: 344,16 = banda de Bollinger superior; 348,15 = máximo de 52 semanas; 405 = precio objetivo máximo de analistas (Yahoo Finance, 14 oct 2026). Relación recompensa/riesgo hasta el primer objetivo: 0.4 (entrada en el punto medio de la zona, 339,88).",
+    "llmCalls": 6,
+    "method": "Modelo qwen3.5:9b, profundidad standard, 6 llamadas, 11902 tokens de entrada y 2746 de salida, 107 s. Análisis automatizado con un modelo de IA local: no es asesoramiento financiero y puede contener errores.",
+    "model": "qwen3.5:9b",
+    "positionSizing": {
+      "atrPct": 1.95,
+      "maxPortfolioPct": 10.0,
+      "rationale": "Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+      "riskPerTradePct": 1.0,
+      "stopDistancePct": 2.9,
+      "volatility30d": 0.19883421620277855
+    },
+    "priceAtAnalysis": 342.96,
+    "promptTokens": 11902,
+    "qualityNotes": [
+      "Posibles errores de redacción que no se pudieron corregir: «taction» parece inglés."
+    ],
+    "risks": [
+      "La caída máxima a un año fue del -13.8%, lo que indica una exposición significativa a movimientos adversos. (fuente: indicadores técnicos 2026-10-14 13:30 UTC)",
+      "El ratio de liquidez corriente es de 1, lo que podría limitar la capacidad de Apple para cubrir sus obligaciones a corto plazo en escenarios de estrés.",
+      "La inflación interanual del 4.0% mantiene presiones sobre los márgenes operativos y el poder adquisitivo de los consumidores. (fuente: macro FRED, Yahoo Finance 2026-10-14 20:53 UTC)"
+    ],
+    "scenarios": null,
+    "scores": {
+      "fundamental": 77.19999694824219,
+      "macroScore": 58.400001525878906,
+      "momentum": 69.9000015258789,
+      "overall": 61.79999923706055,
+      "risk": 30.700000762939453,
+      "sentiment": 57.0,
+      "technical": 65.9000015258789,
+      "valuation": 34.900001525878906
+    },
+    "sources": [
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:00:01Z",
+        "title": "Cotización stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "invest-ai",
+        "publishedAt": "2026-10-14T20:54:15.894470797Z",
+        "title": "Niveles de entrada, stop y objetivos calculados stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "market",
+        "publishedAt": "2026-10-14T13:30:00Z",
+        "title": "Indicadores técnicos (velas diarias) stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "yahoo",
+        "publishedAt": "2026-10-14T20:54:15.866245838Z",
+        "title": "Fundamentales stock:AAPL",
+        "url": null
+      },
+      {
+        "provider": "fred, yahoo",
+        "publishedAt": "2026-10-14T20:53:27Z",
+        "title": "Contexto macroeconómico",
+        "url": null
+      },
+      {
+        "provider": "MarketScreener España",
+        "publishedAt": "2026-10-14T18:13:29Z",
+        "title": "Apple intenta revocar el fallo de 5.700 millones USD en el litigio contra Taction Technology",
+        "url": "https://news.google.com/rss/articles/CBMi4gFBVV95cUxPME4welZuV3hySlk1RXRGVDdyVnI2bEVTY0tNS0ZkZjJEWFZmYUotWVhoODlFWjBCMzUwYW9pa3F2TUh6TEZvR3lSNzZUUW05d2dqc2NBbTJnZjJQMHRkRms0WmNRc04zVFQ1dGpzNHlwcHR2T3pvUXp1eGVGVTJBSzhMb3lYN2VuMUpDX1F2WW5ZUWRfR3ZybXY0S0ZxV0NhNlowX2RLVHZoQlZORUdjb3YxV196RmtYR01GZjlDNmJlaThyQ0xROWV2akZUa0lhZDUzTEd2QUx5QWpHQ3MyTW9n?oc=5"
+      },
+      {
+        "provider": "MT Newswires",
+        "publishedAt": "2026-10-14T18:12:25Z",
+        "title": "Apple Reportedly Seeks to Overturn $5.7 Billion Taction Technology Verdict",
+        "url": "https://finance.yahoo.com/markets/stocks/articles/apple-reportedly-seeks-overturn-5-181225000.html"
+      },
+      {
+        "provider": "Quartz",
+        "publishedAt": "2026-10-14T19:45:08Z",
+        "title": "OpenAI alegó que un ex-empleado que regresó a Apple se envió más de 100 archivos de dispositivos a sí mismo.",
+        "url": "https://news.google.com/rss/articles/CBMijwFBVV95cUxPRWF4eFVlR0IxVkNDWkdtMnp5elBZdEtFUHAtT016cF9GM2R4Wk1wdmtJN3A5QXR1NlFOSHVUQk5odTJXUVA5QjhSTGFfVW9qZ3pSajFuNnYtX0ZzRnNwOWltZEhuVFNPTjhNejZGd2RKM1NzSE1YRGJnY1JFVm04cEl1NUwxbTVFY3kybHctMA?oc=5"
+      }
+    ],
+    "strategy": "Entrada: Entrar en la zona de 336.81 – 342.96 USD con un stop en 330.13 USD.\nSalida: Tomar beneficios parciales en los objetivos de 344.16 USD y 348.15 USD, manteniendo la posición restante hasta el objetivo máximo de analistas en 405 USD o si el precio rompe el stop.\nTamaño de posición (orientativo): Con un riesgo máximo de 1 % de la cartera por operación y el stop a 2.9 % de la entrada, el cálculo daría 34.8 % de la cartera; se limita a 10 % por el riesgo del activo (puntuación de riesgo 31/100). Orientativo, no es asesoramiento.",
+    "summary": "El veredicto es acumular debido a la combinación de fundamentales sólidos con un ROE del 148.8% y una tendencia técnica alcista confirmada por el precio por encima de la SMA200 (291.77). Sin embargo, la valoración exigente con un PER forward de 35.76 y el potencial negativo del -4.0% según los analistas requieren entrar con precaución en la zona de 336.81 – 342.96 USD.",
+    "thesis": "Los fundamentos son robustos con un crecimiento de ingresos del +16.4% y márgenes netos del 27.6%, pero la capitalización bursátil de 5.01T y una deuda/capital de 0.78x sugieren que el mercado ya ha preciado gran parte del potencial futuro. El flujo de caja libre genera una rentabilidad del +2.2% sobre la capitalización, lo cual es moderado en comparación con otros activos defensivos. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC)\n\nEl precio actual de 342.96 USD se sitúa en una zona alcista, con el MACD mostrando un histograma positivo de 0.14 y un volumen de 49.73M que supera al promedio histórico. La distancia al máximo de 52 semanas es del -1.5%, indicando que el activo está cerca de su techo histórico en 348.15 USD, lo que podría limitar la subida inmediata a corto plazo. (fuente: cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC; indicadores técnicos 2026-10-14 13:30 UTC)\n\nLa valoración actual es exigente, reflejada en un PER forward de 35.76 y un PEG de 2.73, lo que implica que el precio de 342.96 USD está cerca de niveles resistentes como la banda de Bollinger superior en 344.16 USD. La tendencia técnica es favorable con un RSI14 de 62.1 y una posición por encima de la SMA50 (324.46), pero el riesgo legal asociado a un fallo judicial de 5.700 millones USD contra Taction Technology añade incertidumbre estructural [N8][N9]. (fuente: fundamentales Yahoo Finance 2026-10-14 20:54 UTC; cotización Yahoo Finance 2026-10-14 20:00 UTC; niveles calculados 2026-10-14 20:54 UTC)\n\nIncertidumbre: La incertidumbre reside en la posible resolución del caso legal contra Taction Technology y en si el lanzamiento de funciones de IA en diciembre cumplirá las expectativas del mercado.",
+    "verdict": "accumulate",
+    "wouldChangeIf": [
+      "Si el RSI14 supera 70, indicando sobrecompra, lo que podría desencadenar una corrección temporal.",
+      "Si el precio cierra por debajo de la zona de entrada (336.81 USD) o rompe el stop en 330.13 USD.",
+      "Si el fallo judicial contra Taction Technology se confirma y resulta en una penalización significativa."
+    ]
+  },
+  "metrics": {
+    "auto": {
+      "citationsStripped": 0,
+      "completionTokens": 2746,
+      "confidence": 0.6899999976158142,
+      "droppedClaims": 0,
+      "droppedForCitation": 0,
+      "droppedForDates": 0,
+      "droppedForFigures": 0,
+      "droppedScenarioSentences": 0,
+      "droppedTotal": 0,
+      "expectedReturnPct": null,
+      "figuresAllDistinct": 29,
+      "figuresAllTotal": 49,
+      "figuresThesisDistinct": 16,
+      "figuresThesisTotal": 17,
+      "genericThesisPenalty": false,
+      "inventedFiguresCaught": 0,
+      "labeledOk": 39,
+      "llmCalls": 6,
+      "notInData": 0,
+      "optimisticWithNegativeExpectedReturn": false,
+      "overallScore": 61.79999923706055,
+      "promptTokens": 11902,
+      "qualityNotesCount": 1,
+      "thesisLabeledOk": 13,
+      "thesisNotInData": 0,
+      "thesisUnlabeledOk": 4,
+      "thresholdVerdict": "Accumulate",
+      "unknownDates": 0,
+      "unlabeledOk": 10,
+      "unverifiedNotes": 0,
+      "verdict": "Accumulate",
+      "verdictMatchesScore": true,
+      "verdictRankDelta": 0,
+      "warnMarks": 0,
+      "wrongLabel": 0,
+      "wrongLabelExamples": []
+    },
+    "depth": "standard",
+    "events": [
+      "INFO redacción sospechosa: se pide corregirla n=4"
+    ],
+    "genericThesisRetries": 0,
+    "jsonRepairs": 0,
+    "model": "qwen3.5:9b",
+    "numCtx": 16384,
+    "spanishIssuesFinal": [
+      {
+        "field": "thesis",
+        "issue": "«taction» parece inglés"
+      },
+      {
+        "field": "bear",
+        "issue": "«taction» parece inglés"
+      },
+      {
+        "field": "wouldChangeIf",
+        "issue": "«taction» parece inglés"
+      }
+    ],
+    "temperature": 0.20000000298023224,
+    "think": false,
+    "wallSeconds": 106.723327711,
+    "wordingFixCalls": 1
+  }
+}
