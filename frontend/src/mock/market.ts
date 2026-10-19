@@ -3,6 +3,7 @@ import type {
   AssetId,
   Candle,
   Fundamentals,
+  FundProfile,
   Holding,
   Indicators,
   Interval,
@@ -381,6 +382,22 @@ const SP500_TOP: Holding[] = [
   { symbol: 'JPM', name: 'JPMorgan Chase & Co.', weight: 0.013 },
 ]
 
+/** Perfil de fondo simulado (cifras inventadas, fuente «mock»). */
+function mockFundProfile(_id: string, r: () => number): FundProfile {
+  const top = SP500_TOP.map((h) => ({ ...h, weight: h.weight * between(r, 0.85, 1.15) }))
+  return {
+    family: 'Gestora simulada', category: 'Large Blend', legalType: 'Exchange Traded Fund', inceptionDate: '1999-03-10',
+    expenseRatio: between(r, 0.0003, 0.0075), grossExpenseRatio: null, frontLoad: null, deferredLoad: null, twelveB1: null,
+    turnover: between(r, 0.02, 0.3), totalAssets: between(r, 2e9, 6e11), dividendYield: between(r, 0.002, 0.03), beta3y: between(r, 0.6, 1.3),
+    ytdReturn: between(r, -0.1, 0.25), threeYearReturn: between(r, 0, 0.2), fiveYearReturn: null,
+    topHoldings: top,
+    sectorWeights: [{ name: 'technology', weight: 0.31 }, { name: 'financial_services', weight: 0.13 }, { name: 'healthcare', weight: 0.11 }, { name: 'consumer_cyclical', weight: 0.1 }],
+    assetMix: [{ name: 'stock', weight: 0.995 }, { name: 'cash', weight: 0.005 }], bondRatings: [],
+    equity: { priceToEarnings: between(r, 17, 30), priceToBook: between(r, 2.5, 6), priceToSales: between(r, 1.5, 4), priceToCashflow: null, threeYearEarningsGrowth: null, medianMarketCap: null },
+    bond: null, source: 'mock', asOf: new Date(Date.now() - 2 * 3600 * 1000).toISOString(), sourceUrl: null,
+  }
+}
+
 function dateOffset(days: number): string {
   return new Date(Date.now() + days * DAY * 1000).toISOString().slice(0, 10)
 }
@@ -467,6 +484,7 @@ export function genFundamentals(id: AssetId): Fundamentals | null {
       beta: between(r, 0.6, 1.3),
       peTrailing: between(r, 12, 28),
       topHoldings: SP500_TOP.map((h) => ({ ...h, weight: h.weight * between(r, 0.85, 1.15) })),
+      fundProfile: mockFundProfile(id, r),
       extra: { 'Réplica': 'Física', 'Domicilio': entry.country ?? '—' },
     }
   }

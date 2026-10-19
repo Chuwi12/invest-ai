@@ -52,7 +52,7 @@ Errores de HTTP que no vienen del dominio:
 | GET | `/quotes` | `ids` (lista separada por comas, máx. 50) | `Quote[]` |
 | GET | `/assets/{id}/history` | `range` (def. `1y`), `interval` (def. `range.default_interval()`) | `Candle[]` |
 | GET | `/assets/{id}/indicators` | — | `Indicators` |
-| GET | `/assets/{id}/fundamentals` | — | `Fundamentals \| null` |
+| GET | `/assets/{id}/fundamentals` | — | `Fundamentals \| null` (en ETF/fondos incluye `fundProfile`: gestora, costes, patrimonio, 10 primeras posiciones, sectores y cartera, con `source`/`asOf`/`sourceUrl`; lo que el proveedor no da es `null`/`[]`; también en `/snapshot`) |
 | GET | `/assets/{id}/news` | `limit` (def. 30) | `NewsItem[]` |
 | GET | `/news` | `limit` (def. 30) | `NewsItem[]` (mercado general) |
 | GET | `/macro` | — | `MacroContext` |
@@ -354,6 +354,17 @@ type IpoBaseRate = { months: number; tiers: IpoBaseRateTier[]; tierNotes: string
   symbols: string[]; source: string; asOf: string; caveats: string[] };
 ```
 Con `INVEST_AI_FAKE=1` todo es inventado (`source: "fake"`, empresas ficticias, URLs genéricas de EDGAR) y el perfil se calcula con el extractor real sobre texto de folleto inventado.
+
+## Redes sociales (Reddit y X)
+
+OPINIÓN de usuarios anónimos, no hechos; solo mide atención y tono, no entra en la puntuación. Apagado por defecto (ver `docs/notes/social.md`). Tipos en `domain` (`SocialPost`, `SocialMetrics`, `SocialDigest`).
+
+| Método | Ruta | Respuesta |
+|--------|------|-----------|
+| GET | `/social/status` | Solo lectura, sin consultar a las redes. Apagado: `{ enabled: false, reddit: {enabled:false}, x: {enabled:false}, lastError: null, notes }` (`notes` explica por qué no se activó algo, p. ej. «X no se activa: X_MONTHLY_READ_BUDGET es obligatorio»). Encendido: `{ enabled: true, reddit: {enabled}, x: {enabled, month, monthlyReadBudget, used, remaining, costPerReadUsd, estimatedCostUsd, maxMonthlyCostUsd, exhausted, accounts, searchAll}, days, refreshMinutes, lastError: {at, source, message} \| null, notes }`. `exhausted` = quedan menos de 10 lecturas (mínimo de la API de X) y no se hacen más consultas ese mes. `estimatedCostUsd = used × costPerReadUsd`. |
+| GET | `/assets/{id}/social` | `{ enabled, digest, disclaimer }`. Apagado: `enabled: false, digest: null`. Encendido consulta las redes solo si lo guardado tiene más de `SOCIAL_REFRESH_MINUTES` (esto puede gastar lecturas de X, siempre dentro del presupuesto). `digest`: `{ asset, metrics, excerpts }` o `null` si no hay publicaciones o las redes fallaron: **un fallo de redes nunca devuelve error**. `metrics`: `{ asOf, windowDays, mentions (24 h), authors, bullish, bearish, neutral, bullishShare, mentionsWindow, bullishWindow, bearishWindow, baselineMean, baselineDays, ratio, z, bySource[], truncated }`; `ratio`/`z`/`baselineMean` son `null` con menos de 5 bloques de 24 h observados. `excerpts` (≤ 5, mejor puntuación primero): `{ id, source: "reddit"\|"x", community, author (hash), title, text, score, comments, createdAt, url, stance: "bullish"\|"bearish"\|"neutral" }`. |
+
+`Analysis.dataWarnings` incluye un aviso si las redes estaban activadas pero fallaron durante el análisis. Con redes apagadas el análisis es idéntico al de siempre.
 
 ## Archivo de conocimiento (RAG)
 

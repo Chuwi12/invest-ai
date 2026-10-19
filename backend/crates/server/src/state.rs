@@ -56,6 +56,10 @@ pub struct AppState {
     pub power: Arc<dyn PowerProbe>,
     /// Archivo de conocimiento local (RAG). `None` con `RAG_ENABLED=0` o si no pudo abrirse.
     pub knowledge: Option<Arc<knowledge::KnowledgeBase>>,
+    /// Redes sociales (Reddit/X; opinión). `None` sin credenciales: la app es idéntica a la que no las conoce.
+    pub social: Option<Arc<crate::social::SocialService>>,
+    /// Avisos de configuración de redes (p. ej. «X no se activa: falta el presupuesto»).
+    pub social_notes: Arc<Vec<String>>,
 }
 
 impl AppState {
@@ -77,6 +81,8 @@ impl AppState {
             clock: Arc::new(SystemClock),
             power: Arc::new(SystemPower::default()),
             knowledge: None,
+            social: None,
+            social_notes: Arc::default(),
         }
     }
 
@@ -98,6 +104,12 @@ impl AppState {
 
     pub fn with_knowledge(mut self, knowledge: Option<Arc<knowledge::KnowledgeBase>>) -> Self {
         self.knowledge = knowledge;
+        self
+    }
+
+    pub fn with_social(mut self, social: Option<Arc<crate::social::SocialService>>, notes: Vec<String>) -> Self {
+        self.social = social;
+        self.social_notes = Arc::new(notes);
         self
     }
 

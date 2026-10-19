@@ -30,9 +30,20 @@ impl OllamaAnalyst {
 
     /// Como `new`, con el archivo de conocimiento local (RAG). Con `None` es exactamente `new`.
     pub fn with_knowledge(cfg: AiConfig, settings: Arc<dyn SettingsStore>, knowledge: Option<Arc<dyn KnowledgeSearch>>) -> Result<Self> {
+        Self::with_extras(cfg, settings, knowledge, None)
+    }
+
+    /// Como `with_knowledge`, además con datos de redes sociales (opinión; ver `crate::social`).
+    /// Con `None` en ambos es exactamente `new`.
+    pub fn with_extras(
+        cfg: AiConfig,
+        settings: Arc<dyn SettingsStore>,
+        knowledge: Option<Arc<dyn KnowledgeSearch>>,
+        social: Option<Arc<dyn domain::SocialData>>,
+    ) -> Result<Self> {
         let client = OllamaClient::new(&cfg.base_url, cfg.timeout)?;
         let models = Arc::new(ModelManager::new(client.clone(), cfg.clone(), settings));
-        let engine = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()).with_knowledge(knowledge));
+        let engine = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()).with_knowledge(knowledge).with_social(social));
         let chat = Arc::new(ChatEngine::new(client.clone(), models.clone(), engine.clone(), cfg.clone()));
         Ok(Self { cfg, client, models, engine, chat })
     }

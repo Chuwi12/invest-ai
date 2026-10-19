@@ -902,7 +902,7 @@ fn classify_heading(h: &str) -> Segment {
         Segment::Quote
     } else if starts(&["Indicadores técnicos", "Technical indicators"]) {
         Segment::Indicators
-    } else if starts(&["Fundamentales", "Fundamentals"]) {
+    } else if starts(&["Fundamentales", "Fundamentals", "Perfil del fondo", "Fund profile"]) {
         Segment::Fundamentals
     } else if starts(&["Puntuaciones", "Quantitative scores"]) {
         Segment::Scores

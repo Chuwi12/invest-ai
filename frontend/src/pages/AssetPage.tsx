@@ -11,6 +11,7 @@ import { IndicatorsPanel } from '@/components/asset/IndicatorsPanel'
 import { MacroPanel } from '@/components/asset/MacroPanel'
 import { NewsPanel } from '@/components/asset/NewsPanel'
 import { PriceChart } from '@/components/asset/PriceChart'
+import { SocialPanel } from '@/components/asset/SocialPanel'
 import { ErrorNotice, Skeleton } from '@/components/states'
 import { useTitle } from '@/hooks/useTitle'
 
@@ -19,6 +20,7 @@ const TABS = [
   ['indicators', 'Indicadores'],
   ['fundamentals', 'Fundamentales'],
   ['news', 'Noticias'],
+  ['social', 'Redes'],
   ['macro', 'Macro'],
 ] as const
 type Tab = (typeof TABS)[number][0]
@@ -103,6 +105,7 @@ function AssetView({ id }: { id: AssetId }) {
           {tab === 'indicators' ? <IndicatorsPanel summary={detail.data.summary} /> : null}
           {tab === 'fundamentals' ? <FundamentalsPanel summary={detail.data.summary} /> : null}
           {tab === 'news' ? <NewsPanel summary={detail.data.summary} /> : null}
+          {tab === 'social' ? <SocialPanel summary={detail.data.summary} /> : null}
           {tab === 'macro' ? <MacroPanel /> : null}
         </div>
       </div>

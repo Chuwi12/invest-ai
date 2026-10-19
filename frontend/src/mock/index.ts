@@ -21,6 +21,7 @@ import { mockIpoBaseRate, mockIpoCalendar, mockIpoPerformance, mockIpoProspectus
 import { mockCalibrated, mockPerformance, mockRollback, mockWatchlist, mockWeights } from './learning'
 import { activeModelId, installedModelIds, mockDelete, mockModels, mockPull, mockSetActive } from './models'
 import { sleep } from './rng'
+import { mockAssetSocial, mockSocialStatus } from './social'
 import { MockSocket } from './socket'
 
 /** Latencia artificial: deja ver los skeletons sin hacerse pesada. */
@@ -401,6 +402,16 @@ export const mockApi: Api = {
   async watchlist(signal) {
     await lag(signal, 120)
     return mockWatchlist()
+  },
+
+  async socialStatus(signal) {
+    await lag(signal, 60)
+    return mockSocialStatus()
+  },
+
+  async assetSocial(id, signal) {
+    await lag(signal, 150)
+    return mockAssetSocial(id)
   },
 
   async ipoCalendar(range, signal) {

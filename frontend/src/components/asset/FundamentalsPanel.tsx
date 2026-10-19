@@ -2,6 +2,7 @@ import { useFundamentals } from '@/api/hooks'
 import type { AssetSummary, Fundamentals } from '@/api/types'
 import { ErrorNotice, SkeletonRows } from '@/components/states'
 import { ExternalLink } from '@/components/ExternalLink'
+import { FundProfileBlock } from './FundProfileBlock'
 import { Provenance } from '@/components/Provenance'
 import { formatCompact, formatCompactCurrency, formatDate, formatFull, formatInt, formatNumber, formatPercent, formatPrice, fundamentalsCurrency } from '@/lib/format'
 import { fundamentalsFreshness } from '@/lib/freshness'
@@ -91,9 +92,10 @@ export function FundamentalsPanel({ summary }: { summary: AssetSummary }) {
         ['Máximo histórico', f.allTimeHigh === null ? null : formatPrice(f.allTimeHigh, { currency: cur }), note],
         ['Fecha del máximo', f.allTimeHighDate ? formatDate(f.allTimeHighDate) : null],
       ])}
-      {group('Fondo / ETF', [['Gastos corrientes', p(f.expenseRatio, 2)], ['Patrimonio', c(f.totalAssets, cur), full(f.totalAssets, cur, note)]])}
+      {f.fundProfile ? null : group('Fondo / ETF', [['Gastos corrientes', p(f.expenseRatio, 2)], ['Patrimonio', c(f.totalAssets, cur), full(f.totalAssets, cur, note)]])}
+      {f.fundProfile ? <FundProfileBlock profile={f.fundProfile} assetId={summary.id} currency={cur} /> : null}
       {group('Bono', [['Rentab. al vencimiento', p(f.yieldToMaturity, 2)], ['Cupón', p(f.coupon, 2)], ['Vencimiento', f.maturityDate ? formatDate(f.maturityDate) : null]])}
-      {f.topHoldings.length > 0 ? (
+      {f.topHoldings.length > 0 && !f.fundProfile ? (
         <section aria-label="Principales posiciones">
           <h3 className="small" style={{ fontWeight: 600, margin: '0.8rem 0 0.3rem' }}>Principales posiciones</h3>
           <div className="table-wrap">

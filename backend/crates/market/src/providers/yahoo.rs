@@ -1043,7 +1043,7 @@ pub fn parse_quotes(text: &str, requested: &HashMap<String, Vec<&AssetId>>) -> P
 // ---------------------------------------------------------------------------------------------
 
 /// Número de un campo de Yahoo, que llega como `{"raw": 1.2, "fmt": "1.20"}` (o `{}` si no hay).
-fn raw(v: &Value) -> Option<f64> {
+pub(crate) fn raw(v: &Value) -> Option<f64> {
     match v {
         Value::Object(_) => v["raw"].as_f64().filter(|x| x.is_finite()),
         Value::Number(n) => n.as_f64().filter(|x| x.is_finite()),
@@ -1051,7 +1051,7 @@ fn raw(v: &Value) -> Option<f64> {
     }
 }
 
-fn raw_date(v: &Value) -> Option<NaiveDate> {
+pub(crate) fn raw_date(v: &Value) -> Option<NaiveDate> {
     raw(v)
         .and_then(|t| DateTime::<Utc>::from_timestamp(t as i64, 0))
         .map(|d| d.date_naive())
@@ -1169,10 +1169,17 @@ pub fn parse_quote_summary(text: &str, now: DateTime<Utc>) -> PResult<Fundamenta
                 })
             })
             .collect(),
+        fund_profile: crate::fund::fund_profile(r, now),
         sources: vec!["yahoo".into()],
         as_of: Some(now),
         ..Fundamentals::default()
     };
+
+    // En un fondo, el P/E del `summaryDetail` a veces es basura (TLT: forwardPE -4002,5).
+    if f.fund_profile.is_some() {
+        f.pe_forward = f.pe_forward.filter(|v| *v > 0.0 && *v < 1000.0);
+        f.pe_trailing = f.pe_trailing.filter(|v| *v > 0.0 && *v < 1000.0);
+    }
 
     // Datos que no encajan en campos tipados.
     let mut extra = |k: &str, val: Option<Value>| {

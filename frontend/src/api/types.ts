@@ -156,6 +156,62 @@ export interface Holding {
   weight: number
 }
 
+/** Peso de un componente de la cartera de un fondo (sector, tipo de activo, calificación), como fracción. */
+export interface WeightedItem {
+  /** Clave del proveedor tal cual (`technology`, `stock`, `aaa`…). */
+  name: string
+  weight: number
+}
+
+export interface FundEquityStats {
+  priceToEarnings: number | null
+  priceToBook: number | null
+  priceToSales: number | null
+  priceToCashflow: number | null
+  threeYearEarningsGrowth: number | null
+  medianMarketCap: number | null
+}
+
+export interface FundBondStats {
+  /** Años. */
+  duration: number | null
+  maturity: number | null
+  creditQuality: number | null
+}
+
+/**
+ * Perfil propio de un ETF o fondo. Lo que el proveedor no da llega `null`/vacío: no se inventa.
+ * Ratios y pesos como fracción (0.0095 = 0,95 %).
+ */
+export interface FundProfile {
+  family: string | null
+  category: string | null
+  legalType: string | null
+  /** `YYYY-MM-DD` */
+  inceptionDate: string | null
+  expenseRatio: number | null
+  grossExpenseRatio: number | null
+  frontLoad: number | null
+  deferredLoad: number | null
+  twelveB1: number | null
+  turnover: number | null
+  totalAssets: number | null
+  dividendYield: number | null
+  beta3y: number | null
+  ytdReturn: number | null
+  threeYearReturn: number | null
+  fiveYearReturn: number | null
+  topHoldings: Holding[]
+  sectorWeights: WeightedItem[]
+  assetMix: WeightedItem[]
+  bondRatings: WeightedItem[]
+  equity: FundEquityStats | null
+  bond: FundBondStats | null
+  source: string
+  asOf: string | null
+  sourceUrl: string | null
+}
+
 /** Ratios y márgenes como fracción (0.25 = 25 %). Todo opcional (null). */
 export interface Fundamentals {
   description: string | null
@@ -219,6 +275,8 @@ export interface Fundamentals {
   expenseRatio: number | null
   totalAssets: number | null
   topHoldings: Holding[]
+  /** Perfil del fondo (solo ETF/fondos y solo si el proveedor lo dio). */
+  fundProfile?: FundProfile | null
 
   yieldToMaturity: number | null
   coupon: number | null
@@ -1046,4 +1104,85 @@ export interface IpoRiskProfile {
   warnings: string[]
   disclaimer: string
   generatedAt: string
+}
+
+// --- Redes sociales (Reddit y X): opinión, no hechos ----------------------------------------------
+
+export type SocialSource = 'reddit' | 'x'
+export type SocialStance = 'bullish' | 'bearish' | 'neutral'
+
+/** Extracto de una publicación (texto de un usuario anónimo: no verificado). */
+export interface SocialExcerpt {
+  id: string
+  source: SocialSource
+  /** Subreddit (sin `r/`) o `x`. */
+  community: string
+  /** Seudónimo (hash), no el nombre de usuario. */
+  author: string
+  title: string | null
+  text: string
+  score: number
+  comments: number
+  createdAt: string
+  url: string
+  stance: SocialStance
+}
+
+/** Métricas deterministas de atención y tono. NO entran en la puntuación. */
+export interface SocialMetrics {
+  asOf: string
+  windowDays: number
+  /** Publicaciones que mencionan el activo en las últimas 24 h. */
+  mentions: number
+  authors: number
+  bullish: number
+  bearish: number
+  neutral: number
+  bullishShare: number | null
+  mentionsWindow: number
+  bullishWindow: number
+  bearishWindow: number
+  baselineMean: number | null
+  baselineDays: number
+  ratio: number | null
+  z: number | null
+  bySource: { source: SocialSource; mentions: number }[]
+  /** La consulta alcanzó el tope: las menciones son una cota inferior. */
+  truncated: boolean
+}
+
+export interface SocialDigest {
+  asset: AssetId
+  metrics: SocialMetrics
+  excerpts: SocialExcerpt[]
+}
+
+/** `GET /assets/{id}/social`. `enabled: false` = sin credenciales (lo normal). */
+export interface AssetSocial {
+  enabled: boolean
+  digest: SocialDigest | null
+  disclaimer: string
+}
+
+/** `GET /social/status`. */
+export interface SocialStatus {
+  enabled: boolean
+  reddit: { enabled: boolean }
+  x: {
+    enabled: boolean
+    month?: string
+    monthlyReadBudget?: number
+    used?: number
+    remaining?: number
+    costPerReadUsd?: number
+    estimatedCostUsd?: number
+    maxMonthlyCostUsd?: number
+    exhausted?: boolean
+    accounts?: number
+    searchAll?: boolean
+  }
+  days?: number
+  refreshMinutes?: number
+  lastError: { at: string; source: SocialSource; message: string } | null
+  notes: string[]
 }

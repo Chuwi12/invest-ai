@@ -12,12 +12,12 @@
 //! - La recompensa/riesgo y los niveles son los del plan de `levels.rs` que ve el juez (veredicto
 //!   «acumular»), así que la cifra coincide con la del informe.
 
-use domain::{AssetClass, AssetSnapshot, Fundamentals, Verdict};
+use domain::{AssetClass, AssetSnapshot, FundProfile, Fundamentals, Verdict};
 
 use crate::{
     analysis::levels,
     fmt,
-    lang::Lang,
+    lang::{Lang, tr},
 };
 
 /// Grupos de filas (máscara de bits en `Sections::derived`).
@@ -29,7 +29,9 @@ pub const VALUATION: u8 = 16;
 /// Detalle de niveles: soportes y resistencias de los datos, zona de entrada y mínimo de 52 semanas
 /// (la etapa técnica y el contexto completo; el juez ya recibe el plan y va justo de espacio).
 pub const DETAIL: u8 = 32;
-pub const ALL: u8 = ANALYST | LEVELS | RANGE | TECH | VALUATION | DETAIL;
+/// Cartera de un ETF o fondo: concentración, peso del mayor sector y coste por 10 000 invertidos.
+pub const FUND: u8 = 64;
+pub const ALL: u8 = ANALYST | LEVELS | RANGE | TECH | VALUATION | DETAIL | FUND;
 
 /// Una cifra derivada: `| label | value | basis |`.
 #[derive(Debug, Clone, PartialEq)]
@@ -73,9 +75,54 @@ fn same_currency(snap: &AssetSnapshot, f: &Fundamentals) -> bool {
     }
 }
 
-/// Las cifras derivadas disponibles. Vacío si no hay precio.
+/// Concentración de la cartera de un fondo: peso de las `n` primeras posiciones (suma de los pesos
+/// que da el proveedor; `n` es cuántas hay, hasta 10) y de la mayor. `None` si no hay posiciones o
+/// los pesos son absurdos (suma > 100 %).
+pub fn concentration(fp: &FundProfile) -> Option<(usize, f64, f64)> {
+    let w: Vec<f64> = fp.top_holdings.iter().map(|h| h.weight).filter(|w| w.is_finite() && *w > 0.0).collect();
+    let sum: f64 = w.iter().sum();
+    (!w.is_empty() && sum <= 1.0001).then(|| (w.len(), sum, w.iter().copied().fold(0.0, f64::max)))
+}
+
+/// Mayor sector de la cartera: (nombre legible, peso).
+pub fn top_sector(fp: &FundProfile) -> Option<(String, f64)> {
+    fp.sector_weights.iter().filter(|s| s.weight.is_finite() && s.weight > 0.0 && s.weight <= 1.0001).max_by(|a, b| a.weight.total_cmp(&b.weight)).map(|s| (sector_name(&s.name), s.weight))
+}
+
+/// `consumer_cyclical` -> `consumer cyclical`.
+pub fn sector_name(key: &str) -> String {
+    key.replace('_', " ")
+}
+
+fn fund_rows(snap: &AssetSnapshot, lang: Lang) -> Vec<Row> {
+    let mut rows = Vec::new();
+    let Some(fp) = snap.fundamentals.as_ref().and_then(|f| f.fund_profile.as_ref()).filter(|_| matches!(snap.summary.class, AssetClass::Etf | AssetClass::Fund)) else {
+        return rows;
+    };
+    let mut add = |label: String, value: String, basis: String| rows.push(Row { group: FUND, core: true, label, value, basis });
+    if let Some((n, sum, max)) = concentration(fp) {
+        add(
+            tr!(lang, "Concentración (peso de las {} primeras posiciones)", "Concentration (weight of the top {} holdings)", n),
+            fmt::pct(sum),
+            lang.t("suma de los pesos de las posiciones listadas", "sum of the weights of the listed holdings").into(),
+        );
+        if n > 1 {
+            add(lang.t("Peso de la mayor posición", "Weight of the largest holding").into(), fmt::pct(max), lang.t("peso de la primera posición", "weight of the first holding").into());
+        }
+    }
+    if let Some((name, w)) = top_sector(fp) {
+        add(lang.t("Peso del primer sector", "Weight of the largest sector").into(), format!("{name} {}", fmt::pct(w)), lang.t("sector de mayor peso de la cartera", "largest sector in the portfolio").into());
+    }
+    if let Some(er) = fp.expense_ratio.filter(|e| e.is_finite() && *e >= 0.0 && *e < 0.1) {
+        add(lang.t("Coste anual por cada 10 000 invertidos", "Annual cost per 10 000 invested").into(), fmt::num(er * 10_000.0), lang.t("ratio de gastos × 10 000", "expense ratio × 10 000").into());
+    }
+    rows
+}
+
+/// Las cifras derivadas disponibles. Vacío si no hay precio ni cartera de fondo.
 pub fn compute(snap: &AssetSnapshot, lang: Lang) -> Vec<Row> {
-    let Some(price) = price_of(snap) else { return vec![] };
+    let fund = fund_rows(snap, lang);
+    let Some(price) = price_of(snap) else { return fund };
     let mut rows: Vec<Row> = Vec::new();
     let mut add = |group: u8, core: bool, label: String, value: String, basis: String| {
         rows.push(Row { group, core, label, value, basis });
@@ -216,6 +263,7 @@ pub fn compute(snap: &AssetSnapshot, lang: Lang) -> Vec<Row> {
             add(VALUATION, true, lang.t("Rentabilidad por FCF", "FCF yield").into(), signed(fcf / m), lang.t("FCF / capitalización", "FCF / market cap").into());
         }
     }
+    rows.extend(fund);
     rows
 }
 

@@ -37,7 +37,11 @@ async fn main() -> anyhow::Result<()> {
     } else {
         server::knowledge::open(kcfg, pool.clone(), shutdown.clone()).await
     };
-    let (market, ipo, analyst, annotate_news, models) = build_services(&config, &pool, rag.as_ref()).await?;
+    // Redes sociales (opinión; apagadas sin credenciales). Con datos simulados no se usan.
+    let social_cfg = market::social::SocialConfig::from_env();
+    let social_notes = social_cfg.notes.clone();
+    let social = if config.fake { None } else { server::social::SocialService::from_config(social_cfg, pool.clone()) };
+    let (market, ipo, analyst, annotate_news, models) = build_services(&config, &pool, rag.as_ref(), social.clone()).await?;
 
     let mut state = AppState::new(
         market,
@@ -47,7 +51,8 @@ async fn main() -> anyhow::Result<()> {
     )
     .with_news_annotator(annotate_news)
     .with_ipo(ipo)
-    .with_knowledge(rag.as_ref().map(|r| r.kb.clone()));
+    .with_knowledge(rag.as_ref().map(|r| r.kb.clone()))
+    .with_social(social, social_notes);
     state.shutdown = shutdown.clone();
     if let Some(rag) = rag {
         rag.spawn_background(&state.tasks, shutdown.clone());
@@ -124,7 +129,12 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn build_services(config: &Config, pool: &sqlx::SqlitePool, rag: Option<&server::knowledge::Rag>) -> anyhow::Result<Services> {
+async fn build_services(
+    config: &Config,
+    pool: &sqlx::SqlitePool,
+    rag: Option<&server::knowledge::Rag>,
+    social: Option<Arc<server::social::SocialService>>,
+) -> anyhow::Result<Services> {
     if config.fake {
         tracing::warn!("INVEST_AI_FAKE activo: datos y analista simulados");
         let market = fake::FakeMarket { tick_interval: Duration::from_millis(250), ..Default::default() };
@@ -135,13 +145,21 @@ async fn build_services(config: &Config, pool: &sqlx::SqlitePool, rag: Option<&s
         .context("no se pudo iniciar el servicio de mercado")?;
     // LLM local: el modelo activo se guarda en la tabla `settings` (ver docs/notes/ai.md).
     let settings = Arc::new(SqliteSettings::new(pool.clone()));
-    let analyst = ai::OllamaAnalyst::with_knowledge(ai::AiConfig::from_env(), settings, rag.map(server::knowledge::Rag::search_handle))
+    let analyst = ai::OllamaAnalyst::with_extras(
+        ai::AiConfig::from_env(),
+        settings,
+        rag.map(server::knowledge::Rag::search_handle),
+        social.map(|s| s as Arc<dyn domain::SocialData>),
+    )
         .map_err(|e| anyhow::anyhow!("no se pudo iniciar el analista: {e}"))?;
     let models = analyst.models();
     let ipo: Arc<dyn IpoData> = Arc::new(market::MarketIpo(market.clone()));
     let analyst: Arc<dyn Analyst> = Arc::new(analyst);
     let (market, ipo, analyst) = match rag {
-        Some(rag) => rag.wrap(market, ipo, analyst),
+        Some(rag) => {
+            let funds: Arc<dyn domain::FundDocs> = market.clone();
+            rag.wrap_with_funds(market, ipo, analyst, funds)
+        }
         None => (market as Arc<dyn MarketData>, ipo, analyst),
     };
     Ok((market, ipo, analyst, ai::annotate_sentiment, Some(models)))

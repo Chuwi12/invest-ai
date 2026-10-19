@@ -1,5 +1,7 @@
 //! Datos de mercado de invest-ai.
 pub mod config;
+pub mod fund;
+pub mod fund_prospectus;
 pub mod html;
 pub mod http;
 pub mod ipo;
@@ -15,6 +17,7 @@ pub mod ratelimit;
 pub mod realtime;
 pub mod secret;
 pub mod service;
+pub mod social;
 pub mod symbol;
 
 pub use config::MarketConfig;

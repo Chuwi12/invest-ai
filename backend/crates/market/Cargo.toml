@@ -30,3 +30,5 @@ url = "2"
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 flate2 = "1"
+# Servidor Reddit/X simulado para los tests de redes sociales (puerto efímero, sin red real).
+axum = "0.8"

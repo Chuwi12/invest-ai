@@ -368,3 +368,10 @@ pub struct TeeMarket { inner: Arc<dyn MarketData>, sink: knowledge::NewsSink }
    pausar la ingesta mientras hay un análisis en curso hasta tener la medida real.
 8. Aviso de colisión: si otro agente crea otra `0004_*.sql`, `sqlx::migrate!` fallará por versión repetida (el coordinador
    ya asignó 0004 a este crate y 0005 al agente de aprendizaje).
+
+## Folletos resumidos de ETF (19-oct-2026)
+- Qué: la primera vez que se pide el snapshot (o el análisis, que lo necesita) de un ETF/fondo con `RAG_ENABLED=1`, `TeeMarket` ofrece su id a `server/src/fund_docs.rs`. Un trabajador en segundo plano llama a `FundDocs::fund_prospectus` (`MarketService`, ver `notes/market.md`) y lo archiva como `NewDocument { kind: Filing, subtype: 497K|485BPOS|497 }` con 5 secciones (`Investment Objective`, `Fees and Expenses`, `Principal Investment Strategies`, `Principal Risks`, `Portfolio Turnover`), `doc_key = etf:<TICKER>` (el del año siguiente sustituye al anterior), `assets = [etf:<TICKER>]` y la URL del documento en sec.gov.
+- Cola acotada (8) con `try_send`: nunca retrasa una respuesta. Sin RAG (o con `INVEST_AI_FAKE=1`) no se crea nada ni se pide nada a EDGAR. En memoria no se reintenta el mismo ETF antes de 6 h (éxito o fallo); en disco, como mucho una descarga cada 30 días, incluso tras reiniciar (se mira `ingested_at` y `meta.checkedAt` del documento; un folleto sin cambios solo actualiza `checkedAt`). Tiempo máximo de una descarga: 150 s.
+- Gestión del embedder igual que el resto: la ingesta espera si hay un análisis en curso.
+- Tests: `server/tests/fund_docs.rs` (embedder simulado; 497K real de TLT), `market/tests/fund_prospectus.rs`.
+- No medido: ingesta con Ollama real (no se usó).

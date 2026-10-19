@@ -22,6 +22,9 @@ pub mod rag;
 pub mod safety;
 pub mod scoring;
 mod sentiment;
+pub mod social;
+#[cfg(test)]
+mod fund_tests;
 #[cfg(test)]
 mod testutil;
 mod think;

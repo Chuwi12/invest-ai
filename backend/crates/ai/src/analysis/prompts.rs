@@ -157,6 +157,9 @@ pub fn quick_hints(snap: &AssetSnapshot, lang: Lang) -> QuickHints {
     let has_fcf = f.is_some_and(|f| fin(f.free_cash_flow));
     let has_eps = f.is_some_and(|f| fin(f.eps_trailing) || fin(f.eps_forward));
     let company = has_per || has_rev || has_margin || has_fcf;
+    // Magnitudes propias de un ETF o fondo (solo si el proveedor las dio).
+    let fp = f.and_then(|f| f.fund_profile.as_ref()).filter(|_| matches!(snap.summary.class, AssetClass::Etf | AssetClass::Fund));
+    let has_fund_pe = fp.is_some_and(|p| p.equity.as_ref().is_some_and(|e| posv(e.price_to_earnings)));
 
     // (clave, ¿lo tiene?, es, en)
     let cand = |key: &str| -> (bool, String) {
@@ -166,6 +169,10 @@ pub fn quick_hints(snap: &AssetSnapshot, lang: Lang) -> QuickHints {
             "margin" => (has_margin, t("el margen operativo", "the operating margin")),
             "fcf" => (has_fcf, t("el flujo de caja libre", "free cash flow")),
             "earn" => (f.is_some_and(|f| fin(f.earnings_growth_yoy)), t("el crecimiento de beneficios", "earnings growth")),
+            "ter" => (fp.is_some_and(|p| p.expense_ratio.is_some_and(|v| v.is_finite() && v >= 0.0)), t("el ratio de gastos", "the expense ratio")),
+            "conc" => (fp.is_some_and(|p| crate::derived::concentration(p).is_some()), t("la concentración de las primeras posiciones", "the concentration of the top holdings")),
+            "aum" => (fp.is_some_and(|p| posv(p.total_assets)), t("el patrimonio del fondo", "the fund's net assets")),
+            "fpe" => (has_fund_pe, t("el PER de la cartera", "the portfolio P/E")),
             "div" => (f.is_some_and(|f| posv(f.dividend_yield)), t("la rentabilidad por dividendo", "the dividend yield")),
             "analyst" => (
                 f.is_some_and(|f| posv(f.analyst_target_mean) && f.analyst_count != Some(0)),
@@ -189,6 +196,7 @@ pub fn quick_hints(snap: &AssetSnapshot, lang: Lang) -> QuickHints {
     };
     let order: &[&str] = match snap.summary.class {
         AssetClass::Crypto => &["ath", "ret1y", "dd", "vol", "supply"],
+        AssetClass::Etf | AssetClass::Fund if fp.is_some() => &["ter", "conc", "aum", "fpe", "per", "div", "ret1y", "dd", "vol", "ath"],
         AssetClass::Etf | AssetClass::Fund | AssetClass::Index => &["per", "div", "ret1y", "dd", "vol", "ath"],
         _ => &["per", "rev", "margin", "fcf", "earn", "div", "analyst", "ath", "ret1y", "dd"],
     };
@@ -198,7 +206,7 @@ pub fn quick_hints(snap: &AssetSnapshot, lang: Lang) -> QuickHints {
     let valuation = present(order);
     let technical = present(&["rsi", "sma200", "sma50", "macd", "atr"]);
 
-    let absent: Vec<String> = [("per", !has_per), ("eps", !has_eps), ("margin", !has_margin), ("fcf", !has_fcf), ("rev", !has_rev)]
+    let absent: Vec<String> = [("per", !has_per && !has_fund_pe), ("eps", !has_eps), ("margin", !has_margin), ("fcf", !has_fcf), ("rev", !has_rev)]
         .into_iter()
         .filter(|(_, missing)| *missing)
         .map(|(k, _)| match k {
@@ -553,5 +561,30 @@ mod tests {
         assert!(t.contains("GOOD paragraph shapes"));
         assert!(!own(&t)[own(&t).find("GOOD paragraph").unwrap()..].contains("P/E"), "{t}");
     }
-}
 
+    fn etf_with_profile(name: &str, with_profile: bool) -> AssetSnapshot {
+        let mut s = fixture::stock_snapshot();
+        s.summary.class = AssetClass::Etf;
+        let f = s.fundamentals.as_mut().unwrap();
+        (f.pe_trailing, f.pe_forward, f.revenue_growth_yoy, f.operating_margin, f.free_cash_flow, f.eps_trailing, f.eps_forward) = (None, None, None, None, None, None, None);
+        let p = format!("{}/tests/fixtures/fund_profile_{name}.json", env!("CARGO_MANIFEST_DIR"));
+        let fp: domain::FundProfile = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        f.fund_profile = with_profile.then_some(fp);
+        s
+    }
+
+    #[test]
+    fn quick_example_for_an_etf_picks_fund_magnitudes_it_has() {
+        let with = quick_hints(&etf_with_profile("spy", true), Lang::Es);
+        assert_eq!(&with.valuation[..3], ["el ratio de gastos", "la concentración de las primeras posiciones", "el patrimonio del fondo"]);
+        assert!(with.valuation.contains(&"el PER de la cartera".to_string()) && !with.absent.iter().any(|a| a.contains("PER")), "{with:?}");
+        let t = task(&etf_with_profile("spy", true), Lang::Es);
+        assert!(own(&t)[own(&t).find("GOOD paragraph").unwrap()..].contains("El ratio de gastos de <valor>"), "{t}");
+        let tlt = quick_hints(&etf_with_profile("tlt", true), Lang::Es);
+        assert!(tlt.valuation.contains(&"el ratio de gastos".to_string()) && !tlt.valuation.iter().any(|v| v.contains("concentración") || v.contains("PER de la cartera")), "{tlt:?}");
+        assert!(tlt.absent.iter().any(|a| a.contains("PER")), "un bono no tiene PER: {tlt:?}");
+        // Sin perfil, el ejemplo es el de siempre.
+        let without = quick_hints(&etf_with_profile("spy", false), Lang::Es);
+        assert!(!without.valuation.iter().any(|v| v.contains("ratio de gastos") || v.contains("patrimonio")), "{without:?}");
+    }
+}

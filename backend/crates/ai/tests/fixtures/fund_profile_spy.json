@@ -1,0 +1,139 @@
+{
+ "family": "State Street Investment Management",
+ "category": "Large Blend",
+ "legalType": "Exchange Traded Fund",
+ "inceptionDate": "1993-01-22",
+ "expenseRatio": 0.000945,
+ "grossExpenseRatio": null,
+ "frontLoad": null,
+ "deferredLoad": null,
+ "twelveB1": null,
+ "turnover": 0.03,
+ "totalAssets": 809216114688.0,
+ "dividendYield": 0.0099,
+ "beta3y": 1.0,
+ "ytdReturn": 0.14380279,
+ "threeYearReturn": 0.23161751,
+ "fiveYearReturn": 0.1357875,
+ "topHoldings": [
+  {
+   "symbol": "NVDA",
+   "name": "NVIDIA Corp",
+   "weight": 0.0836162
+  },
+  {
+   "symbol": "AAPL",
+   "name": "Apple Inc",
+   "weight": 0.0735303
+  },
+  {
+   "symbol": "MSFT",
+   "name": "Microsoft Corp",
+   "weight": 0.0576201
+  },
+  {
+   "symbol": "AMZN",
+   "name": "Amazon.com Inc",
+   "weight": 0.0370001
+  },
+  {
+   "symbol": "GOOGL",
+   "name": "Alphabet Inc Class A",
+   "weight": 0.030545799
+  },
+  {
+   "symbol": "AVGO",
+   "name": "Broadcom Inc",
+   "weight": 0.0252788
+  },
+  {
+   "symbol": "GOOG",
+   "name": "Alphabet Inc Class C",
+   "weight": 0.024504
+  },
+  {
+   "symbol": "META",
+   "name": "Meta Platforms Inc Class A",
+   "weight": 0.0241938
+  },
+  {
+   "symbol": "MU",
+   "name": "Micron Technology Inc",
+   "weight": 0.0182
+  },
+  {
+   "symbol": "TSLA",
+   "name": "Tesla Inc",
+   "weight": 0.0151269
+  }
+ ],
+ "sectorWeights": [
+  {
+   "name": "technology",
+   "weight": 0.4045
+  },
+  {
+   "name": "financial_services",
+   "weight": 0.111999996
+  },
+  {
+   "name": "communication_services",
+   "weight": 0.0995
+  },
+  {
+   "name": "healthcare",
+   "weight": 0.0926
+  },
+  {
+   "name": "consumer_cyclical",
+   "weight": 0.0874
+  },
+  {
+   "name": "industrials",
+   "weight": 0.0754
+  },
+  {
+   "name": "consumer_defensive",
+   "weight": 0.0433
+  },
+  {
+   "name": "energy",
+   "weight": 0.034
+  },
+  {
+   "name": "utilities",
+   "weight": 0.0188
+  },
+  {
+   "name": "realestate",
+   "weight": 0.017
+  },
+  {
+   "name": "basic_materials",
+   "weight": 0.0156
+  }
+ ],
+ "assetMix": [
+  {
+   "name": "stock",
+   "weight": 0.9975
+  },
+  {
+   "name": "cash",
+   "weight": 0.0025
+  }
+ ],
+ "bondRatings": [],
+ "equity": {
+  "priceToEarnings": 24.201355275895448,
+  "priceToBook": 5.253756435851634,
+  "priceToSales": 3.641793218981026,
+  "priceToCashflow": 18.77581674802854,
+  "threeYearEarningsGrowth": null,
+  "medianMarketCap": null
+ },
+ "bond": null,
+ "source": "yahoo",
+ "asOf": "2026-10-19T14:15:00Z",
+ "sourceUrl": "https://finance.yahoo.com/quote/SPY/holdings"
+}

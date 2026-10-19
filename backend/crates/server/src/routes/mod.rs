@@ -32,6 +32,7 @@ pub mod knowledge;
 pub mod learning;
 pub mod market;
 pub mod models;
+pub mod social;
 pub mod static_files;
 pub mod system;
 pub mod watchlist;
@@ -94,6 +95,8 @@ fn api(state: AppState) -> Router {
         .route("/ipo/{symbol}/performance", get(ipo::performance))
         .route("/ipo/{symbol}/risk-profile", get(ipo::risk_profile))
         .route("/knowledge/stats", get(knowledge::stats))
+        .route("/social/status", get(social::status))
+        .route("/assets/{id}/social", get(social::asset_social))
         .route("/learning/performance", get(learning::performance))
         .route("/learning/weights", get(learning::weights))
         .route("/learning/weights/rollback", post(learning::rollback))

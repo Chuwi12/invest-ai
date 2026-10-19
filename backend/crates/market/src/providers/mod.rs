@@ -20,8 +20,10 @@ pub mod gdelt;
 pub mod google_news;
 pub mod marketaux;
 pub mod newsapi;
+pub mod reddit;
 pub mod sec;
 pub mod twelvedata;
+pub mod x;
 pub mod yahoo;
 
 // ---------------------------------------------------------------------------------------------

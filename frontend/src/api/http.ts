@@ -99,6 +99,8 @@ export const httpApi: Api = {
       { signal },
     ),
   watchlist: (signal) => request('/watchlist', { signal }),
+  socialStatus: (signal) => request('/social/status', { signal }),
+  assetSocial: (id, signal) => request(`/assets/${encodeURIComponent(id)}/social`, { signal }),
 
   ipoCalendar: (range, signal) => request('/ipo/calendar', { query: { from: range?.from, to: range?.to }, signal }),
   ipoRiskProfile: (symbol, date, signal) => request(`/ipo/${encodeURIComponent(symbol)}/risk-profile`, { query: { date }, signal }),

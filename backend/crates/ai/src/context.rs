@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
 use domain::{
-    AssetClass, AssetSnapshot, Fundamentals, Indicators, NewsItem, Quote, SourceRef, Trend,
+    AssetClass, AssetSnapshot, FundProfile, Fundamentals, Indicators, NewsItem, Quote, SourceRef, Trend,
 };
 
 use crate::{
@@ -200,7 +200,7 @@ impl Sections {
             quote: true,
             scores: Self::S_ALL,
             verdict: true,
-            derived: derived::ANALYST | derived::LEVELS | derived::RANGE | derived::VALUATION,
+            derived: derived::ANALYST | derived::LEVELS | derived::RANGE | derived::VALUATION | derived::FUND,
             ..Self::NONE
         }
     }
@@ -218,7 +218,7 @@ impl Sections {
             quote: true,
             fundamentals: true,
             scores: Self::S_FUNDAMENTAL | Self::S_VALUATION,
-            derived: derived::ANALYST | derived::RANGE | derived::VALUATION,
+            derived: derived::ANALYST | derived::RANGE | derived::VALUATION | derived::FUND,
             ..Self::NONE
         }
     }
@@ -414,6 +414,11 @@ fn render(
         && let Some(f) = &snap.fundamentals
     {
         render_fundamentals(&mut out, f, snap, l, lv);
+        if matches!(s.class, AssetClass::Etf | AssetClass::Fund)
+            && let Some(fp) = &f.fund_profile
+        {
+            render_fund_profile(&mut out, fp, l, lv);
+        }
     }
     if sec.derived != 0 {
         // Con la tabla de indicadores delante no se repiten ATR %, volatilidad ni volumen relativo.
@@ -757,7 +762,7 @@ fn render_fundamentals(
                 lab("assets", f.total_assets, fmt::big),
             ],
         );
-        if lv.extras && !f.top_holdings.is_empty() {
+        if lv.extras && !f.top_holdings.is_empty() && f.fund_profile.is_none() {
             let h: Vec<String> = f
                 .top_holdings
                 .iter()
@@ -777,6 +782,80 @@ fn render_fundamentals(
                 lab("coupon", f.coupon, |v| format!("{v:.2}%")),
                 f.maturity_date.map(|d| format!("maturity {d}")),
             ],
+        );
+    }
+    t.render(out, (l.t("Concepto", "Item"), l.t("Valor", "Value")));
+}
+
+/// Perfil propio de un ETF o fondo: gestora, costes, patrimonio, concentración, sectores y valoración
+/// de la cartera. Cada fila existe solo si el proveedor dio el dato.
+fn render_fund_profile(out: &mut String, fp: &FundProfile, l: Lang, lv: &Level) {
+    let head = l.t("Perfil del fondo", "Fund profile");
+    let src = format!("{}: {}", l.t("fuente", "source"), if fp.source.is_empty() { "?" } else { &fp.source });
+    let asof = fp.as_of.map(|t| format!(" · {}", ts(t))).unwrap_or_default();
+    section(out, &format!("{head} [{src}{asof}]"));
+    let pct1 = |v: f64| fmt::pct(v);
+    let mut t = Table::default();
+    t.row(
+        l.t("Gestora y tipo", "Manager and type"),
+        vec![fp.family.clone(), fp.category.clone().map(|c| format!("{} {c}", l.t("categoría", "category"))), fp.legal_type.clone(), fp.inception_date.map(|d| format!("{} {d}", l.t("inicio", "inception")))],
+    );
+    t.row(
+        l.t("Costes", "Costs"),
+        vec![
+            lab("expense ratio", fp.expense_ratio, fmt::pct2),
+            lab("gross expense ratio", fp.gross_expense_ratio, fmt::pct2),
+            lab("12b-1", fp.twelve_b1, fmt::pct2),
+            lab("front load", fp.front_load.filter(|v| *v > 0.0), fmt::pct2),
+            lab("deferred load", fp.deferred_load.filter(|v| *v > 0.0), fmt::pct2),
+            lab("turnover", fp.turnover, pct1),
+        ],
+    );
+    t.row(
+        l.t("Patrimonio", "Assets"),
+        vec![lab("total assets", fp.total_assets, fmt::big), lab("dividend yield", fp.dividend_yield, fmt::pct2), lab("beta 3Y", fp.beta_3y, fmt::num)],
+    );
+    t.row(
+        l.t("Rentabilidad del fondo", "Fund returns"),
+        vec![lab("YTD", fp.ytd_return, fmt::pct_signed), lab("3Y avg", fp.three_year_return, fmt::pct_signed), lab("5Y avg", fp.five_year_return, fmt::pct_signed)],
+    );
+    if let Some((n, sum, _)) = derived::concentration(fp) {
+        let first = fp.top_holdings.first().map(|h| format!("{} {}", h.symbol.as_deref().unwrap_or(&h.name), pct1(h.weight)));
+        t.row(
+            l.t("Concentración", "Concentration"),
+            vec![Some(tr!(l, "peso de las {} primeras posiciones {}", "weight of the top {} holdings {}", n, pct1(sum))), first.map(|f| format!("{} {f}", l.t("mayor", "largest")))],
+        );
+    }
+    if !fp.top_holdings.is_empty() {
+        let h: Vec<String> = fp.top_holdings.iter().take(if lv.extras { 10 } else { 5 }).map(|h| format!("{} {}", h.symbol.as_deref().unwrap_or(&h.name), pct1(h.weight))).collect();
+        t.one(l.t("Mayores posiciones", "Top holdings"), Some(h.join(", ")));
+    }
+    let weights = |v: &[domain::WeightedItem], n: usize| -> Option<String> {
+        let s: Vec<String> = v.iter().take(n).map(|w| format!("{} {}", derived::sector_name(&w.name), pct1(w.weight))).collect();
+        (!s.is_empty()).then(|| s.join(", "))
+    };
+    t.one(l.t("Sectores", "Sectors"), weights(&fp.sector_weights, if lv.extras { 11 } else { 4 }));
+    if lv.extras {
+        t.one(l.t("Tipo de activo", "Asset mix"), weights(&fp.asset_mix, 6));
+        t.one(l.t("Calificaciones crediticias", "Credit ratings"), weights(&fp.bond_ratings, 8));
+    }
+    if let Some(e) = &fp.equity {
+        t.row(
+            l.t("Valoración de la cartera", "Portfolio valuation"),
+            vec![
+                lab("P/E", e.price_to_earnings, fmt::num),
+                lab("P/B", e.price_to_book, fmt::num),
+                lab("P/S", e.price_to_sales, fmt::num),
+                lab("P/CF", e.price_to_cashflow, fmt::num),
+                lab("earnings growth 3Y", e.three_year_earnings_growth, fmt::pct_signed),
+                lab("median market cap", e.median_market_cap, fmt::big),
+            ],
+        );
+    }
+    if let Some(b) = &fp.bond {
+        t.row(
+            l.t("Renta fija de la cartera", "Bond portfolio"),
+            vec![lab("duration", b.duration, |v| format!("{v:.1} years")), lab("maturity", b.maturity, |v| format!("{v:.1} years")), lab("credit quality", b.credit_quality, fmt::num)],
         );
     }
     t.render(out, (l.t("Concepto", "Item"), l.t("Valor", "Value")));

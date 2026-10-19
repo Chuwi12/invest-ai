@@ -66,6 +66,29 @@ fn summary_of(e: &(&str, &str, &str, &str, f64)) -> AssetSummary {
 }
 
 /// Fecha fija para que las respuestas sean deterministas.
+/// Perfil de fondo INVENTADO del modo simulado (fuente `fake`): solo sirve para ver la pantalla.
+fn fake_fund_profile() -> domain::FundProfile {
+    let w = |name: &str, weight: f64| domain::WeightedItem { name: name.into(), weight };
+    let h = |symbol: &str, name: &str, weight: f64| domain::Holding { symbol: Some(symbol.into()), name: name.into(), weight };
+    domain::FundProfile {
+        family: Some("Gestora simulada".into()),
+        category: Some("Large Blend".into()),
+        legal_type: Some("Exchange Traded Fund".into()),
+        expense_ratio: Some(0.0009),
+        total_assets: Some(5.0e11),
+        dividend_yield: Some(0.012),
+        turnover: Some(0.03),
+        beta_3y: Some(1.0),
+        top_holdings: vec![h("AAA", "Alfa Corp", 0.08), h("BBB", "Beta Inc", 0.07), h("CCC", "Gamma SA", 0.05)],
+        sector_weights: vec![w("technology", 0.32), w("financial_services", 0.14), w("healthcare", 0.11)],
+        asset_mix: vec![w("stock", 0.99), w("cash", 0.01)],
+        equity: Some(domain::FundEquityStats { price_to_earnings: Some(23.5), price_to_book: Some(4.9), price_to_sales: Some(3.1), ..Default::default() }),
+        source: "fake".into(),
+        as_of: Some(fixed_time()),
+        ..domain::FundProfile::default()
+    }
+}
+
 fn fixed_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2025, 1, 2, 15, 30, 0).unwrap()
 }
@@ -204,6 +227,7 @@ impl MarketData for FakeMarket {
             pe_forward: Some(25.0),
             profit_margin: Some(0.25),
             dividend_yield: Some(0.005),
+            fund_profile: (id.class == AssetClass::Etf).then(fake_fund_profile),
             sources: vec!["fake".into()],
             as_of: Some(fixed_time()),
             ..Fundamentals::default()

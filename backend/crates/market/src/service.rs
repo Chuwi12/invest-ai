@@ -299,6 +299,11 @@ fn with_fundamentals_origin(mut f: Fundamentals, id: &AssetId) -> Fundamentals {
             Some(_) => TimestampOrigin::Provider,
         });
     }
+    if let Some(fp) = f.fund_profile.as_mut()
+        && fp.source_url.is_none()
+    {
+        fp.source_url = symbol::verify_url("yahoo", id).map(|u| format!("{u}/holdings"));
+    }
     f
 }
 
@@ -1085,6 +1090,26 @@ impl Inner {
         Ok((*arc).clone())
     }
 
+    /// Folleto resumido de un ETF (EDGAR). Reutiliza la caché de folletos (6 h) y el limitador de `sec`.
+    async fn fund_prospectus(&self, id: &AssetId, max_chars: usize) -> domain::Result<Prospectus> {
+        symbol::validate(id)?;
+        if !matches!(id.class, AssetClass::Etf | AssetClass::Fund) {
+            return Err(DomainError::InvalidInput("solo ETF y fondos".into()));
+        }
+        let key = format!("fund|{}|{max_chars}", id.symbol.to_ascii_uppercase());
+        let arc = cached(&self.prospectuses, key, async {
+            let slot = self.slot("sec").ok_or_else(|| DomainError::Unavailable("SEC no disponible".into()))?;
+            let sec = self.sec.clone();
+            let id = id.clone();
+            slot.run(&|_p: Arc<dyn Provider>| { let s = sec.clone(); let id = id.clone(); async move { s.fund_prospectus(&id, max_chars).await } })
+                .await
+                .map(Arc::new)
+                .map_err(|e| self.to_domain("sec", e))
+        })
+        .await?;
+        Ok((*arc).clone())
+    }
+
     async fn daily_series(&self, symbol: &str, from: i64, to: i64) -> domain::Result<crate::providers::yahoo::DailySeries> {
         let slot = self.slot("yahoo").ok_or_else(|| DomainError::Unavailable("Yahoo no disponible".into()))?;
         let y = self.yahoo.clone();
@@ -1357,6 +1382,12 @@ impl MarketService {
         self.inner.ipo_prospectus(issuer, pick, max_chars).await
     }
 
+    /// Folleto resumido (497K o 485BPOS) de un ETF/fondo con sus secciones clave. Varias peticiones a
+    /// EDGAR: úsalo solo en segundo plano (archivo RAG).
+    pub async fn fund_prospectus(&self, id: &AssetId, max_chars: usize) -> domain::Result<Prospectus> {
+        self.inner.fund_prospectus(id, max_chars).await
+    }
+
     /// Rentabilidad posterior a la OPV (primer día, 1/3/6/12 meses) frente a `SPY`, `IWM` o `QQQ`.
     /// Sin `offer_price` se toma el del calendario y, si falta, el de la portada del folleto.
     pub async fn ipo_performance(
@@ -1453,6 +1484,14 @@ impl MarketService {
     /// Ticker sin sufijos de bolsa (`SAN.MC` → `SAN`).
     pub fn plain_ticker(symbol: &str) -> String {
         plain_ticker(symbol)
+    }
+}
+
+#[async_trait]
+impl domain::FundDocs for MarketService {
+    async fn fund_prospectus(&self, id: &AssetId) -> domain::Result<Prospectus> {
+        // 6000 caracteres por sección como máximo: el archivo los trocea de todos modos.
+        MarketService::fund_prospectus(self, id, 6000).await
     }
 }
 

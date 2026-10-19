@@ -58,6 +58,8 @@ export const qk = {
   performance: ['learning', 'performance'] as const,
   calibrated: (confidence: number, horizon: number, model: string | undefined) => ['learning', 'calibrated', confidence, horizon, model ?? null] as const,
   watchlist: ['watchlist'] as const,
+  social: (id: AssetId) => ['social', id] as const,
+  socialStatus: ['social', 'status'] as const,
   ipoCalendar: (from?: string, to?: string) => ['ipo', 'calendar', from ?? null, to ?? null] as const,
   ipoProfile: (symbol: string, date?: string) => ['ipo', 'profile', symbol, date ?? null] as const,
   ipoProspectus: (symbol: string) => ['ipo', 'prospectus', symbol] as const,
@@ -665,6 +667,27 @@ export function useWatchlist() {
     staleTime: 15 * SEC,
     // Una pasada en marcha cambia sola: se sigue de cerca mientras dura.
     refetchInterval: (q) => (q.state.data?.running ? 10 * SEC : false),
+  })
+}
+
+// --- Redes sociales (opinión) -------------------------------------------------------------------
+
+/** Se consulta solo al abrir la pestaña (puede costar lecturas de X): sin sondeo ni refetch al enfocar. */
+export function useAssetSocial(id: AssetId) {
+  return useQuery({
+    queryKey: qk.social(id),
+    queryFn: ({ signal }) => api.assetSocial(id, signal),
+    staleTime: 10 * 60 * SEC,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useSocialStatus(enabled = true) {
+  return useQuery({
+    queryKey: qk.socialStatus,
+    queryFn: ({ signal }) => api.socialStatus(signal),
+    staleTime: 30 * SEC,
+    enabled,
   })
 }
 

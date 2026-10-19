@@ -34,6 +34,8 @@ import type {
   SearchEntry,
   SendMessageBody,
   ServiceStatus,
+  AssetSocial,
+  SocialStatus,
   UpdateConversationBody,
   ViewStat,
   WatchlistStatus,
@@ -109,6 +111,11 @@ export interface Api {
   /** Confianza declarada junto a la calibrada (si hay calibración aplicable). */
   calibratedConfidence(confidence: number, horizon?: number, model?: string, signal?: AbortSignal): Promise<CalibratedConfidence>
   watchlist(signal?: AbortSignal): Promise<WatchlistStatus>
+
+  // Redes sociales (Reddit/X): OPINIÓN, no hechos. Apagado por defecto (`enabled: false`).
+  socialStatus(signal?: AbortSignal): Promise<SocialStatus>
+  /** Consulta las redes solo si lo guardado está desfasado; un fallo de redes devuelve `digest: null`. */
+  assetSocial(id: AssetId, signal?: AbortSignal): Promise<AssetSocial>
 
   // OPV de EE. UU.: perfil de riesgo determinista (no una recomendación).
   /** Sin fechas: de hoy−30 a hoy+60 días. Rango máx. 180 días. */

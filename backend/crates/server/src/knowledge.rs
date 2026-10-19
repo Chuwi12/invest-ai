@@ -167,11 +167,20 @@ impl Embedder for GatedEmbedder {
 pub struct TeeMarket {
     inner: Arc<dyn MarketData>,
     sink: NewsSink,
+    /// Cola de folletos de ETF (ver `fund_docs`): solo con RAG y un `FundDocs` cableado.
+    funds: Option<crate::fund_docs::FundSink>,
 }
 
 impl TeeMarket {
     pub fn new(inner: Arc<dyn MarketData>, sink: NewsSink) -> Self {
-        Self { inner, sink }
+        Self { inner, sink, funds: None }
+    }
+
+    /// Ofrece al archivo los ETF/fondos de cada snapshot para archivar su folleto resumido.
+    #[must_use]
+    pub fn with_funds(mut self, funds: crate::fund_docs::FundSink) -> Self {
+        self.funds = Some(funds);
+        self
     }
 }
 
@@ -206,6 +215,9 @@ impl MarketData for TeeMarket {
     async fn snapshot(&self, id: &AssetId) -> domain::Result<AssetSnapshot> {
         let s = self.inner.snapshot(id).await?;
         self.sink.offer(Some(id), &s.news);
+        if let Some(funds) = &self.funds {
+            funds.offer(&s.summary.id);
+        }
         Ok(s)
     }
     fn subscribe(&self, ids: &[AssetId]) -> BoxStream<'static, PriceTick> {
@@ -335,6 +347,7 @@ pub struct Rag {
     pub activity: Activity,
     news: NewsSink,
     filings: FilingSink,
+    funds: crate::fund_docs::FundArchive,
     workers: Vec<JoinHandle<()>>,
 }
 
@@ -354,7 +367,7 @@ pub async fn open(cfg: KnowledgeConfig, pool: SqlitePool, shutdown: Cancellation
 pub async fn open_with(cfg: KnowledgeConfig, pool: SqlitePool, embedder: Arc<dyn Embedder>, shutdown: CancellationToken) -> Option<Rag> {
     let activity = Activity::default();
     let gated = Arc::new(GatedEmbedder::new(embedder, activity.clone(), shutdown.clone()));
-    let kb = match KnowledgeBase::open(pool, gated, cfg).await {
+    let kb = match KnowledgeBase::open(pool.clone(), gated, cfg).await {
         Ok(kb) => kb,
         Err(e) => {
             tracing::error!(error = %e, "RAG desactivado: no se pudo abrir el archivo de conocimiento (la app sigue sin él)");
@@ -362,8 +375,9 @@ pub async fn open_with(cfg: KnowledgeConfig, pool: SqlitePool, embedder: Arc<dyn
         }
     };
     let (news, w1) = spawn_news_worker(kb.clone(), shutdown.clone());
-    let (filings, w2) = spawn_filing_worker(kb.clone(), shutdown);
-    Some(Rag { kb, activity, news, filings, workers: vec![w1, w2] })
+    let (filings, w2) = spawn_filing_worker(kb.clone(), shutdown.clone());
+    let funds = crate::fund_docs::FundArchive::new(kb.clone(), pool, shutdown);
+    Some(Rag { kb, activity, news, filings, funds, workers: vec![w1, w2] })
 }
 
 impl Rag {
@@ -376,6 +390,23 @@ impl Rag {
         )
     }
 
+    /// Como [`Rag::wrap`], y además archiva el folleto resumido de los ETF cuyo snapshot se pide
+    /// (primera vez y luego como mucho cada 30 días), descargado en segundo plano con `funds`.
+    pub fn wrap_with_funds(
+        &self,
+        market: Arc<dyn MarketData>,
+        ipo: Arc<dyn IpoData>,
+        analyst: Arc<dyn Analyst>,
+        funds: Arc<dyn domain::FundDocs>,
+    ) -> (Arc<dyn MarketData>, Arc<dyn IpoData>, Arc<dyn Analyst>) {
+        self.funds.start(funds);
+        (
+            Arc::new(TeeMarket::new(market, self.news.clone()).with_funds(self.funds.sink())),
+            Arc::new(TeeIpo::new(ipo, self.filings.clone())),
+            Arc::new(TrackedAnalyst::new(analyst, self.activity.clone())),
+        )
+    }
+
     /// Búsqueda para `ai`.
     pub fn search_handle(&self) -> Arc<dyn KnowledgeSearch> {
         self.kb.clone()
@@ -383,7 +414,7 @@ impl Rag {
 
     /// Lanza el mantenimiento y registra los trabajadores en `tasks` (el apagado los espera).
     pub fn spawn_background(self, tasks: &TaskTracker, shutdown: CancellationToken) {
-        for w in self.workers {
+        for w in self.workers.into_iter().chain(self.funds.take_handles()) {
             tasks.spawn(async move {
                 let _ = w.await;
             });

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+  <feed xmlns="http://www.w3.org/2005/Atom">
+    <author>
+      <email>webmaster@sec.gov</email>
+      <name>Webmaster</name>
+    </author>
+    <company-info>
+      <addresses>
+        <address type="mailing">
+          <city>DOWNERS GROVE</city>
+          <state>IL</state>
+          <street1>3500 LACEY ROAD</street1>
+          <street2>SUITE 700</street2>
+          <zip>60515</zip>
+        </address>
+        <address type="business">
+          <city>DOWNERS GROVE</city>
+          <phone>800-983-0903</phone>
+          <state>IL</state>
+          <street1>3500 LACEY ROAD</street1>
+          <street2>SUITE 700</street2>
+          <zip>60515</zip>
+        </address>
+      </addresses>
+      <cik>0001067839</cik>
+      <cik-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001067839&amp;owner=include&amp;count=10</cik-href>
+      <conformed-name>INVESCO QQQ TRUST, SERIES 1</conformed-name>
+      <fiscal-year-end>0930</fiscal-year-end>
+      <formerly-names count="4">
+        <names>
+          <date>1998-08-07</date>
+          <name>INVESTMENT PRODUCT SERVICES INC</name>
+        </names>
+        <names>
+          <date>2009-01-26</date>
+          <name>NASDAQ 100 TRUST SERIES 1</name>
+        </names>
+        <names>
+          <date>1998-10-19</date>
+          <name>NASDAQ GOLD SM TRUST SER 1</name>
+        </names>
+        <names>
+          <date>2018-09-04</date>
+          <name>POWERSHARES QQQ TRUST, SERIES 1</name>
+        </names>
+      </formerly-names>
+      <state-location>IL</state-location>
+      <state-location-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;State=IL&amp;owner=include&amp;count=10</state-location-href>
+    </company-info>
+    <entry>
+      <category label="form type" scheme="https://www.sec.gov/" term="497K" />
+      <content type="text/xml">
+        <accession-number>0001193125-26-265096</accession-number>
+        <act>33</act>
+        <file-number>333-61001</file-number>
+        <file-number-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;filenum=333-61001&amp;owner=include&amp;count=10</file-number-href>
+        <filing-date>2026-06-10</filing-date>
+        <filing-href>https://www.sec.gov/Archives/edgar/data/1067839/000119312526265096/0001193125-26-265096-index.htm</filing-href>
+        <filing-type>497K</filing-type>
+        <film-number>261078228</film-number>
+        <form-name>Summary Prospectus for certain open-end management investment companies filed pursuant to Securities Act Rule 497(K)</form-name>
+        <size>41 KB</size>
+      </content>
+      <id>urn:tag:sec.gov,2008:accession-number=0001193125-26-265096</id>
+      <link href="https://www.sec.gov/Archives/edgar/data/1067839/000119312526265096/0001193125-26-265096-index.htm" rel="alternate" type="text/html" />
+      <summary type="html"> &lt;b&gt;Filed:&lt;/b&gt; 2026-06-10 &lt;b&gt;AccNo:&lt;/b&gt; 0001193125-26-265096 &lt;b&gt;Size:&lt;/b&gt; 41 KB</summary>
+      <title>497K  - Summary Prospectus for certain open-end management investment companies filed pursuant to Securities Act Rule 497(K)</title>
+      <updated>2026-06-10T07:46:04-04:00</updated>
+    </entry>
+    <entry>
+      <category label="form type" scheme="https://www.sec.gov/" term="497K" />
+      <content type="text/xml">
+        <accession-number>0001104659-26-052973</accession-number>
+        <act>33</act>
+        <file-number>333-61001</file-number>
+        <file-number-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;filenum=333-61001&amp;owner=include&amp;count=10</file-number-href>
+        <filing-date>2026-04-30</filing-date>
+        <filing-href>https://www.sec.gov/Archives/edgar/data/1067839/000110465926052973/0001104659-26-052973-index.htm</filing-href>
+        <filing-type>497K</filing-type>
+        <film-number>26925846</film-number>
+        <form-name>Summary Prospectus for certain open-end management investment companies filed pursuant to Securities Act Rule 497(K)</form-name>
+        <size>26 KB</size>
+      </content>
+      <id>urn:tag:sec.gov,2008:accession-number=0001104659-26-052973</id>
+      <link href="https://www.sec.gov/Archives/edgar/data/1067839/000110465926052973/0001104659-26-052973-index.htm" rel="alternate" type="text/html" />
+      <summary type="html"> &lt;b&gt;Filed:&lt;/b&gt; 2026-04-30 &lt;b&gt;AccNo:&lt;/b&gt; 0001104659-26-052973 &lt;b&gt;Size:&lt;/b&gt; 26 KB</summary>
+      <title>497K  - Summary Prospectus for certain open-end management investment companies filed pursuant to Securities Act Rule 497(K)</title>
+      <updated>2026-04-30T16:22:04-04:00</updated>
+    </entry>
+    <entry>
+      <category label="form type" scheme="https://www.sec.gov/" term="497K" />
+      <content type="text/xml">
+        <accession-number>0001104659-25-123275</accession-number>
+        <act>33</act>
+        <file-number>333-61001</file-number>
+        <file-number-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;filenum=333-61001&amp;owner=include&amp;count=10</file-number-href>
+        <filing-date>2025-12-19</filing-date>
+        <filing-href>https://www.sec.gov/Archives/edgar/data/1067839/000110465925123275/0001104659-25-123275-index.htm</filing-href>
+        <filing-type>497K</filing-type>
+        <film-number>251588451</film-number>
+        <form-name>Summary Prospectus for certain open-end management investment companies filed pursuant to Securities Act Rule 497(K)</form-name>
+        <size>153 KB</size>
+      </content>
+      <id>urn:tag:sec.gov,2008:accession-number=0001104659-25-123275</id>
+      <link href="https://www.sec.gov/Archives/edgar/data/1067839/000110465925123275/0001104659-25-123275-index.htm" rel="alternate" type="text/html" />
+      <summary type="html"> &lt;b&gt;Filed:&lt;/b&gt; 2025-12-19 &lt;b&gt;AccNo:&lt;/b&gt; 0001104659-25-123275 &lt;b&gt;Size:&lt;/b&gt; 153 KB</summary>
+      <title>497K  - Summary Prospectus for certain open-end management investment companies filed pursuant to Securities Act Rule 497(K)</title>
+      <updated>2025-12-19T17:07:07-05:00</updated>
+    </entry>
+    <id>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001067839</id>
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=C000271435&amp;type=497K&amp;owner=include&amp;start=0&amp;count=10" rel="alternate" type="text/html" />
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=C000271435&amp;type=497K&amp;owner=include&amp;start=0&amp;count=10&amp;output=atom" rel="self" type="application/atom+xml" />
+    <title>INVESCO QQQ TRUST, SERIES 1  (0001067839)</title>
+    <updated>2026-10-19T08:02:23-04:00</updated>
+  </feed>

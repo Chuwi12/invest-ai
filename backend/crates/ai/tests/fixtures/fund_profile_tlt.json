@@ -1,0 +1,45 @@
+{
+ "family": "iShares",
+ "category": "Long Government",
+ "legalType": "Exchange Traded Fund",
+ "inceptionDate": "2002-07-22",
+ "expenseRatio": 0.0015,
+ "grossExpenseRatio": null,
+ "frontLoad": null,
+ "deferredLoad": null,
+ "twelveB1": null,
+ "turnover": 0.18,
+ "totalAssets": 46233321472.0,
+ "dividendYield": 0.05,
+ "beta3y": 2.31,
+ "ytdReturn": -0.0495014,
+ "threeYearReturn": 0.0180403,
+ "fiveYearReturn": -0.079711296,
+ "topHoldings": [],
+ "sectorWeights": [],
+ "assetMix": [
+  {
+   "name": "bond",
+   "weight": 0.996
+  },
+  {
+   "name": "cash",
+   "weight": 0.004
+  }
+ ],
+ "bondRatings": [
+  {
+   "name": "aa",
+   "weight": 1.0
+  },
+  {
+   "name": "us_government",
+   "weight": 0.996
+  }
+ ],
+ "equity": null,
+ "bond": null,
+ "source": "yahoo",
+ "asOf": "2026-10-19T14:15:00Z",
+ "sourceUrl": "https://finance.yahoo.com/quote/TLT/holdings"
+}

@@ -8,6 +8,7 @@ pub mod db;
 pub mod error;
 pub mod extract;
 pub mod fake;
+pub mod fund_docs;
 pub mod guard;
 pub mod knowledge;
 pub mod limits;
@@ -17,6 +18,7 @@ pub mod resolve;
 pub mod routes;
 pub mod security_headers;
 pub mod singleflight;
+pub mod social;
 pub mod state;
 pub mod watchlist;
 

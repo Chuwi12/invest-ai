@@ -22,6 +22,7 @@ use crate::{
 };
 
 const TICKERS_URL: &str = "https://www.sec.gov/files/company_tickers.json";
+const FUND_TICKERS_URL: &str = "https://www.sec.gov/files/company_tickers_mf.json";
 
 /// Formularios que interesan a un inversor (se descarta el ruido de Form 4, 144, etc.).
 const FORMS: &[&str] = &[
@@ -40,6 +41,8 @@ pub struct Sec {
     info: ProviderInfo,
     user_agent: String,
     tickers: Cache<(), Arc<HashMap<String, Company>>>,
+    /// `company_tickers_mf.json`: ticker de ETF/fondo -> CIK, serie y clase.
+    fund_tickers: Cache<(), Arc<HashMap<String, FundSeries>>>,
     /// Límite por petición HTTP (la SEC permite 10/s; un método puede encadenar varias).
     limiter: RateLimiter,
 }
@@ -52,6 +55,10 @@ impl Sec {
             user_agent,
             limiter: RateLimiter::new(8.0, 3),
             tickers: Cache::builder()
+                .time_to_live(Duration::from_secs(86_400))
+                .max_capacity(1)
+                .build(),
+            fund_tickers: Cache::builder()
                 .time_to_live(Duration::from_secs(86_400))
                 .max_capacity(1)
                 .build(),
@@ -368,6 +375,186 @@ impl Sec {
                 as_of: now,
             })
             .collect())
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Folletos de ETF y fondos (497K, 485BPOS, 497)
+// ---------------------------------------------------------------------------------------------
+
+/// Serie y clase de un ETF en `company_tickers_mf.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FundSeries {
+    pub cik: u64,
+    pub series_id: String,
+    pub class_id: String,
+}
+
+/// `company_tickers_mf.json`: `{"fields":["cik","seriesId","classId","symbol"],"data":[[…],…]}`.
+pub fn parse_fund_tickers(text: &str) -> PResult<HashMap<String, FundSeries>> {
+    let v: Value = parse_json(text)?;
+    let fields: Vec<&str> = v["fields"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let col = |name: &str| fields.iter().position(|f| *f == name);
+    let (Some(c_cik), Some(c_ser), Some(c_cls), Some(c_sym)) = (col("cik"), col("seriesId"), col("classId"), col("symbol")) else {
+        return Err(ProviderError::upstream("company_tickers_mf sin las columnas esperadas"));
+    };
+    let mut out = HashMap::new();
+    for row in v["data"].as_array().into_iter().flatten() {
+        let (Some(cik), Some(series), Some(class), Some(sym)) = (
+            row.get(c_cik).and_then(Value::as_u64),
+            row.get(c_ser).and_then(Value::as_str),
+            row.get(c_cls).and_then(Value::as_str),
+            row.get(c_sym).and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        out.entry(sym.to_ascii_uppercase())
+            .or_insert_with(|| FundSeries { cik, series_id: series.to_string(), class_id: class.to_string() });
+    }
+    Ok(out)
+}
+
+/// Una presentación del feed Atom de EDGAR (`browse-edgar?output=atom`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AtomFiling {
+    pub accession: String,
+    pub form: String,
+    pub filed: NaiveDate,
+}
+
+fn xml_tag<'a>(s: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let i = s.find(&open)? + open.len();
+    let j = s[i..].find(&format!("</{tag}>"))? + i;
+    Some(s[i..j].trim())
+}
+
+/// (CIK del registrante, presentaciones más recientes primero y sin duplicados).
+pub fn parse_filing_atom(text: &str) -> (Option<u64>, Vec<AtomFiling>) {
+    let (head, entries) = text.split_once("<entry>").map_or((text, ""), |(h, rest)| (h, rest));
+    let cik = xml_tag(head, "cik").and_then(|c| c.parse::<u64>().ok());
+    let mut out: Vec<AtomFiling> = Vec::new();
+    for e in entries.split("<entry>") {
+        let (Some(acc), Some(form), Some(date)) = (xml_tag(e, "accession-number"), xml_tag(e, "filing-type"), xml_tag(e, "filing-date")) else {
+            continue;
+        };
+        let Ok(filed) = NaiveDate::parse_from_str(date, "%Y-%m-%d") else { continue };
+        if !acc.chars().all(|c| c.is_ascii_digit() || c == '-') || out.iter().any(|f| f.accession == acc) {
+            continue;
+        }
+        out.push(AtomFiling { accession: acc.to_string(), form: form.to_string(), filed });
+    }
+    out.sort_by(|a, b| b.filed.cmp(&a.filed).then_with(|| b.accession.cmp(&a.accession)));
+    (cik, out)
+}
+
+/// Nombre del registrante (`conformed-name`) del feed Atom.
+pub fn parse_atom_name(text: &str) -> Option<String> {
+    let head = text.split("<entry>").next().unwrap_or(text);
+    xml_tag(head, "conformed-name").map(|n| n.replace("&amp;", "&")).filter(|n| !n.is_empty())
+}
+
+/// Documento principal de una presentación: el `.htm` más grande de `index.json` (≤ `max_bytes`).
+pub fn pick_main_document(index_json: &str, max_bytes: u64) -> Option<String> {
+    let v: Value = serde_json::from_str(index_json).ok()?;
+    v["directory"]["item"]
+        .as_array()?
+        .iter()
+        .filter_map(|i| {
+            let name = i["name"].as_str()?;
+            let size: u64 = i["size"].as_str()?.trim().parse().ok()?;
+            let lower = name.to_ascii_lowercase();
+            ((lower.ends_with(".htm") || lower.ends_with(".html")) && !lower.contains("-index") && safe_path(name) && size > 0 && size <= max_bytes).then(|| (size, name.to_string()))
+        })
+        .max_by_key(|(size, _)| *size)
+        .map(|(_, n)| n)
+}
+
+fn atom_url(key: &str, form: &str, count: usize) -> String {
+    format!("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={key}&type={form}&dateb=&owner=include&count={count}&output=atom")
+}
+
+/// Candidatos por orden: formulario y cuántos documentos se prueban. El 497K de un ETF cuelga a
+/// menudo de un fideicomiso con decenas de fondos: se descartan los que no nombran el ticker.
+const FUND_PLAN_SERIES: &[(&str, usize, u64)] = &[("497K", 5, 1_500_000), ("485BPOS", 1, 3_000_000)];
+/// Fideicomisos de un solo fondo (SPY, QQQ...): su CIK es el del fondo.
+const FUND_PLAN_DIRECT: &[(&str, usize, u64)] = &[("497K", 3, 1_500_000), ("485BPOS", 1, 3_000_000), ("497", 1, 3_000_000)];
+
+impl Sec {
+    async fn fund_series(&self, ticker: &str) -> PResult<Option<FundSeries>> {
+        let map = self
+            .fund_tickers
+            .try_get_with((), async {
+                let text = self.get(FUND_TICKERS_URL.into()).await?;
+                parse_fund_tickers(&text).map(Arc::new)
+            })
+            .await
+            .map_err(|e: Arc<ProviderError>| match &*e {
+                ProviderError::RateLimited { retry_after } => ProviderError::RateLimited { retry_after: *retry_after },
+                other => ProviderError::Upstream(other.to_string()),
+            })?;
+        Ok(map.get(ticker).cloned())
+    }
+
+    /// Folleto resumido (497K) o folleto (485BPOS / 497) de un ETF, con sus secciones clave.
+    /// Ticker -> CIK, serie y clase por `company_tickers_mf.json`; sin él (SPY es un fideicomiso
+    /// de unidades y no figura) se usa el CIK de `company_tickers.json`.
+    pub async fn fund_prospectus(&self, id: &AssetId, max_chars: usize) -> PResult<Prospectus> {
+        if !matches!(id.class, AssetClass::Etf | AssetClass::Fund) {
+            return Err(ProviderError::Unsupported);
+        }
+        let ticker = super::plain_ticker(&id.symbol).to_ascii_uppercase();
+        let (key, direct) = match self.fund_series(&ticker).await? {
+            Some(s) => (s.class_id, false),
+            None => (format!("{:010}", self.company_by_symbol(&ticker).await?.cik), true),
+        };
+        for (form, n, max_bytes) in if direct { FUND_PLAN_DIRECT } else { FUND_PLAN_SERIES } {
+            let atom = self.get(atom_url(&key, form, 12)).await?;
+            let (cik, filings) = parse_filing_atom(&atom);
+            let registrant = parse_atom_name(&atom);
+            let Some(cik) = cik else { continue };
+            for f in filings.iter().filter(|f| f.form == *form).take(*n) {
+                let acc = f.accession.replace('-', "");
+                let base = format!("https://www.sec.gov/Archives/edgar/data/{cik}/{acc}");
+                let index = match self.get(format!("{base}/index.json")).await {
+                    Ok(t) => t,
+                    Err(ProviderError::RateLimited { retry_after }) => return Err(ProviderError::RateLimited { retry_after }),
+                    Err(_) => continue,
+                };
+                let Some(doc) = pick_main_document(&index, *max_bytes) else { continue };
+                let url = format!("{base}/{doc}");
+                let html = match self.get(url.clone()).await {
+                    Ok(h) => h,
+                    Err(ProviderError::RateLimited { retry_after }) => return Err(ProviderError::RateLimited { retry_after }),
+                    Err(_) => continue,
+                };
+                let t = ticker.clone();
+                let ex = tokio::task::spawn_blocking(move || crate::fund_prospectus::extract(&html, &t, max_chars))
+                    .await
+                    .map_err(|e| ProviderError::upstream(format!("extracción interrumpida: {e}")))?;
+                if !ex.usable() || !(direct || ex.mentions_ticker) {
+                    continue;
+                }
+                return Ok(Prospectus {
+                    issuer: ex.fund_name.clone().or(registrant).unwrap_or_else(|| ticker.clone()),
+                    cik,
+                    ticker: Some(ticker.clone()),
+                    form: f.form.clone(),
+                    preliminary: false,
+                    filed_on: f.filed,
+                    accession: f.accession.clone(),
+                    url,
+                    index_url: format!("{base}/{}-index.htm", f.accession),
+                    offer_price: None,
+                    sections: ex.sections,
+                    missing: ex.missing,
+                    document_chars: ex.document_chars,
+                    source: "sec".into(),
+                    fetched_at: Utc::now(),
+                });
+            }
+        }
+        Err(ProviderError::NotFound(format!("{ticker}: sin folleto resumido utilizable en EDGAR")))
     }
 }
 

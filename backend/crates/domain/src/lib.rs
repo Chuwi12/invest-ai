@@ -457,6 +457,9 @@ pub struct Fundamentals {
     pub expense_ratio: Option<f64>,
     pub total_assets: Option<f64>,
     pub top_holdings: Vec<Holding>,
+    /// Perfil propio del fondo (gestora, costes, cartera, sectores). Solo ETF/fondos.
+    #[serde(default)]
+    pub fund_profile: Option<FundProfile>,
 
     // Bonos
     pub yield_to_maturity: Option<f64>,
@@ -475,12 +478,89 @@ pub struct Fundamentals {
     pub timestamp_origin: Option<TimestampOrigin>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Holding {
     pub symbol: Option<String>,
     pub name: String,
     pub weight: f64,
+}
+
+/// Peso de un componente (sector, tipo de activo, calificación) como fracción de la cartera.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeightedItem {
+    /// Clave de Yahoo tal cual (`technology`, `stock`, `aaa`...).
+    pub name: String,
+    pub weight: f64,
+}
+
+/// Estadísticas de la cartera de renta variable de un fondo (media ponderada de sus posiciones).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundEquityStats {
+    pub price_to_earnings: Option<f64>,
+    pub price_to_book: Option<f64>,
+    pub price_to_sales: Option<f64>,
+    pub price_to_cashflow: Option<f64>,
+    /// Crecimiento de beneficios a 3 años de las posiciones (fracción).
+    pub three_year_earnings_growth: Option<f64>,
+    pub median_market_cap: Option<f64>,
+}
+
+/// Estadísticas de la cartera de renta fija de un fondo.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundBondStats {
+    /// Duración efectiva en años.
+    pub duration: Option<f64>,
+    /// Vencimiento medio en años.
+    pub maturity: Option<f64>,
+    /// Calidad crediticia media (escala numérica de Yahoo), si la da.
+    pub credit_quality: Option<f64>,
+}
+
+/// Perfil propio de un ETF o fondo. Todo lo que el proveedor no da queda en `None`/vacío: nunca se
+/// inventa ni se completa con otra fuente. Pesos y ratios como fracción (0.0095 = 0,95 %).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundProfile {
+    /// Gestora (`family`).
+    pub family: Option<String>,
+    pub category: Option<String>,
+    pub legal_type: Option<String>,
+    pub inception_date: Option<NaiveDate>,
+    /// Ratio de gastos neto o, si no, el del último informe anual.
+    pub expense_ratio: Option<f64>,
+    pub gross_expense_ratio: Option<f64>,
+    pub front_load: Option<f64>,
+    pub deferred_load: Option<f64>,
+    /// Comisión de distribución 12b-1.
+    pub twelve_b1: Option<f64>,
+    /// Rotación anual de la cartera.
+    pub turnover: Option<f64>,
+    /// Patrimonio gestionado en la moneda del fondo.
+    pub total_assets: Option<f64>,
+    pub dividend_yield: Option<f64>,
+    pub beta_3y: Option<f64>,
+    pub ytd_return: Option<f64>,
+    pub three_year_return: Option<f64>,
+    pub five_year_return: Option<f64>,
+    /// Diez primeras posiciones (las que dé el proveedor), de mayor a menor peso.
+    pub top_holdings: Vec<Holding>,
+    /// Peso por sector, de mayor a menor.
+    pub sector_weights: Vec<WeightedItem>,
+    /// Reparto por tipo de activo (acciones, bonos, efectivo...), solo los no nulos.
+    pub asset_mix: Vec<WeightedItem>,
+    /// Calificaciones crediticias (renta fija), de mayor a menor peso.
+    pub bond_ratings: Vec<WeightedItem>,
+    pub equity: Option<FundEquityStats>,
+    pub bond: Option<FundBondStats>,
+    /// Proveedor (`yahoo`).
+    pub source: String,
+    pub as_of: Option<DateTime<Utc>>,
+    /// Página pública donde comprobar las cifras.
+    pub source_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1396,6 +1476,144 @@ pub trait IpoData: Send + Sync + 'static {
     ) -> Result<IpoPerformance>;
     /// Tasa base de las OPV de los últimos `months` meses.
     async fn base_rate(&self, months: u32) -> Result<IpoBaseRate>;
+}
+
+/// Folleto resumido de un ETF o fondo en EDGAR. Lo implementa `market` (`MarketService`). Es una
+/// descarga costosa (varias peticiones y documentos de cientos de KB): solo para el archivo RAG y
+/// siempre en segundo plano.
+#[async_trait]
+pub trait FundDocs: Send + Sync + 'static {
+    /// Folleto (497K, o 485BPOS) del ETF `id`, con las secciones clave en `sections`.
+    async fn fund_prospectus(&self, id: &AssetId) -> Result<Prospectus>;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Redes sociales (opinión, no hechos). Ver docs/notes/social.md.
+// ---------------------------------------------------------------------------------------------
+
+/// Red de origen de una publicación.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SocialSource {
+    Reddit,
+    X,
+}
+
+impl SocialSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reddit => "reddit",
+            Self::X => "x",
+        }
+    }
+}
+
+impl FromStr for SocialSource {
+    type Err = DomainError;
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "reddit" => Ok(Self::Reddit),
+            "x" => Ok(Self::X),
+            _ => Err(DomainError::InvalidInput("red social desconocida".into())),
+        }
+    }
+}
+
+/// Tono de una publicación según el léxico determinista (no es una predicción).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SocialStance {
+    Bullish,
+    Bearish,
+    Neutral,
+}
+
+/// Publicación de Reddit o X. Es OPINIÓN de un usuario anónimo, no un hecho verificado.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocialPost {
+    /// `reddit:<id>` o `x:<id>`: único por red.
+    pub id: String,
+    pub source: SocialSource,
+    /// Subreddit (sin `r/`) o `x`.
+    pub community: String,
+    /// Seudónimo (hash truncado del usuario con sal fija): sirve para contar autores distintos, no
+    /// para identificar a nadie. NO es anonimato fuerte: un nombre de usuario conocido puede recalcularse.
+    pub author: String,
+    pub title: Option<String>,
+    /// Texto recortado.
+    pub text: String,
+    /// Puntos de Reddit o «me gusta» de X.
+    pub score: i64,
+    pub comments: u32,
+    /// Fecha real de publicación (no la de descarga).
+    pub created_at: DateTime<Utc>,
+    pub url: String,
+}
+
+/// Publicación elegida como extracto, con su tono.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocialExcerpt {
+    #[serde(flatten)]
+    pub post: SocialPost,
+    pub stance: SocialStance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocialSourceCount {
+    pub source: SocialSource,
+    pub mentions: u32,
+}
+
+/// Métricas deterministas de atención y tono. NO entran en la puntuación ni en los pesos: se
+/// guardan con su fecha para que `learning` pueda evaluar algún día si predicen algo.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocialMetrics {
+    /// Instante al que se refieren («últimas 24 h» termina aquí).
+    pub as_of: DateTime<Utc>,
+    pub window_days: u32,
+    /// Publicaciones que mencionan el activo en las últimas 24 h.
+    pub mentions: u32,
+    pub authors: u32,
+    pub bullish: u32,
+    pub bearish: u32,
+    pub neutral: u32,
+    /// `bullish / (bullish + bearish)`; `None` si no hay ninguna con tono.
+    pub bullish_share: Option<f64>,
+    /// Lo mismo sobre toda la ventana.
+    pub mentions_window: u32,
+    pub bullish_window: u32,
+    pub bearish_window: u32,
+    /// Media de menciones por bloque de 24 h en los hasta 30 bloques previos con cobertura.
+    pub baseline_mean: Option<f64>,
+    /// Bloques de 24 h realmente observados que forman la media (si son pocos, no hay cociente).
+    pub baseline_days: u32,
+    /// `mentions / baseline_mean`.
+    pub ratio: Option<f64>,
+    pub z: Option<f64>,
+    pub by_source: Vec<SocialSourceCount>,
+    /// Alguna consulta alcanzó el tope de publicaciones: las menciones son una cota inferior.
+    pub truncated: bool,
+}
+
+/// Lo que recibe el análisis y la ficha del activo.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocialDigest {
+    pub asset: AssetId,
+    pub metrics: SocialMetrics,
+    pub excerpts: Vec<SocialExcerpt>,
+}
+
+/// Datos sociales de un activo. Lo implementa `server` (Reddit/X + BD); `ai` solo lo consume.
+/// Con la integración apagada no se cablea ninguna implementación.
+#[async_trait]
+pub trait SocialData: Send + Sync + 'static {
+    /// `Ok(None)` = sin publicaciones útiles para este activo.
+    async fn digest(&self, asset: &AssetSummary) -> Result<Option<SocialDigest>>;
 }
 
 #[cfg(test)]

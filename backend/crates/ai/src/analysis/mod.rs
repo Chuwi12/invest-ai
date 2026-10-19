@@ -144,6 +144,9 @@ pub struct AnalysisEngine {
     /// Archivo de conocimiento local (RAG). `None` (por defecto, `RAG_ENABLED=0`): el análisis es
     /// idéntico al que no conoce el RAG; ver `crate::rag`.
     knowledge: Option<Arc<dyn KnowledgeSearch>>,
+    /// Datos de redes sociales (opinión). `None` (por defecto, sin credenciales): el análisis es
+    /// idéntico byte a byte al que no conoce las redes; ver `crate::social`.
+    social: Option<Arc<dyn domain::SocialData>>,
 }
 
 /// `quick` no reintenta la tesis genérica: en el 7B el reintento (otra generación completa del juez)
@@ -168,12 +171,18 @@ fn min_figures(depth: AnalysisDepth) -> usize {
 
 impl AnalysisEngine {
     pub fn new(client: OllamaClient, models: Arc<ModelManager>, cfg: AiConfig) -> Self {
-        Self { client, models, cfg, knowledge: None }
+        Self { client, models, cfg, knowledge: None, social: None }
     }
 
     /// Conecta el archivo de conocimiento (RAG). Con `None` no cambia nada.
     pub fn with_knowledge(mut self, knowledge: Option<Arc<dyn KnowledgeSearch>>) -> Self {
         self.knowledge = knowledge;
+        self
+    }
+
+    /// Conecta los datos de redes sociales. Con `None` no cambia nada.
+    pub fn with_social(mut self, social: Option<Arc<dyn domain::SocialData>>) -> Self {
+        self.social = social;
         self
     }
 
@@ -328,6 +337,27 @@ impl AnalysisEngine {
             None => (Citations::default(), None),
         };
         let system = if knowledge.is_empty() { system } else { format!("{system}\n{}", crate::rag::ANALYSIS_RULES) };
+        // Redes sociales: opinión, en su propio bloque y SIN pasar por el NumberIndex. Un fallo o la
+        // falta de datos dejan el prompt idéntico al de siempre (solo un aviso si falló).
+        let (social_block, social_warning) = match &self.social {
+            Some(s) => match tokio::time::timeout(std::time::Duration::from_secs(20), s.digest(&snap.summary)).await {
+                Ok(Ok(Some(d))) if d.metrics.mentions_window > 0 => (Some(crate::social::render_block(&d, lang)), None),
+                Ok(Ok(_)) => (None, None),
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "redes sociales no disponibles: el análisis sigue sin ellas");
+                    (None, Some(crate::social::unavailable_warning(lang)))
+                }
+                Err(_) => {
+                    tracing::warn!("redes sociales: tiempo de espera agotado; el análisis sigue sin ellas");
+                    (None, Some(crate::social::unavailable_warning(lang)))
+                }
+            },
+            None => (None, None),
+        };
+        let system = match &social_block {
+            Some(_) => format!("{system}\n{}", crate::social::SOCIAL_RULES),
+            None => system,
+        };
         // Niveles: dos planes porque dependen del veredicto final (esperar ≠ comprar).
         let plan_now = levels::plan(&snap, Verdict::Accumulate, lang);
         let plan_wait = levels::plan(&snap, Verdict::Wait, lang);
@@ -448,7 +478,8 @@ impl AnalysisEngine {
             (format!("{judge_text}\n{levels_block}"), prompts::judge_task(lang, &digest, card.verdict, debated, deep, &lang_code))
         };
         let knowledge_block = if knowledge.is_empty() { String::new() } else { format!("{}\n", knowledge.render(&lang_code)) };
-        let judge_user = format!("{}{knowledge_block}{}", data_block(&judge_ctx), prompts::with_language(judge_task, &lang_code));
+        let social_block = social_block.map(|b| format!("{b}\n")).unwrap_or_default();
+        let judge_user = format!("{}{knowledge_block}{social_block}{}", data_block(&judge_ctx), prompts::with_language(judge_task, &lang_code));
         let judge_max = if quick {
             self.cfg.max_output_tokens.map_or(QUICK_JUDGE_MAX_TOKENS, |m| m.min(QUICK_JUDGE_MAX_TOKENS))
         } else {
@@ -573,6 +604,7 @@ impl AnalysisEngine {
         }
         analysis.data_warnings = gaps::real_gaps(&snap, &card, lang);
         analysis.data_warnings.extend(rag_warning);
+        analysis.data_warnings.extend(social_warning);
         analysis.quality_notes = Some(notes);
         analysis.method = Some(tr!(
             lang,
