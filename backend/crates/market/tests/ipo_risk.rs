@@ -499,3 +499,15 @@ fn profile_uses_the_tier_of_its_own_offer_size() {
     assert!(pr.base_rate_tier.is_none() && pr.base_rate.is_some());
     assert!(pr.warnings.iter().any(|w| w.contains("solo la tasa base global")));
 }
+
+#[test]
+fn lockup_scan_does_not_panic_on_non_ascii_before_a_spelled_out_number() {
+    // Regresión: comillas tipográficas justo antes de «six months» partían un carácter multibyte.
+    let mut p = trxb();
+    p.sections = vec![section(
+        "lock_up",
+        "Our officers have agreed with the underwriters, “six months from the date of this prospectus”, not to sell. Il y a «three months» aussi.",
+    )];
+    let pr = profile(&p, None);
+    assert_eq!(ind(&pr, "lock_up").value.as_deref(), Some("6 meses"));
+}

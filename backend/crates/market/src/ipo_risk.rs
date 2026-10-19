@@ -772,7 +772,7 @@ fn duration_candidates(text: &str) -> Vec<(usize, usize, u64, bool)> {
         let at = from + p;
         from = at + 5;
         let head = lower[..at].trim_end_matches([' ', '-']);
-        let word_start = head.rfind(|c: char| !c.is_ascii_alphabetic()).map_or(0, |x| x + 1);
+        let word_start = head.char_indices().rev().find(|(_, c)| !c.is_ascii_alphabetic()).map_or(0, |(x, c)| x + c.len_utf8());
         let w = &head[word_start..];
         if let Some(&(_, n)) = WORDS.iter().find(|(name, _)| *name == w) {
             out.push((word_start, at, n, true));

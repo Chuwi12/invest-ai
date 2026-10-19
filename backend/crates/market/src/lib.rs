@@ -4,6 +4,7 @@ pub mod html;
 pub mod http;
 pub mod ipo;
 pub mod ipo_risk;
+pub mod ipo_study;
 pub mod indicators;
 pub mod news;
 pub mod options;
