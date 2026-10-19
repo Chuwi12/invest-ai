@@ -22,5 +22,7 @@ pub async fn stats(State(state): State<AppState>) -> ApiResult<Json<Value>> {
         "textBytes": s.text_bytes,
         "embeddingBytes": s.embedding_bytes,
         "indexMemoryBytes": s.index_memory_bytes,
+        "lexical": s.lexical,
+        "lexicalIndexed": s.lexical_indexed,
     })))
 }

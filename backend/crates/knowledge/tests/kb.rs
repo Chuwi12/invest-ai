@@ -200,7 +200,8 @@ async fn persistence_and_model_change() {
     assert_eq!(r.hits.len(), 1);
     assert_eq!(r.hits[0].doc.assets, vec!["commodity:GC=F"]);
     // Otro modelo (otra dimensión): no mezcla espacios; los fragmentos quedan pendientes y se completan.
-    let kb2 = KnowledgeBase::open(pool, Arc::new(FakeEmbedder { dim: 64 }), KnowledgeConfig::default()).await.unwrap();
+    // Sin búsqueda léxica (RAG_HYBRID=0): solo vectores, como antes de la híbrida.
+    let kb2 = KnowledgeBase::open(pool, Arc::new(FakeEmbedder { dim: 64 }), KnowledgeConfig { hybrid: false, ..KnowledgeConfig::default() }).await.unwrap();
     let s = kb2.stats().await.unwrap();
     assert_eq!((s.indexed, s.pending), (0, 1));
     assert!(kb2.search(&req("gold record")).await.unwrap().hits.is_empty());
@@ -212,7 +213,8 @@ async fn persistence_and_model_change() {
 #[tokio::test]
 async fn embedder_down_keeps_text_pending_and_search_fails_loudly() {
     let pool = testutil::memory_pool().await;
-    let kb = KnowledgeBase::open(pool, Arc::new(Down), KnowledgeConfig::default()).await.unwrap();
+    // Solo vectores (RAG_HYBRID=0): sin embedder la búsqueda falla en voz alta. Con la híbrida, ver tests/hybrid.rs.
+    let kb = KnowledgeBase::open(pool, Arc::new(Down), KnowledgeConfig { hybrid: false, ..KnowledgeConfig::default() }).await.unwrap();
     let r = kb.ingest(doc("n:d", DocKind::News, "Oil prices slide on demand worries", "Oil prices slide on demand worries.", &[], 0)).await.unwrap();
     assert_eq!((r.chunks, r.embedded, r.pending), (1, 0, 1));
     assert!(kb.search(&req("oil")).await.is_err(), "sin embedder no se inventa nada");

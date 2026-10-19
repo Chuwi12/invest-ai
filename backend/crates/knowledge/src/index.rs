@@ -128,6 +128,11 @@ impl VectorIndex {
         self.docs.get(slot as usize).and_then(Option::as_ref)
     }
 
+    /// ¿El documento existe y pasa el filtro? (para filtrar candidatos que no vienen del índice vectorial)
+    pub fn accepts(&self, filter: &Filter, doc_id: i64) -> bool {
+        self.doc_by_id(doc_id).is_some_and(|d| filter.accepts(d))
+    }
+
     pub fn doc_by_id(&self, id: i64) -> Option<&DocMeta> {
         self.slot_of.get(&id).and_then(|s| self.doc(*s))
     }

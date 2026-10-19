@@ -361,6 +361,6 @@ Solo lectura. El archivo guarda las noticias y los folletos de OPV que la app ya
 
 | Método | Ruta | Respuesta |
 |--------|------|-----------|
-| GET | `/knowledge/stats` | Con el RAG apagado (`RAG_ENABLED=0`, `INVEST_AI_FAKE=1` o si no pudo abrirse): `{ "enabled": false }`. Encendido: `{ enabled: true, model, documents, chunks, indexed, pending, textBytes, embeddingBytes, indexMemoryBytes }`. `pending` = fragmentos sin embedding del modelo activo (se completan en segundo plano cuando no hay análisis ni chat en curso); `indexed` = fragmentos cargados en el índice en memoria. **500** `internal` si SQLite falla. |
+| GET | `/knowledge/stats` | Con el RAG apagado (`RAG_ENABLED=0`, `INVEST_AI_FAKE=1` o si no pudo abrirse): `{ "enabled": false }`. Encendido: `{ enabled: true, model, documents, chunks, indexed, pending, textBytes, embeddingBytes, indexMemoryBytes, lexical, lexicalIndexed }` (`lexical` = búsqueda híbrida FTS5/BM25 activa; `lexicalIndexed` = fragmentos en el índice léxico, que se rellena en segundo plano la primera vez). `pending` = fragmentos sin embedding del modelo activo (se completan en segundo plano cuando no hay análisis ni chat en curso); `indexed` = fragmentos cargados en el índice en memoria. **500** `internal` si SQLite falla. |
 
 El chat gana la herramienta `search_knowledge` (solo con el RAG encendido; no aparece en `tool_call` si está apagado) y `Analysis.sources` puede incluir fuentes del archivo (noticias y folletos citados con `[D#]`).

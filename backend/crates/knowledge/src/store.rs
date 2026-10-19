@@ -111,15 +111,146 @@ pub async fn assets_of(pool: &SqlitePool, doc_id: i64) -> Result<Vec<String>> {
     Ok(sqlx::query_scalar("SELECT asset_id FROM document_assets WHERE document_id = ? ORDER BY asset_id").bind(doc_id).fetch_all(pool).await?)
 }
 
-pub async fn delete_documents(tx: &mut Transaction<'_, Sqlite>, ids: &[i64]) -> Result<usize> {
+pub async fn delete_documents(tx: &mut Transaction<'_, Sqlite>, ids: &[i64], fts: bool) -> Result<usize> {
     let mut chunks = 0usize;
     for id in ids {
+        if fts {
+            fts_delete_doc(tx, *id).await?;
+        }
         sqlx::query("DELETE FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id = ?)").bind(id).execute(&mut **tx).await?;
         chunks += sqlx::query("DELETE FROM chunks WHERE document_id = ?").bind(id).execute(&mut **tx).await?.rows_affected() as usize;
         sqlx::query("DELETE FROM document_assets WHERE document_id = ?").bind(id).execute(&mut **tx).await?;
         sqlx::query("DELETE FROM documents WHERE id = ?").bind(id).execute(&mut **tx).await?;
     }
     Ok(chunks)
+}
+
+// ----------------------------------------------------------------------------- FTS5 (perezoso)
+//
+// La tabla FTS5 NO está en ninguna migración: se crea al abrir el archivo y, si falla, el archivo
+// sigue funcionando solo con vectores. Se mantiene con borrados e inserciones EXPLÍCITOS en las
+// mismas transacciones (no con triggers): un trigger sobre `chunks` quedaría en la BD aunque FTS5
+// dejara de estar disponible y haría fallar cada alta o baja de fragmentos.
+
+/// Tabla sin contenido propio (el texto vive en `chunks`; no se duplica): `rowid` = `chunks.id`.
+/// `unicode61 remove_diacritics 2`: parte por cualquier no alfanumérico y quita tildes, válido
+/// para español e inglés; no se usa `porter` (solo inglés).
+const FTS_DDL: &str = "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, title, section, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 2')";
+/// Pesos de bm25 por columna: texto 1,0, título 1,5, sección 1,5 (el nombre de la empresa o «Risk Factors»
+/// pesan algo más que una mención suelta). Heurística razonada, sin calibrar.
+const FTS_WEIGHTS: &str = "1.0, 1.5, 1.5";
+
+/// Crea (si falta) y sondea la tabla; borra huérfanos de una sesión anterior en la que FTS5 falló a mitad.
+pub async fn fts_init(pool: &SqlitePool) -> Result<()> {
+    sqlx::query(FTS_DDL).execute(pool).await?;
+    sqlx::query("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH '\"sonda\"' LIMIT 1").fetch_optional(pool).await?;
+    sqlx::query("DELETE FROM chunks_fts WHERE rowid NOT IN (SELECT id FROM chunks)").execute(pool).await?;
+    Ok(())
+}
+
+pub async fn fts_count(pool: &SqlitePool) -> Result<i64> {
+    Ok(sqlx::query_scalar("SELECT COUNT(*) FROM chunks_fts").fetch_one(pool).await?)
+}
+
+pub async fn fts_insert(tx: &mut Transaction<'_, Sqlite>, chunk_id: i64, text: &str, title: &str, section: Option<&str>) -> Result<()> {
+    sqlx::query("INSERT INTO chunks_fts (rowid, text, title, section) VALUES (?,?,?,?)")
+        .bind(chunk_id)
+        .bind(text)
+        .bind(title)
+        .bind(section.unwrap_or(""))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+pub async fn fts_delete_doc(tx: &mut Transaction<'_, Sqlite>, doc_id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE document_id = ?)").bind(doc_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+pub struct BackfillRow {
+    pub chunk_id: i64,
+    pub text: String,
+    pub title: String,
+    pub section: Option<String>,
+}
+
+/// Siguiente tanda de fragmentos con `id > after`, por id (indexado por clave, sin releer lo hecho).
+pub async fn chunks_after(pool: &SqlitePool, after: i64, limit: i64) -> Result<Vec<BackfillRow>> {
+    let rows = sqlx::query("SELECT c.id, c.text, d.title, c.section FROM chunks c JOIN documents d ON d.id = c.document_id WHERE c.id > ? ORDER BY c.id LIMIT ?")
+        .bind(after)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.iter().map(|r| BackfillRow { chunk_id: r.get(0), text: r.get(1), title: r.get(2), section: r.get(3) }).collect())
+}
+
+/// Reindexa una tanda (borrar + insertar: idempotente).
+pub async fn fts_reindex(pool: &SqlitePool, rows: &[BackfillRow]) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    for r in rows {
+        sqlx::query("DELETE FROM chunks_fts WHERE rowid = ?").bind(r.chunk_id).execute(&mut *tx).await?;
+        fts_insert(&mut tx, r.chunk_id, &r.text, &r.title, r.section.as_deref()).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+pub struct LexRow {
+    pub chunk_id: i64,
+    pub doc_id: i64,
+    pub text_hash: String,
+}
+
+pub struct LexQuery<'a> {
+    pub expr: &'a str,
+    pub kinds: &'a [DocKind],
+    pub assets: &'a [String],
+    pub include_general: bool,
+    pub since_ms: Option<i64>,
+    pub until_ms: Option<i64>,
+    pub limit: i64,
+}
+
+/// Mejores fragmentos por BM25 (de mejor a peor) con los filtros de tipo, fechas y activos aplicados
+/// en SQL (si no, con un activo concreto el top global podría no contener ninguno suyo).
+pub async fn lexical_search(pool: &SqlitePool, q: &LexQuery<'_>) -> Result<Vec<LexRow>> {
+    let mut sql = String::from(
+        "SELECT chunks_fts.rowid, c.document_id, c.text_hash FROM chunks_fts \
+         JOIN chunks c ON c.id = chunks_fts.rowid JOIN documents d ON d.id = c.document_id WHERE chunks_fts MATCH ?",
+    );
+    if !q.kinds.is_empty() {
+        sql.push_str(&format!(" AND d.kind IN ({})", vec!["?"; q.kinds.len()].join(",")));
+    }
+    if q.since_ms.is_some() {
+        sql.push_str(" AND d.published_at >= ?");
+    }
+    if q.until_ms.is_some() {
+        sql.push_str(" AND d.published_at <= ?");
+    }
+    if !q.assets.is_empty() {
+        sql.push_str(&format!(" AND (d.id IN (SELECT document_id FROM document_assets WHERE asset_id IN ({}))", vec!["?"; q.assets.len()].join(",")));
+        if q.include_general {
+            sql.push_str(" OR NOT EXISTS (SELECT 1 FROM document_assets x WHERE x.document_id = d.id)");
+        }
+        sql.push(')');
+    }
+    sql.push_str(&format!(" ORDER BY bm25(chunks_fts, {FTS_WEIGHTS}), chunks_fts.rowid LIMIT ?"));
+    let mut query = sqlx::query(&sql).bind(q.expr);
+    for k in q.kinds {
+        query = query.bind(k.as_str());
+    }
+    if let Some(s) = q.since_ms {
+        query = query.bind(s);
+    }
+    if let Some(u) = q.until_ms {
+        query = query.bind(u);
+    }
+    for a in q.assets {
+        query = query.bind(a);
+    }
+    let rows = query.bind(q.limit).fetch_all(pool).await?;
+    Ok(rows.iter().map(|r| LexRow { chunk_id: r.get(0), doc_id: r.get(1), text_hash: r.get(2) }).collect())
 }
 
 pub struct Existing {

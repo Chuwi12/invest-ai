@@ -18,6 +18,8 @@ pub struct KnowledgeConfig {
     pub embed: OllamaEmbedConfig,
     pub chunk: ChunkConfig,
     pub top_k: usize,
+    /// `RAG_HYBRID` (def. sí): búsqueda léxica FTS5/BM25 fusionada con la vectorial (RRF). Con 0 no se crea ni se toca la tabla FTS5.
+    pub hybrid: bool,
     /// Tope duro de fragmentos almacenados.
     pub max_chunks: usize,
     pub max_doc_bytes: usize,
@@ -37,6 +39,7 @@ impl Default for KnowledgeConfig {
             embed: OllamaEmbedConfig::new("http://127.0.0.1:11434", DEFAULT_EMBED_MODEL),
             chunk: ChunkConfig::default(),
             top_k: 6,
+            hybrid: true,
             max_chunks: 100_000,
             max_doc_bytes: 4 * 1024 * 1024,
             max_chunks_per_doc: 3000,
@@ -88,6 +91,9 @@ impl KnowledgeConfig {
             c.chunk.overlap_tokens = v;
         }
         c.chunk = c.chunk.sanitized();
+        if let Some(v) = text("RAG_HYBRID") {
+            c.hybrid = !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off");
+        }
         if let Some(v) = num("RAG_TOP_K") {
             c.top_k = v.clamp(1, 30);
         }

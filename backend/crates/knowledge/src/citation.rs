@@ -275,6 +275,7 @@ mod tests {
             text: text.into(),
             score: 1.0,
             similarity: 1.0,
+            lexical: false,
             recency: 1.0,
             source_weight: 1.0,
             doc: DocumentInfo {

@@ -16,6 +16,7 @@ pub mod error;
 pub mod index;
 pub mod ingest;
 pub mod kb;
+pub mod lexical;
 pub mod model;
 pub mod ollama;
 pub mod store;

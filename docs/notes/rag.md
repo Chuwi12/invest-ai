@@ -65,8 +65,50 @@ tipo (`kind`+`subtype`), idioma, hash (`content_hash` del documento, `text_hash`
 5. Colapso de texto idéntico y tope por documento (`max_per_doc`, 2) para que un S-1 largo no ocupe los `k`.
 6. `min_similarity` opcional: el umbral depende del modelo, hay que calibrarlo con datos reales (no hay valor por defecto).
 
-Si el embedder falla, `search` devuelve error: el llamador debe seguir **sin** conocimiento y decirlo, no inventar.
-Tras un fallo transitorio hay 30 s de pausa para no martillear a Ollama (los textos quedan pendientes).
+Si el embedder falla **y no hay búsqueda léxica**, `search` devuelve error: el llamador debe seguir **sin** conocimiento y decirlo,
+no inventar. Tras un fallo transitorio hay 30 s de pausa para no martillear a Ollama (los textos quedan pendientes). Con la
+híbrida (abajo) el fallo del embedder degrada a solo BM25 en vez de devolver error.
+
+### Búsqueda híbrida (FTS5/BM25 + vectores, `RAG_HYBRID`, activada por defecto)
+Los embeddings flojean con identificadores exactos (tickers como `BRK.B`, «Item 1A», cifras); BM25 los encuentra tal cual y
+funciona sin Ollama. Código: `lexical.rs` (saneado y RRF), `store.rs` (tabla y consulta), `kb.rs` (fusión).
+- **Tabla FTS5 perezosa, sin migración**: `chunks_fts` se crea al abrir (`CREATE VIRTUAL TABLE IF NOT EXISTS`) con columnas
+  `text, title, section`, **sin contenido propio** (`content='', contentless_delete=1`: el texto sigue solo en `chunks`; borrar por
+  `rowid` exige SQLite ≥ 3.43, hay 3.46) y `tokenize='unicode61 remove_diacritics 2'` (parte por no alfanuméricos y quita tildes: sirve a
+  español e inglés; `porter` descartado, es solo inglés). `rowid` = `chunks.id`. Si crear o sondear la tabla falla, `tracing::warn!` y el
+  archivo funciona **solo con vectores** (`Stats.lexical = false`); el arranque nunca se rompe. Con `RAG_HYBRID=0` ni se crea ni se toca.
+- **Relleno**: los fragmentos anteriores se indexan en segundo plano, en tandas de 500, cediendo la puerta de escritura entre tandas
+  (`backfill_lexical`, idempotente). Si el recuento de la tabla coincide con el de `chunks` no hace nada (reinicio normal). Mientras
+  tanto la parte léxica devuelve resultados parciales (la vectorial no cambia). Al abrir se borran huérfanos de una sesión que cayó a mitad.
+- **Coherencia**: altas y bajas son **explícitas dentro de la misma transacción** (ingesta, reemplazo, `delete_by_key`, `purge`), **no con
+  triggers**: un trigger sobre `chunks` seguiría en la BD aunque FTS5 dejara de existir y haría fallar cada alta o baja de fragmentos.
+  Si una escritura FTS5 falla durante la ingesta, el documento NO se pierde: se desactiva la parte léxica hasta reiniciar y el próximo
+  arranque la repara (`backfill`).
+- **Consulta**: `lexical::fts_query` pone **cada término entre comillas dobles** (una cadena entre comillas es siempre una frase literal:
+  `AND/OR/NOT/NEAR`, `*`, `^`, `col:`, `-`, `(` pierden su significado), elimina comillas internas y caracteres de control, descarta
+  términos sin alfanuméricos y palabras vacías es/en, deduplica, y limita a 300 caracteres y 16 términos; se unen con `OR` (BM25 ordena
+  por cuántos y cuán raros). `BRK.B` -> `"BRK.B"` (el tokenizador lo parte en `brk b` adyacentes). Sin términos útiles no hay parte léxica.
+- **Filtros**: tipo, fechas y activo se aplican en SQL (si no, con un activo concreto el top global podría no contener ninguno suyo);
+  el emisor se aplica después con los metadatos en memoria. `min_similarity` solo afecta a la parte vectorial.
+- **Fusión**: Reciprocal Rank Fusion con k = 60 (valor del artículo original; **no hay datos propios para ajustarlo**) sobre las dos listas de
+  `5k` candidatos (mín. 25): `rrf = Σ 1/(60 + posición)`. Se normaliza por el máximo posible (`2/61`) y **sustituye a la similitud** en
+  la fórmula de reranking heurístico, que sigue igual (`0,80·relevancia + 0,12·recencia + 0,08·fuente`) y después colapso y tope por
+  documento. Sin candidatos léxicos la puntuación es exactamente la de antes. En `SearchHit`, `similarity` es el coseno real (0 si el
+  fragmento solo salió de BM25) y `lexical` indica si BM25 también lo devolvió. BM25 pondera `text`/`title`/`section` 1,0/1,5/1,5 (heurística).
+- **Sin embedder**: si Ollama está caído o el fragmento aún no tiene vector, la parte léxica sigue; un fragmento sin embedding antes no se
+  recuperaba y ahora sí. Una consulta sin términos léxicos útiles y sin embedder sigue devolviendo error.
+- **Latencia léxica medida** (`cargo run --release -p knowledge --example bench_lexical -- 25000`; CPU, sin embeddings; ~1 KB por fragmento,
+  vocabulario sintético de 30 000 palabras con distribución sesgada; 30 repeticiones; BD en disco con caché del SO caliente):
+
+| Fragmentos | Relleno del índice | BD (sin / con FTS5) | ticker raro p50 | 6 términos p50 / p95 | 3 muy frecuentes p50 / p95 | 6 térm. + activo p50 | 3 frec. + activo p50 |
+|---|---|---|---|---|---|---|---|
+| 50 000 | 5,4 s | 102 → 125 MiB (+24) | 0,13 ms | 9,8 / 11,9 ms | 27,7 / 32,8 ms | 6,2 ms | 18,5 ms |
+| 100 000 (tope `RAG_MAX_CHUNKS`) | 11,8 s | 203 → 248 MiB (+45) | 0,08 ms | 17,2 / 24,0 ms | 55,4 / 65,1 ms | 11,2 ms | 37,4 ms |
+
+  Lectura honesta: es **lineal con el número de fragmentos que contienen los términos**, no con el total; las palabras muy frecuentes son
+  el peor caso (aquí con un vocabulario sintético, no con texto real; no se ha medido con noticias reales). Las palabras vacías ya se
+  descartan en la consulta. Sumado a ~25–60 ms de la parte vectorial (extrapolación) queda por debajo de 130 ms en el tope; ante
+  un embedder de ~100+ ms por consulta es secundario. El índice FTS5 añade ~0,45 MiB por cada 1 000 fragmentos.
 
 ## Citas `[D#]` y verificación (`citation.rs`)
 - `Citations::new(hits)` numera `D1…Dn` por orden de puntuación (por fragmento, no por documento).
@@ -208,15 +250,21 @@ fuente, tope por documento); persistencia en fichero y cambio de modelo (pendien
 anteriores» + `</knowledge_base>` + `[D1]` + `<|im_start|>`: se almacena y recupera íntegro, no cierra el bloque, no fabrica
 citas y no altera la recuperación de los demás); enganche de noticias (deduplica ofertas repetidas, no bloquea).
 
+Híbrida (`knowledge/tests/hybrid.rs`, 9 tests + 4 unitarios en `lexical.rs`): un ticker (`BRK.B`) en un fragmento largo que el vector
+simulado no recupera y la híbrida pone primero; «Item 1A» (cabecera de sección); 16 consultas hostiles para FTS5 (comillas, `OR`, `NEAR(`,
+`*`, `^`, `col:`, `--`, SQL, 4 000 caracteres, Unicode) sin romper la sintaxis; sin embedder (`Down`) y fragmentos sin vector se recuperan por
+BM25 respetando filtros de activo y tipo; FTS5 inutilizable al abrir (tabla normal con el mismo nombre) y roto a mitad de sesión (`DROP TABLE`):
+degrada a vectores sin perder el documento; borrado, actualización y purga mantienen la tabla coherente; relleno de un archivo creado con
+`RAG_HYBRID=0`; `RAG_HYBRID=0` = comportamiento anterior. Los golden de `ai` con el RAG apagado no dependen de esto y siguen pasando.
+
 ## Pendiente / límites
 - **Medir con Ollama real** (velocidad, VRAM, calidad es↔en, lotes) y decidir modelo con el protocolo de arriba. Sin esto
   la recomendación es de ficha técnica.
 - **Búsqueda léxica (FTS5/BM25) híbrida**: los embeddings flojean con identificadores exactos (tickers, «Item 1A», cifras).
   Daría además recuperación sin Ollama. **Verificado: el SQLite que empaqueta sqlx (3.46.0) incluye FTS5**
-  (`knowledge/tests/fts5.rs` crea una tabla virtual `fts5` con `unicode61`, consulta con `MATCH` y `bm25`; las opciones de
-  compilación listan `ENABLE_FTS5`). **No se implementó** la búsqueda híbrida. Aviso para cuando se haga: crear la tabla en
-  una migración que falle solo si falta FTS5 pondría en riesgo el arranque; mejor crearla de forma perezosa al abrir el archivo
-  y degradar a solo vectores si falla. Es el siguiente paso con más valor.
+  (`knowledge/tests/fts5.rs`). **Implementada** (ver «Búsqueda híbrida»): tabla perezosa, RRF y `RAG_HYBRID`. Falta medir con corpus y
+  consultas reales si mejora el recall frente a solo vectores y ajustar k=60 y los pesos de columna; hoy solo está probado con
+  el embedder simulado (que no es semántico) y con datos sintéticos.
 - Sin reranker neuronal (cross-encoder): el reranking es heurístico y sin calibrar.
 - Los pesos 0,80/0,12/0,08, las vidas medias y los pesos de fuente son razonados, no ajustados con datos.
 - Análisis pasados: el tipo existe y el `meta` admite el resultado, pero **no hay conversión desde `Analysis`** ni lo

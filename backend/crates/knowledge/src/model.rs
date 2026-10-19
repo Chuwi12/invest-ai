@@ -229,7 +229,10 @@ pub struct SearchHit {
     pub text: String,
     /// Puntuación final tras el reranking (mayor = mejor).
     pub score: f32,
+    /// Coseno con la consulta; 0 si el fragmento solo salió de la búsqueda léxica (sin vector o fuera del top vectorial).
     pub similarity: f32,
+    /// `true` si BM25 (FTS5) también lo devolvió.
+    pub lexical: bool,
     pub recency: f32,
     pub source_weight: f32,
     pub doc: DocumentInfo,
@@ -255,6 +258,10 @@ pub struct Stats {
     /// Memoria del índice en RAM (vectores + filas), estimada.
     pub index_memory_bytes: usize,
     pub model: String,
+    /// La búsqueda léxica (FTS5) está activa.
+    pub lexical: bool,
+    /// Fragmentos presentes en la tabla FTS5.
+    pub lexical_indexed: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

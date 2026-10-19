@@ -2,7 +2,10 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex, RwLock},
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -16,10 +19,11 @@ use crate::{
     config::KnowledgeConfig,
     embed::{EmbedKind, Embedder, normalize_l2},
     error::{EmbedError, KnowledgeError, Result},
-    index::{Candidate, DocMeta, Filter, VectorIndex},
+    index::{DocMeta, Filter, VectorIndex},
+    lexical::{fts_query, rrf_max, rrf_term},
     model::*,
     store::{self, ChunkRow, InsertDoc},
-    text::{fold_key, hash128, hash128_hex, looks_like_injection, normalize_text},
+    text::{fold_key, hash128, hash128_hex, looks_like_injection, normalize_text, parse_hash128},
 };
 
 /// Tras un fallo transitorio del embedder no se vuelve a intentar durante este tiempo.
@@ -39,6 +43,8 @@ pub struct KnowledgeBase {
     index: Arc<RwLock<VectorIndex>>,
     write_gate: tokio::sync::Mutex<()>,
     backoff_until: Mutex<Option<Instant>>,
+    /// La tabla FTS5 existe y funciona (se pone a `false` si algo falla: se degrada a solo vectores).
+    fts: AtomicBool,
 }
 
 fn meta_of(d: &DocumentInfo) -> DocMeta {
@@ -91,8 +97,17 @@ impl KnowledgeBase {
         if skipped > 0 {
             tracing::warn!(skipped, "vectores descartados al cargar el índice (dimensión o documento incoherente)");
         }
-        tracing::info!(model = %model, vectors = index.len(), docs = index.doc_count(), "archivo de conocimiento cargado");
-        Ok(Arc::new(Self {
+        // Búsqueda léxica: perezosa y opcional. Un fallo NUNCA impide abrir el archivo.
+        let fts = cfg.hybrid
+            && match store::fts_init(&pool).await {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::warn!(error = %e, "FTS5 no disponible: el archivo funciona solo con vectores");
+                    false
+                }
+            };
+        tracing::info!(model = %model, vectors = index.len(), docs = index.doc_count(), lexical = fts, "archivo de conocimiento cargado");
+        let kb = Arc::new(Self {
             pool,
             embedder,
             model,
@@ -100,7 +115,62 @@ impl KnowledgeBase {
             index: Arc::new(RwLock::new(index)),
             write_gate: tokio::sync::Mutex::new(()),
             backoff_until: Mutex::new(None),
-        }))
+            fts: AtomicBool::new(fts),
+        });
+        if fts {
+            // Los fragmentos anteriores a la tabla se indexan en segundo plano y en tandas.
+            let bg = kb.clone();
+            tokio::spawn(async move {
+                match bg.backfill_lexical().await {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!(n, "fragmentos añadidos al índice léxico"),
+                    Err(e) => tracing::warn!(error = %e, "no se pudo completar el índice léxico"),
+                }
+            });
+        }
+        Ok(kb)
+    }
+
+    #[doc(hidden)]
+    pub fn pool_for_tests(&self) -> &SqlitePool {
+        &self.pool
+    }
+
+    /// ¿La búsqueda léxica está activa?
+    pub fn lexical_enabled(&self) -> bool {
+        self.fts.load(Ordering::Relaxed)
+    }
+
+    fn disable_fts(&self, e: &dyn std::fmt::Display) {
+        if self.fts.swap(false, Ordering::Relaxed) {
+            tracing::warn!(error = %e, "FTS5 falló: se degrada a solo vectores hasta reiniciar");
+        }
+    }
+
+    /// Indexa en la tabla FTS5 los fragmentos que aún no están (primera vez o tras un fallo), en
+    /// tandas de 500 y cediendo el paso a las escrituras entre tandas. Idempotente. Devuelve cuántos reindexó.
+    pub async fn backfill_lexical(&self) -> Result<usize> {
+        if !self.lexical_enabled() {
+            return Ok(0);
+        }
+        if store::fts_count(&self.pool).await? == store::total_chunks(&self.pool).await? {
+            return Ok(0);
+        }
+        let (mut after, mut done) = (0i64, 0usize);
+        loop {
+            let _gate = self.write_gate.lock().await;
+            let rows = store::chunks_after(&self.pool, after, 500).await?;
+            let Some(last) = rows.last().map(|r| r.chunk_id) else { break };
+            if let Err(e) = store::fts_reindex(&self.pool, &rows).await {
+                self.disable_fts(&e);
+                return Err(e);
+            }
+            after = last;
+            done += rows.len();
+            drop(_gate);
+            tokio::task::yield_now().await;
+        }
+        Ok(done)
     }
 
     pub fn config(&self) -> &KnowledgeConfig {
@@ -224,7 +294,7 @@ impl KnowledgeBase {
         let meta = serde_json::to_string(&doc.meta).unwrap_or_else(|_| "{}".into());
         let mut tx = self.pool.begin().await?;
         if let Some(old) = replacing {
-            store::delete_documents(&mut tx, &[old]).await?;
+            store::delete_documents(&mut tx, &[old], self.lexical_enabled()).await?;
         }
         let id = store::insert_document(
             &mut tx,
@@ -249,6 +319,7 @@ impl KnowledgeBase {
         store::add_assets(&mut tx, id, &assets).await?;
         let mut new_rows: Vec<(i64, u128, &Vec<f32>)> = Vec::new();
         let mut pending = 0usize;
+        let mut fts = self.lexical_enabled();
         for (d, h) in drafts.iter().zip(&hashes) {
             let cid = store::insert_chunk(
                 &mut tx,
@@ -256,6 +327,11 @@ impl KnowledgeBase {
                 &ChunkRow { ordinal: d.ordinal as i64, section: d.section.clone(), text: d.text.clone(), text_hash: h.clone(), tokens: d.tokens as i64 },
             )
             .await?;
+            if fts && let Err(e) = store::fts_insert(&mut tx, cid, &d.text, doc.title.trim(), d.section.as_deref()).await {
+                // Un fallo de FTS5 no debe perder el documento: se sigue sin índice léxico.
+                self.disable_fts(&e);
+                fts = false;
+            }
             match vectors.get(h) {
                 Some(v) => {
                     store::insert_embedding(&mut tx, cid, &self.model, v, now_ms).await?;
@@ -394,23 +470,38 @@ impl KnowledgeBase {
 
     // --------------------------------------------------------------- búsqueda
 
-    /// Embebe la consulta y busca. Si el embedder falla devuelve el error: el llamador debe
-    /// seguir SIN conocimiento y decirlo, no inventar.
+    /// Embebe la consulta y busca (vectorial + léxica si está activa). Si el embedder falla y hay
+    /// búsqueda léxica, sigue solo con BM25; si no, devuelve el error: el llamador debe seguir
+    /// SIN conocimiento y decirlo, no inventar.
     pub async fn search(&self, req: &SearchRequest) -> Result<SearchResults> {
         let q = normalize_text(&req.query);
         if q.is_empty() {
             return Err(KnowledgeError::Invalid("consulta vacía".into()));
         }
-        let mut vs = self.embed_texts(&[q], EmbedKind::Query).await?;
-        let v = vs.pop().ok_or_else(|| KnowledgeError::Internal("sin vector de consulta".into()))?;
-        self.search_vector(req, &v).await
+        let lexical_ok = self.lexical_enabled() && fts_query(&q).is_some();
+        match self.embed_texts(std::slice::from_ref(&q), EmbedKind::Query).await {
+            Ok(mut vs) => {
+                let v = vs.pop().ok_or_else(|| KnowledgeError::Internal("sin vector de consulta".into()))?;
+                self.search_inner(req, Some(&v), &q).await
+            }
+            Err(e) if lexical_ok => {
+                tracing::warn!(error = %e, "embedder no disponible: búsqueda solo léxica");
+                self.search_inner(req, None, &q).await
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Búsqueda con un vector de consulta ya calculado (normalizado).
     pub async fn search_vector(&self, req: &SearchRequest, qv: &[f32]) -> Result<SearchResults> {
+        self.search_inner(req, Some(qv), &normalize_text(&req.query)).await
+    }
+
+    async fn search_inner(&self, req: &SearchRequest, qv: Option<&[f32]>, qtext: &str) -> Result<SearchResults> {
         let k = req.k.clamp(1, 50);
         let max_per_doc = req.max_per_doc.max(1);
         let now = req.now.unwrap_or_else(Utc::now);
+        let n = (k * 5).max(25);
         let filter = Filter {
             assets: req.assets.iter().map(|a| a.trim().to_string()).collect(),
             include_general: req.include_general,
@@ -419,28 +510,73 @@ impl KnowledgeBase {
             since_ms: req.since.map(|t| t.timestamp_millis()),
             until_ms: req.until.map(|t| t.timestamp_millis()),
         };
+        // Candidatos léxicos (BM25), ya con los filtros de SQL; el resto del filtro (emisor) se aplica abajo.
+        let mut lex: Vec<store::LexRow> = Vec::new();
+        if self.lexical_enabled()
+            && let Some(expr) = fts_query(qtext)
+        {
+            let q = store::LexQuery {
+                expr: &expr,
+                kinds: &filter.kinds,
+                assets: &filter.assets,
+                include_general: filter.include_general,
+                since_ms: filter.since_ms,
+                until_ms: filter.until_ms,
+                limit: n as i64,
+            };
+            match store::lexical_search(&self.pool, &q).await {
+                Ok(rows) => lex = rows,
+                Err(e) if qv.is_some() => tracing::warn!(error = %e, "búsqueda léxica fallida: se usa solo la vectorial"),
+                Err(e) => return Err(e),
+            }
+        }
         struct Ranked {
-            c: Candidate,
+            chunk_id: i64,
+            doc_id: i64,
+            text_hash: u128,
+            similarity: f32,
+            lexical: bool,
             score: f32,
             recency: f32,
             srcw: f32,
         }
         let (ranked, scanned) = {
             let ix = self.index_read();
-            let (cands, scanned) = ix.search(qv, &filter, (k * 5).max(25), req.min_similarity);
-            let mut ranked: Vec<Ranked> = cands
+            let (vcands, vscanned) = match qv {
+                Some(qv) => ix.search(qv, &filter, n, req.min_similarity),
+                None => (Vec::new(), 0),
+            };
+            let lex: Vec<&store::LexRow> = lex.iter().filter(|r| ix.accepts(&filter, r.doc_id)).collect();
+            let hybrid = !lex.is_empty();
+            // Fusión RRF: posición en cada lista (0 = la mejor). Sin candidatos léxicos, la puntuación es la de siempre.
+            // chunk -> (documento, hash del texto, coseno, posición vectorial, posición léxica)
+            type Pooled = (i64, u128, f32, Option<usize>, Option<usize>);
+            let mut pool: HashMap<i64, Pooled> = HashMap::new();
+            for (rank, c) in vcands.iter().enumerate() {
+                pool.insert(c.chunk_id, (c.doc_id, c.text_hash, c.similarity, Some(rank), None));
+            }
+            for (rank, r) in lex.iter().enumerate() {
+                let Some(th) = parse_hash128(&r.text_hash) else { continue };
+                pool.entry(r.chunk_id).and_modify(|e| e.4 = Some(rank)).or_insert((r.doc_id, th, 0.0, None, Some(rank)));
+            }
+            let mut ranked: Vec<Ranked> = pool
                 .into_iter()
-                .filter_map(|c| {
-                    let d = ix.doc(c.slot)?;
+                .filter_map(|(chunk_id, (doc_id, text_hash, sim, vr, lr))| {
+                    let d = ix.doc_by_id(doc_id)?;
                     let age_days = (now.timestamp_millis() - d.published_ms) as f64 / 86_400_000.0;
                     let recency = recency(d.kind, age_days);
                     let srcw = self.cfg.source_weight(d.kind, &d.source);
-                    let score = 0.80 * c.similarity.clamp(0.0, 1.0) + 0.12 * recency + 0.08 * srcw;
-                    Some(Ranked { c, score, recency, srcw })
+                    let relevance = if hybrid {
+                        (vr.map_or(0.0, rrf_term) + lr.map_or(0.0, rrf_term)) / rrf_max()
+                    } else {
+                        sim.clamp(0.0, 1.0)
+                    };
+                    let score = 0.80 * relevance + 0.12 * recency + 0.08 * srcw;
+                    Some(Ranked { chunk_id, doc_id, text_hash, similarity: sim, lexical: lr.is_some(), score, recency, srcw })
                 })
                 .collect();
-            ranked.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.c.chunk_id.cmp(&b.c.chunk_id)));
-            (ranked, scanned)
+            ranked.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.chunk_id.cmp(&b.chunk_id)));
+            (ranked, vscanned + lex.len())
         };
         // Colapsa fragmentos idénticos (S-1 y su enmienda S-1/A) y limita por documento.
         let mut seen_text: HashSet<u128> = HashSet::new();
@@ -450,24 +586,24 @@ impl KnowledgeBase {
             if picked.len() >= k {
                 break;
             }
-            if seen_text.contains(&r.c.text_hash) {
+            if seen_text.contains(&r.text_hash) {
                 continue;
             }
-            let n = per_doc.entry(r.c.doc_id).or_default();
+            let n = per_doc.entry(r.doc_id).or_default();
             if *n >= max_per_doc {
                 continue;
             }
             *n += 1;
-            seen_text.insert(r.c.text_hash);
+            seen_text.insert(r.text_hash);
             picked.push(r);
         }
-        let ids: Vec<i64> = picked.iter().map(|r| r.c.chunk_id).collect();
+        let ids: Vec<i64> = picked.iter().map(|r| r.chunk_id).collect();
         let mut rows = store::chunks_with_docs(&self.pool, &ids).await?;
         let hits = picked
             .into_iter()
             .filter_map(|r| {
-                let (section, text, doc) = rows.remove(&r.c.chunk_id)?;
-                Some(SearchHit { chunk_id: r.c.chunk_id, section, text, score: r.score, similarity: r.c.similarity, recency: r.recency, source_weight: r.srcw, doc })
+                let (section, text, doc) = rows.remove(&r.chunk_id)?;
+                Some(SearchHit { chunk_id: r.chunk_id, section, text, score: r.score, similarity: r.similarity, lexical: r.lexical, recency: r.recency, source_weight: r.srcw, doc })
             })
             .collect();
         Ok(SearchResults { hits, scanned, model: self.model.clone() })
@@ -515,7 +651,7 @@ impl KnowledgeBase {
             return Ok(rep);
         }
         let mut tx = self.pool.begin().await?;
-        rep.chunks_removed = store::delete_documents(&mut tx, &ids).await?;
+        rep.chunks_removed = store::delete_documents(&mut tx, &ids, self.lexical_enabled()).await?;
         tx.commit().await?;
         self.index_write().remove_docs(&gone);
         Ok(rep)
@@ -544,7 +680,7 @@ impl KnowledgeBase {
         let _gate = self.write_gate.lock().await;
         let Some(ex) = store::find_by_key(&self.pool, doc_key).await? else { return Ok(false) };
         let mut tx = self.pool.begin().await?;
-        store::delete_documents(&mut tx, &[ex.id]).await?;
+        store::delete_documents(&mut tx, &[ex.id], self.lexical_enabled()).await?;
         tx.commit().await?;
         self.index_write().remove_docs(&HashSet::from([ex.id]));
         Ok(true)
@@ -554,6 +690,7 @@ impl KnowledgeBase {
         let (documents, text_bytes, embedding_bytes) = store::sizes(&self.pool).await?;
         let chunks = store::total_chunks(&self.pool).await? as usize;
         let pending = store::count_pending(&self.pool, &self.model).await? as usize;
+        let lexical_indexed = if self.lexical_enabled() { store::fts_count(&self.pool).await.unwrap_or(0).max(0) as usize } else { 0 };
         let ix = self.index_read();
         Ok(Stats {
             documents: documents as usize,
@@ -564,6 +701,8 @@ impl KnowledgeBase {
             embedding_bytes,
             index_memory_bytes: ix.memory_bytes(),
             model: self.model.clone(),
+            lexical: self.lexical_enabled(),
+            lexical_indexed,
         })
     }
 }
