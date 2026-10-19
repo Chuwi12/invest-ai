@@ -54,6 +54,8 @@ pub struct AppState {
     pub clock: Arc<dyn Clock>,
     /// Fuente de energía (la pasada diaria se aplaza si el equipo va con batería).
     pub power: Arc<dyn PowerProbe>,
+    /// Archivo de conocimiento local (RAG). `None` con `RAG_ENABLED=0` o si no pudo abrirse.
+    pub knowledge: Option<Arc<knowledge::KnowledgeBase>>,
 }
 
 impl AppState {
@@ -74,6 +76,7 @@ impl AppState {
             watchlist: Arc::new(WatchlistConfig::disabled()),
             clock: Arc::new(SystemClock),
             power: Arc::new(SystemPower::default()),
+            knowledge: None,
         }
     }
 
@@ -90,6 +93,11 @@ impl AppState {
     pub fn with_watchlist(mut self, cfg: WatchlistConfig, clock: Arc<dyn Clock>) -> Self {
         self.watchlist = Arc::new(cfg);
         self.clock = clock;
+        self
+    }
+
+    pub fn with_knowledge(mut self, knowledge: Option<Arc<knowledge::KnowledgeBase>>) -> Self {
+        self.knowledge = knowledge;
         self
     }
 

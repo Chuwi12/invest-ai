@@ -354,3 +354,13 @@ type IpoBaseRate = { months: number; tiers: IpoBaseRateTier[]; tierNotes: string
   symbols: string[]; source: string; asOf: string; caveats: string[] };
 ```
 Con `INVEST_AI_FAKE=1` todo es inventado (`source: "fake"`, empresas ficticias, URLs genéricas de EDGAR) y el perfil se calcula con el extractor real sobre texto de folleto inventado.
+
+## Archivo de conocimiento (RAG)
+
+Solo lectura. El archivo guarda las noticias y los folletos de OPV que la app ya descarga (ver `docs/notes/rag.md`).
+
+| Método | Ruta | Respuesta |
+|--------|------|-----------|
+| GET | `/knowledge/stats` | Con el RAG apagado (`RAG_ENABLED=0`, `INVEST_AI_FAKE=1` o si no pudo abrirse): `{ "enabled": false }`. Encendido: `{ enabled: true, model, documents, chunks, indexed, pending, textBytes, embeddingBytes, indexMemoryBytes }`. `pending` = fragmentos sin embedding del modelo activo (se completan en segundo plano cuando no hay análisis ni chat en curso); `indexed` = fragmentos cargados en el índice en memoria. **500** `internal` si SQLite falla. |
+
+El chat gana la herramienta `search_knowledge` (solo con el RAG encendido; no aparece en `tool_call` si está apagado) y `Analysis.sources` puede incluir fuentes del archivo (noticias y folletos citados con `[D#]`).

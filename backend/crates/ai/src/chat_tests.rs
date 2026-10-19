@@ -8,7 +8,7 @@ use serde_json::json;
 use super::*;
 use crate::{
     fixture::FakeMarket,
-    testutil::{MemSettings, MockOllama, content_line, done_line, reply, thinking_line, tool_call_line},
+    testutil::{MemSettings, MockOllama, content_line, done_line, fnv64, reply, thinking_line, tool_call_line},
 };
 
 struct Env {
@@ -258,4 +258,160 @@ async fn input_limits_history_budget_and_errors() {
     let dead = Env { mock: MockOllama::start().await, engine: Arc::new(ChatEngine::new(client, models, analysis, dead_cfg)), market: e.market.clone() };
     let ev = collect(&dead, request(&dead, "hola", &[])).await;
     assert!(matches!(ev.last(), Some(ChatEvent::Error { message }) if message.contains("Ollama")), "{ev:?}");
+}
+
+// --- RAG apagado: el chat es idéntico byte a byte -----------------------------------------------
+
+/// Sustituye toda marca «AAAA-MM-DD HH:MM UTC» (la hora real del test) por una constante.
+fn mask_clock(s: &str) -> String {
+    let b: Vec<char> = s.chars().collect();
+    let shape = "dddd-dd-dd dd:dd UTC";
+    let (mut out, mut i) = (String::new(), 0);
+    while i < b.len() {
+        let ok = i + shape.len() <= b.len()
+            && shape.chars().enumerate().all(|(k, p)| if p == 'd' { b[i + k].is_ascii_digit() } else { b[i + k] == p });
+        if ok {
+            out.push_str("<T>");
+            i += shape.len();
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    // «Antigüedad del dato | 606539 s»: segundos desde el dato hasta ahora.
+    let key = "Antigüedad del dato | ";
+    out.split(key)
+        .enumerate()
+        .map(|(i, p)| if i == 0 { p.to_string() } else { format!("<age>{}", p.trim_start_matches(|c: char| c.is_ascii_digit())) })
+        .collect::<Vec<_>>()
+        .join(key)
+}
+
+/// Peticiones enviadas a Ollama + eventos, con la fecha del system normalizada.
+async fn chat_transcript(e: &Env) -> String {
+    e.mock.push_chat(vec![tool_call_line("get_quote", json!({"id": "AAPL"})), done_line()]);
+    e.mock.push_chat(reply("AAPL cotiza a 228.4 USD según Fixture."));
+    let ev = collect(e, request(e, "¿a cuánto está Apple?", &["stock:AAPL"])).await;
+    let reqs = mask_clock(&serde_json::to_string(&e.mock.chat_requests()).unwrap());
+    let events: Vec<String> = ev
+        .iter()
+        .map(|x| match x {
+            ChatEvent::Start { .. } => "start".to_string(),
+            ChatEvent::Done { model, prompt_tokens, completion_tokens, .. } => format!("done {model} {prompt_tokens:?} {completion_tokens:?}"),
+            ChatEvent::ToolCall { name, arguments, .. } => format!("tool_call {name} {arguments}"),
+            ChatEvent::ToolResult { name, ok, summary, .. } => format!("tool_result {name} {ok} {summary}"),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    format!("{reqs}\n{}", events.join("\n"))
+}
+
+const CHAT_GOLDEN: u64 = 12784002139361706001;
+
+#[tokio::test]
+async fn rag_off_chat_matches_golden_transcript() {
+    let t = chat_transcript(&env().await).await;
+    assert_eq!(fnv64(&t), CHAT_GOLDEN, "huella del transcript: {}", fnv64(&t));
+}
+
+// --- RAG encendido (herramienta search_knowledge) -------------------------------------------------
+
+mod rag_on {
+    use chrono::TimeZone;
+    use knowledge::{DocKind, FakeEmbedder, KnowledgeBase, KnowledgeConfig, NewDocument, Section, testutil};
+
+    use super::*;
+
+    async fn env_kb(kb: Arc<dyn knowledge::KnowledgeSearch>) -> Env {
+        let mock = MockOllama::start().await;
+        let cfg = AiConfig { base_url: mock.url.clone(), ..AiConfig::default() };
+        let client = OllamaClient::new(&mock.url, Duration::from_secs(5)).unwrap();
+        let models = Arc::new(ModelManager::new(client.clone(), cfg.clone(), Arc::new(MemSettings::default())));
+        let analysis = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()).with_knowledge(Some(kb)));
+        Env { engine: Arc::new(ChatEngine::new(client, models, analysis, cfg)), mock, market: Arc::new(FakeMarket::new()) }
+    }
+
+    async fn kb() -> Arc<KnowledgeBase> {
+        let kb = KnowledgeBase::open(testutil::memory_pool().await, Arc::new(FakeEmbedder::default()), KnowledgeConfig::default()).await.unwrap();
+        for (key, kind, text) in [
+            ("news:a", DocKind::News, "Apple services revenue grew 31.4 percent"),
+            ("filing:b", DocKind::Filing, "Risk factors: supply concentration in Asia"),
+        ] {
+            kb.ingest(NewDocument {
+                doc_key: key.into(),
+                kind,
+                subtype: None,
+                source: "yahoo".into(),
+                publisher: None,
+                title: text.into(),
+                url: Some(format!("https://example.test/{key}")),
+                issuer: None,
+                language: Some("en".into()),
+                published_at: chrono::Utc.with_ymd_and_hms(2026, 10, 5, 12, 0, 0).unwrap(),
+                assets: vec!["stock:AAPL".into()],
+                sections: vec![Section { heading: None, text: text.into() }],
+                meta: json!({}),
+            })
+            .await
+            .unwrap();
+        }
+        kb
+    }
+
+    #[tokio::test]
+    async fn tool_is_offered_only_with_archive_and_returns_numbered_fragments() {
+        let e = env_kb(kb().await).await;
+        e.mock.push_chat(vec![tool_call_line("search_knowledge", json!({"query": "ingresos de servicios", "asset": "stock:AAPL", "kind": "news", "since": "2026-10-01", "limit": 50})), done_line()]);
+        e.mock.push_chat(reply("Según el archivo, los servicios crecieron 31.4 percent [D1]."));
+        let ev = collect(&e, request(&e, "¿qué dicen las noticias?", &[])).await;
+        let reqs = e.mock.chat_requests();
+        let tools = reqs[0]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 10);
+        assert!(tools.iter().any(|t| t["function"]["name"] == "search_knowledge"));
+        assert!(reqs[0]["messages"][0]["content"].as_str().unwrap().contains("UNTRUSTED DATA"));
+        let tool_msg = reqs[1]["messages"].as_array().unwrap().iter().find(|m| m["role"] == "tool").unwrap()["content"].as_str().unwrap().to_string();
+        assert!(tool_msg.contains("<knowledge_base>") && tool_msg.contains("[D1]") && tool_msg.contains("31.4 percent"), "{tool_msg}");
+        assert!(!tool_msg.contains("Risk factors"), "kind=news excluye folletos: {tool_msg}");
+        assert!(ev.iter().any(|x| matches!(x, ChatEvent::ToolResult { ok: true, name, .. } if name == "search_knowledge")));
+        let text = text_of(&ev);
+        assert!(!text.contains('⚠'), "cita válida y cifra respaldada por el fragmento: {text}");
+    }
+
+    #[tokio::test]
+    async fn unknown_citation_in_the_answer_is_flagged_and_numbering_continues_across_calls() {
+        let e = env_kb(kb().await).await;
+        e.mock.push_chat(vec![tool_call_line("search_knowledge", json!({"query": "apple", "kind": "news"})), done_line()]);
+        e.mock.push_chat(vec![tool_call_line("search_knowledge", json!({"query": "riesgos", "kind": "filing"})), done_line()]);
+        e.mock.push_chat(reply("Hay concentración de proveedores en Asia [D9]."));
+        let ev = collect(&e, request(&e, "riesgos", &[])).await;
+        let reqs = e.mock.chat_requests();
+        let second = reqs[2]["messages"].as_array().unwrap().iter().rfind(|m| m["role"] == "tool").unwrap()["content"].as_str().unwrap().to_string();
+        assert!(second.contains("[D2]") && !second.contains("[D1]"), "{second}");
+        assert!(text_of(&ev).contains("⚠") && text_of(&ev).contains("cita"), "{}", text_of(&ev));
+    }
+
+    #[tokio::test]
+    async fn rag_off_rejects_the_tool_exactly_as_an_unknown_one() {
+        let e = env().await;
+        e.mock.push_chat(vec![tool_call_line("search_knowledge", json!({"query": "x"})), done_line()]);
+        e.mock.push_chat(reply("No puedo."));
+        let ev = collect(&e, request(&e, "busca", &[])).await;
+        assert!(ev.iter().any(|x| matches!(x, ChatEvent::ToolResult { ok: false, summary, .. } if summary.contains("herramienta desconocida"))));
+    }
+
+    #[tokio::test]
+    async fn failing_archive_is_reported_to_the_model_not_hidden() {
+        struct Down;
+        #[async_trait::async_trait]
+        impl knowledge::KnowledgeSearch for Down {
+            async fn search(&self, _: &knowledge::SearchRequest) -> knowledge::Result<knowledge::SearchResults> {
+                Err(knowledge::KnowledgeError::Internal("caído".into()))
+            }
+        }
+        let e = env_kb(Arc::new(Down)).await;
+        e.mock.push_chat(vec![tool_call_line("search_knowledge", json!({"query": "x"})), done_line()]);
+        e.mock.push_chat(reply("El archivo no está disponible."));
+        let ev = collect(&e, request(&e, "busca", &[])).await;
+        assert!(ev.iter().any(|x| matches!(x, ChatEvent::ToolResult { ok: false, summary, .. } if summary.contains("no está disponible"))));
+    }
 }

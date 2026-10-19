@@ -18,6 +18,7 @@ mod labels;
 mod lang;
 pub mod models;
 pub mod ollama;
+pub mod rag;
 pub mod safety;
 pub mod scoring;
 mod sentiment;
@@ -29,5 +30,6 @@ pub mod tools;
 
 pub use analyst::OllamaAnalyst;
 pub use config::AiConfig;
+pub use knowledge::KnowledgeSearch;
 pub use models::ModelManager;
 pub use sentiment::annotate_sentiment;

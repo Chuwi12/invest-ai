@@ -9,6 +9,7 @@ pub mod error;
 pub mod extract;
 pub mod fake;
 pub mod guard;
+pub mod knowledge;
 pub mod limits;
 pub mod models;
 pub mod repo;

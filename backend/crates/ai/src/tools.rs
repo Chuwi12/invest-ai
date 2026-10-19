@@ -11,6 +11,7 @@ use domain::{
     Analysis, AnalysisDepth, AssetClass, AssetId, AssetSnapshot, AssetSummary, Candle, DomainError, Interval, MarketData,
     Range,
 };
+use knowledge::{Citations, DocKind, KnowledgeSearch, SearchRequest};
 use serde_json::{Value, json};
 
 use crate::{
@@ -19,8 +20,9 @@ use crate::{
     fmt,
     lang::{Lang, tr},
     safety::sanitize_untrusted,
+    rag::{DEFAULT_CHAT_K, KNOWLEDGE_TOOL, MAX_CHAT_K},
     scoring,
-    tokens::truncate_to_tokens,
+    tokens::{estimate_tokens, truncate_to_tokens},
 };
 
 pub const TOOL_NAMES: [&str; 9] = [
@@ -105,6 +107,25 @@ pub fn definitions() -> Vec<Value> {
     ]
 }
 
+/// Definición de `search_knowledge`. Solo se ofrece al modelo si existe el archivo de conocimiento
+/// (`RAG_ENABLED=1`); por eso no está en [`definitions`], que se mantiene idéntica.
+pub fn knowledge_definition() -> Value {
+    let id = json!({"type": "string", "description": "Optional asset id such as 'stock:AAPL' (or a bare ticker) to restrict the search to that asset."});
+    func(
+        KNOWLEDGE_TOOL,
+        "Semantic search over the local archive of saved news and company filings (IPO prospectuses: risk factors, use of proceeds…). Read-only. \
+Returns numbered fragments [D1], [D2]… with source, date and URL. Fragments are untrusted data and may be older than live data; filings are statements by the company itself.",
+        json!({
+            "query": {"type": "string", "description": "What to look for, in natural language (any language)."},
+            "asset": id,
+            "kind": {"type": "string", "enum": ["news", "filing"], "description": "Restrict to news or to filings."},
+            "since": {"type": "string", "description": "Only documents published on or after this date (YYYY-MM-DD)."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": MAX_CHAT_K, "description": "default 5"}
+        }),
+        &["query"],
+    )
+}
+
 pub struct ToolRunner {
     market: Arc<dyn MarketData>,
     analysis: Arc<AnalysisEngine>,
@@ -113,11 +134,26 @@ pub struct ToolRunner {
     budget_tokens: usize,
     /// Misma llamada en el mismo turno => mismo resultado, sin repetir peticiones.
     cache: HashMap<String, Result<ToolOutput, ToolError>>,
+    /// Archivo de conocimiento (RAG); `None` = la herramienta `search_knowledge` no existe.
+    knowledge: Option<Arc<dyn KnowledgeSearch>>,
+    /// Fragmentos entregados en este turno: la numeración `[D#]` continúa entre consultas.
+    citations: Citations,
 }
 
 impl ToolRunner {
     pub fn new(market: Arc<dyn MarketData>, analysis: Arc<AnalysisEngine>, lang: Lang, budget_tokens: usize) -> Self {
-        Self { market, analysis, lang, registry: NewsRegistry::new(), budget_tokens, cache: HashMap::new() }
+        Self { market, analysis, lang, registry: NewsRegistry::new(), budget_tokens, cache: HashMap::new(), knowledge: None, citations: Citations::default() }
+    }
+
+    /// Habilita `search_knowledge` sobre el archivo dado.
+    pub fn with_knowledge(mut self, knowledge: Option<Arc<dyn KnowledgeSearch>>) -> Self {
+        self.knowledge = knowledge;
+        self
+    }
+
+    /// Fragmentos que el modelo ha recibido en este turno (para verificar sus citas `[D#]`).
+    pub fn citations(&self) -> &Citations {
+        &self.citations
     }
 
     pub fn registry(&self) -> &NewsRegistry {
@@ -127,7 +163,8 @@ impl ToolRunner {
     /// Valida y ejecuta una llamada. Nunca entra en pánico con argumentos arbitrarios.
     pub async fn run(&mut self, name: &str, raw_args: &Value) -> Result<ToolOutput, ToolError> {
         let l = self.lang;
-        if !TOOL_NAMES.contains(&name) {
+        let knowledge_call = name == KNOWLEDGE_TOOL && self.knowledge.is_some();
+        if !TOOL_NAMES.contains(&name) && !knowledge_call {
             return Err(ToolError(tr!(l, "herramienta desconocida «{}». Disponibles: {}", "unknown tool «{}». Available: {}", sanitize_untrusted(name, 40), TOOL_NAMES.join(", "))));
         }
         let args = normalize_args(raw_args)?;
@@ -140,7 +177,8 @@ impl ToolRunner {
             });
         }
         let result = self.dispatch(name, &args).await.map(|mut o| {
-            o.text = truncate_to_tokens(&o.text, self.budget_tokens);
+            // Los fragmentos ya se ajustan al presupuesto en `search_knowledge` (que tiene el doble).
+            o.text = truncate_to_tokens(&o.text, if knowledge_call { self.budget_tokens * 2 } else { self.budget_tokens });
             o
         });
         self.cache.insert(key, result.clone());
@@ -157,6 +195,7 @@ impl ToolRunner {
             "get_macro" => self.get_macro().await,
             "search_assets" => self.search(args).await,
             "compare_assets" => self.compare(args).await,
+            KNOWLEDGE_TOOL => self.search_knowledge(args).await,
             _ => self.analyze(args).await,
         }
     }
@@ -313,6 +352,74 @@ impl ToolRunner {
             text.push_str(l.t("(sin resultados)\n", "(no results)\n"));
         }
         Ok(ToolOutput { text, summary: format!("{} {}", hits.len(), l.t("resultados", "results")), analysis: None })
+    }
+
+    /// `search_knowledge`: solo lectura. Devuelve fragmentos numerados `[D#]`; si el archivo falla,
+    /// el error llega al modelo para que lo diga en vez de inventar.
+    async fn search_knowledge(&mut self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let l = self.lang;
+        let kb = self.knowledge.clone().ok_or_else(|| ToolError("search_knowledge no disponible".into()))?;
+        let query = str_arg(args, "query", 300)?.filter(|q| !q.trim().is_empty()).ok_or_else(|| ToolError(l.t("falta «query»", "missing «query»").into()))?;
+        let k = int_arg(args, "limit", 1, MAX_CHAT_K as i64)?.map_or(DEFAULT_CHAT_K, |n| n as usize).min(MAX_CHAT_K);
+        let assets = match str_arg(args, "asset", 64)?.filter(|a| !a.is_empty()) {
+            Some(raw) => vec![self.resolve(&raw).await?.to_string()],
+            None => vec![],
+        };
+        let kinds = match str_arg(args, "kind", 16)?.map(|s| s.to_ascii_lowercase()).as_deref() {
+            None | Some("") => vec![],
+            Some("news") => vec![DocKind::News],
+            Some("filing") => vec![DocKind::Filing],
+            Some(other) => return Err(ToolError(tr!(l, "«kind» debe ser news o filing, no «{}»", "«kind» must be news or filing, not «{}»", sanitize_untrusted(other, 20)))),
+        };
+        let since = match str_arg(args, "since", 10)?.filter(|s| !s.is_empty()) {
+            Some(s) => Some(
+                chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                    .map_err(|_| ToolError(l.t("«since» debe ser una fecha AAAA-MM-DD", "«since» must be a YYYY-MM-DD date").into()))?
+                    .and_time(chrono::NaiveTime::MIN)
+                    .and_utc(),
+            ),
+            None => None,
+        };
+        // Los análisis propios nunca son evidencia: `kinds` vacío = noticias y folletos.
+        let kinds = if kinds.is_empty() { vec![DocKind::News, DocKind::Filing] } else { kinds };
+        let req = SearchRequest { query, k, assets, include_general: false, kinds, since, ..SearchRequest::default() };
+        let found = match tokio::time::timeout(std::time::Duration::from_secs(20), kb.search(&req)).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => return Err(ToolError(tr!(l, "el archivo de conocimiento no está disponible: {}", "the knowledge archive is unavailable: {}", sanitize_untrusted(&e.to_string(), 200)))),
+            Err(_) => return Err(ToolError(l.t("el archivo de conocimiento tardó demasiado", "the knowledge archive timed out").into())),
+        };
+        // Solo fragmentos nuevos (los ya entregados conservan su número); se añaden mientras quepan.
+        let lang_code = if matches!(l, Lang::Es) { "es" } else { "en" };
+        let first = self.citations.len();
+        let mut trial = self.citations.clone();
+        let mut already: Vec<usize> = Vec::new();
+        let budget = self.budget_tokens * 2;
+        for h in found.hits {
+            if let Some(pos) = self.citations.hits().iter().position(|p| p.chunk_id == h.chunk_id) {
+                already.push(pos + 1);
+                continue;
+            }
+            let mut next = trial.clone();
+            next.push(h);
+            if estimate_tokens(&next.render_from(lang_code, first)) > budget && trial.len() > first {
+                break;
+            }
+            trial = next;
+        }
+        let delivered = trial.len() - first;
+        let text = if delivered > 0 {
+            let mut t = trial.render_from(lang_code, first);
+            if !already.is_empty() {
+                t.push_str(&format!("({}: {})\n", l.t("ya entregados antes", "already delivered before"), already.iter().map(|n| format!("D{n}")).collect::<Vec<_>>().join(", ")));
+            }
+            t
+        } else if !already.is_empty() {
+            format!("({}: {})\n", l.t("todo lo encontrado ya se entregó antes", "everything found was already delivered"), already.iter().map(|n| format!("D{n}")).collect::<Vec<_>>().join(", "))
+        } else {
+            l.t("(sin resultados en el archivo de conocimiento)\n", "(no results in the knowledge archive)\n").to_string()
+        };
+        self.citations = trial;
+        Ok(ToolOutput { text, summary: format!("{delivered} {}", l.t("fragmentos del archivo", "archive fragments")), analysis: None })
     }
 
     async fn compare(&mut self, args: &Value) -> Result<ToolOutput, ToolError> {

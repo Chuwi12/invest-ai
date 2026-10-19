@@ -1,7 +1,7 @@
 # Archivo de conocimiento local (RAG)
 
-Estado: **crate `knowledge` implementado y probado sin red ni Ollama; sin cablear** (ver «Para el coordinador»).
-Ningún embedding real se ha calculado todavía: no se usó Ollama ni la GPU y no se descargó ningún modelo.
+Estado: **cableado** en servidor e IA (apagado por defecto: `RAG_ENABLED=0`). Todo está probado con el embedder simulado;
+**ningún embedding real se ha calculado todavía**: no se usó Ollama ni la GPU y no se descargó ningún modelo (ver «Cableado»).
 
 ## Principio
 El LLM no aprende: consulta. El archivo guarda texto que la app ya tiene (noticias descargadas, secciones de
@@ -212,17 +212,67 @@ citas y no altera la recuperación de los demás); enganche de noticias (dedupli
 - **Medir con Ollama real** (velocidad, VRAM, calidad es↔en, lotes) y decidir modelo con el protocolo de arriba. Sin esto
   la recomendación es de ficha técnica.
 - **Búsqueda léxica (FTS5/BM25) híbrida**: los embeddings flojean con identificadores exactos (tickers, «Item 1A», cifras).
-  Daría además recuperación sin Ollama. No se hizo: no he verificado que el SQLite empaquetado por sqlx incluya FTS5 y una
-  migración fallida rompería el arranque de toda la app. Es el siguiente paso con más valor.
+  Daría además recuperación sin Ollama. **Verificado: el SQLite que empaqueta sqlx (3.46.0) incluye FTS5**
+  (`knowledge/tests/fts5.rs` crea una tabla virtual `fts5` con `unicode61`, consulta con `MATCH` y `bm25`; las opciones de
+  compilación listan `ENABLE_FTS5`). **No se implementó** la búsqueda híbrida. Aviso para cuando se haga: crear la tabla en
+  una migración que falle solo si falta FTS5 pondría en riesgo el arranque; mejor crearla de forma perezosa al abrir el archivo
+  y degradar a solo vectores si falla. Es el siguiente paso con más valor.
 - Sin reranker neuronal (cross-encoder): el reranking es heurístico y sin calibrar.
 - Los pesos 0,80/0,12/0,08, las vidas medias y los pesos de fuente son razonados, no ajustados con datos.
 - Análisis pasados: el tipo existe y el `meta` admite el resultado, pero **no hay conversión desde `Analysis`** ni lo
   recomiendo como evidencia: el modelo podría citar su propia alucinación anterior. Si se usa, solo con la etiqueta
   «análisis previo de esta app (no es fuente primaria)» (ya la lleva `render`) y para comparar «qué cambió desde entonces».
-- `Citations::clean` es léxico (ver arriba). Las cifras de los fragmentos aún no entran en `NumberIndex`.
+- `Citations::clean` es léxico (ver arriba). Las cifras de los fragmentos SÍ entran ya en el `NumberIndex` del análisis (solo su texto, no fecha ni URL).
 - Detección de cabeceras de folleto: heurística de texto plano; HTML de EDGAR conviene seccionarlo en origen.
 
-## Para el coordinador
+## Cableado (hecho)
+**Cómo activarlo**: `ollama pull embeddinggemma:300m-qat-q8_0` (la app nunca descarga) y `RAG_ENABLED=1` en `.env`. Con
+`INVEST_AI_FAKE=1` se ignora. `GET /api/knowledge/stats` (ver `docs/API.md`) dice si está activo y cuántos fragmentos hay.
+
+| Pieza | Dónde |
+|---|---|
+| Apertura tolerante a fallos, `TeeMarket` (noticias), `TeeIpo` (folletos como `Filing` con sus secciones), mantenimiento (`embed_pending(64)` al arrancar y cada 2 min, `purge` cada 6 h), pausa por actividad | `server/src/knowledge.rs` |
+| Cableado en el arranque, espera de los trabajadores en el apagado (`state.tasks`) | `server/src/main.rs`, `server/src/state.rs` |
+| Ruta `GET /api/knowledge/stats` | `server/src/routes/knowledge.rs` |
+| Recuperación en el análisis, reglas del system prompt, `[D#]`, fuentes | `ai/src/rag.rs`, `ai/src/analysis/mod.rs` |
+| Herramienta `search_knowledge` | `ai/src/tools.rs`, `ai/src/chat.rs` |
+
+- **Un fallo del RAG nunca impide arrancar**: si `KnowledgeBase::open` falla (p. ej. falta la migración) hay `tracing::error!` y la app
+  sigue sin RAG (`knowledge: None`, `/knowledge/stats` → `enabled:false`). Si una búsqueda falla en un análisis, este sigue sin
+  conocimiento y lo anota en `dataWarnings`; en el chat el error llega al modelo como resultado de la herramienta.
+- **Análisis**: una búsqueda por activo antes de las etapas (`assets=[id]`, solo noticias y folletos, nunca análisis propios;
+  k=6 en standard/deep, 3 en quick; tope de 20 s). El bloque `<knowledge_base>` va solo al juez. El system prompt añade la regla 7
+  (dato no fiable, citar `[D#]`, los folletos son declaraciones de la empresa) **solo si se entregaron fragmentos**. Tras el juez,
+  `Citations::clean` quita las citas inexistentes o sin relación (nota en `qualityNotes`) y las `[D#]` que sobreviven pasan a
+  `Analysis.sources`.
+- **Chat**: `search_knowledge(query, asset?, kind?, since?, limit?)`, solo lectura, `limit` ≤ 8 (def. 5), solo noticias/folletos.
+  La numeración `[D#]` continúa entre llamadas del mismo turno; al final se avisa de citas `[D#]` inexistentes.
+- **Pausa por VRAM**: `TrackedAnalyst` cuenta análisis y chats en curso (HTTP, SSE y lista de seguimiento, porque envuelve al analista y
+  no a las rutas; los semáforos de `limits` no cubren la lista de seguimiento) y `GatedEmbedder` hace esperar a los embeddings de
+  DOCUMENTOS mientras haya alguno. Las consultas no esperan (el propio análisis las necesita). Esperar y no fallar es deliberado:
+  un error transitorio activaría la pausa de 30 s del archivo también para las consultas.
+- **Folletos de OPV**: se archivan cuando `/api/ipo/{symbol}/prospectus` o `/risk-profile` los obtienen (decorador de `IpoData`), por
+  una cola acotada de 16 y un trabajador; nunca retrasan la respuesta. Se archivan completos (antes del recorte `maxChars`), sin
+  las subsecciones (el padre ya las contiene). `doc_key = filing:<accession>`.
+
+### RAG apagado = idéntico byte a byte
+`knowledge` es `None` en el motor de análisis, en el de chat y en el `ToolRunner`; el servidor no envuelve nada. Garantías
+comprobadas: (1) tests `rag_off_standard_analysis_matches_golden_transcript` y `rag_off_chat_matches_golden_transcript` (en `ai`):
+huella FNV-64 de TODAS las peticiones enviadas a Ollama más el `Analysis`/eventos de chat sobre el fixture, calculada con el
+código anterior al RAG, antes de tocarlo (se enmascaran solo la hora y la antigüedad del dato); (2) `empty_archive_is_byte_identical_to_rag_off`:
+con el RAG encendido pero sin resultados la huella es la misma; (3) `definitions()` sigue devolviendo 9 herramientas y `search_knowledge`
+con el RAG apagado se rechaza como «herramienta desconocida»; (4) el servidor solo envuelve mercado/OPV/analista con el RAG abierto.
+
+### Qué falta medir (GPU libre; nada de esto se ha ejecutado)
+No hay un arnés de medición hecho; se hace con la propia app:
+1. `ollama pull embeddinggemma:300m-qat-q8_0` (y `qwen3-embedding:0.6b` para comparar).
+2. `RAG_ENABLED=1 RAG_EMBED_KEEP_ALIVE=2m ./invest-ai` con un LLM cargado; consultar noticias de 3–4 activos y `/api/ipo/{ticker}/prospectus` de 2 OPV.
+3. Velocidad de embeddings: ver `pending` en `GET /api/knowledge/stats` bajar con el tiempo (fragmentos/s) con y sin generación en curso.
+4. VRAM: `watch -n1 'ollama ps; nvidia-smi --query-gpu=memory.used --format=csv'` durante un análisis con RAG: ¿se descarga y recarga el LLM al embeber la consulta? Si sí, `RAG_EMBED_NUM_GPU=0` (CPU).
+5. Calidad con y sin RAG: mismo activo y profundidad con `RAG_ENABLED=0` y `=1` (comparar citas `[D#]` válidas, cifras sin verificar en `qualityNotes`, tiempo y tokens de entrada: k=6 cuesta ~2,5 k).
+6. Protocolo de recall@5 es↔en de la sección «Recomendación» (40 pares).
+
+## Para el coordinador (histórico: ya cableado, ver arriba)
 1. **Migración**: `0004_knowledge.sql` ya está en `server/migrations/`. `knowledge::SCHEMA_SQL` la incluye con `include_str!`
    (única copia); `KnowledgeBase::open` falla con un mensaje claro si no se aplicó. `Cargo.lock` cambia (paquete nuevo,
    dependencias que ya estaban en el lock).

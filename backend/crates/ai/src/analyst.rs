@@ -9,6 +9,7 @@ use domain::{
     Result, SettingsStore,
 };
 use futures::{StreamExt, stream::BoxStream};
+use knowledge::KnowledgeSearch;
 
 use crate::{analysis::AnalysisEngine, chat::ChatEngine, config::AiConfig, models::ModelManager, ollama::OllamaClient};
 
@@ -24,9 +25,14 @@ impl OllamaAnalyst {
     /// `settings`: almacén de ajustes persistentes (modelo activo). El acceso a datos de mercado
     /// no hace falta aquí: `analyze` recibe el snapshot y `chat` recibe `market` en `ChatRequest`.
     pub fn new(cfg: AiConfig, settings: Arc<dyn SettingsStore>) -> Result<Self> {
+        Self::with_knowledge(cfg, settings, None)
+    }
+
+    /// Como `new`, con el archivo de conocimiento local (RAG). Con `None` es exactamente `new`.
+    pub fn with_knowledge(cfg: AiConfig, settings: Arc<dyn SettingsStore>, knowledge: Option<Arc<dyn KnowledgeSearch>>) -> Result<Self> {
         let client = OllamaClient::new(&cfg.base_url, cfg.timeout)?;
         let models = Arc::new(ModelManager::new(client.clone(), cfg.clone(), settings));
-        let engine = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()));
+        let engine = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()).with_knowledge(knowledge));
         let chat = Arc::new(ChatEngine::new(client.clone(), models.clone(), engine.clone(), cfg.clone()));
         Ok(Self { cfg, client, models, engine, chat })
     }

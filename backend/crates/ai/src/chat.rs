@@ -88,6 +88,10 @@ never leave English words in tables or sentences.",
             if !caps.tools {
                 system.push_str(&format!("\nTools are NOT available with this model ({}): answer only from the preloaded data and say what you cannot check.", caps.id));
             }
+            let knowledge = this.analysis.knowledge();
+            if caps.tools && knowledge.is_some() {
+                system.push_str(crate::rag::CHAT_RULES);
+            }
             system.push_str(&preload(&req.market, &req.focus, lang, ctx_tokens, &mut index).await);
 
             let user_text = clamp_user_text(&req.user_message);
@@ -100,8 +104,11 @@ never leave English words in tables or sentences.",
             messages.extend(history_messages(&req.history, ctx_tokens * 30 / 100));
             messages.push(WireMessage::user(user_text));
 
-            let mut runner = ToolRunner::new(req.market.clone(), this.analysis.clone(), lang, (ctx_tokens / 6).clamp(500, 3000));
-            let tools = if caps.tools { definitions() } else { vec![] };
+            let mut runner = ToolRunner::new(req.market.clone(), this.analysis.clone(), lang, (ctx_tokens / 6).clamp(500, 3000)).with_knowledge(knowledge.clone());
+            let mut tools = if caps.tools { definitions() } else { vec![] };
+            if caps.tools && knowledge.is_some() {
+                tools.push(crate::tools::knowledge_definition());
+            }
             let max_out = this.cfg.max_output_tokens.unwrap_or(2048);
             let mut usage = Usage::default();
             let mut total_prompt = 0u32;
@@ -176,6 +183,13 @@ never leave English words in tables or sentences.",
                 }
             }
 
+            // Citas [D#] a fragmentos del archivo: se comprueban contra lo que el modelo recibió.
+            if !runner.citations().is_empty() {
+                let (_, issues) = runner.citations().clean(&answer);
+                if let Some(note) = crate::rag::issues_note(lang, &issues) {
+                    yield ChatEvent::Token { text: format!("\n\n> ⚠ {note}") };
+                }
+            }
             // Verificación de cifras de la respuesta final.
             let bad = index.unverified(&answer);
             if !bad.is_empty() && !answer.trim().is_empty() {

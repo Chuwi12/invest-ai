@@ -28,6 +28,7 @@ use std::{
 };
 
 use chrono::{NaiveDate, Utc};
+use knowledge::{Citations, KnowledgeSearch};
 use domain::{
     Analysis, AnalysisDepth, AnalysisEvent, AssetSnapshot, Catalyst, DomainError, Horizon, ModelTier, Result,
     Scenario, ScoreBreakdown, Verdict,
@@ -140,6 +141,9 @@ pub struct AnalysisEngine {
     client: OllamaClient,
     models: Arc<ModelManager>,
     cfg: AiConfig,
+    /// Archivo de conocimiento local (RAG). `None` (por defecto, `RAG_ENABLED=0`): el análisis es
+    /// idéntico al que no conoce el RAG; ver `crate::rag`.
+    knowledge: Option<Arc<dyn KnowledgeSearch>>,
 }
 
 /// `quick` no reintenta la tesis genérica: en el 7B el reintento (otra generación completa del juez)
@@ -164,7 +168,17 @@ fn min_figures(depth: AnalysisDepth) -> usize {
 
 impl AnalysisEngine {
     pub fn new(client: OllamaClient, models: Arc<ModelManager>, cfg: AiConfig) -> Self {
-        Self { client, models, cfg }
+        Self { client, models, cfg, knowledge: None }
+    }
+
+    /// Conecta el archivo de conocimiento (RAG). Con `None` no cambia nada.
+    pub fn with_knowledge(mut self, knowledge: Option<Arc<dyn KnowledgeSearch>>) -> Self {
+        self.knowledge = knowledge;
+        self
+    }
+
+    pub(crate) fn knowledge(&self) -> Option<Arc<dyn KnowledgeSearch>> {
+        self.knowledge.clone()
     }
 
     fn lang(&self) -> Lang {
@@ -302,6 +316,18 @@ impl AnalysisEngine {
         let judge_text = ctx_for(&Sections::judge());
         let lang_code = self.cfg.lang_code();
         let system = system_prompt(&lang_code);
+        // RAG: una recuperación por activo, antes de las etapas y del juez. Un fallo no detiene el análisis.
+        let (knowledge, rag_warning) = match &self.knowledge {
+            Some(kb) => match crate::rag::retrieve_for_analysis(kb.as_ref(), &snap, depth).await {
+                Ok(c) => (c, None),
+                Err(e) => {
+                    tracing::warn!(error = %e, "archivo de conocimiento no disponible: el análisis sigue sin él");
+                    (Citations::default(), Some(crate::rag::unavailable_warning(lang)))
+                }
+            },
+            None => (Citations::default(), None),
+        };
+        let system = if knowledge.is_empty() { system } else { format!("{system}\n{}", crate::rag::ANALYSIS_RULES) };
         // Niveles: dos planes porque dependen del veredicto final (esperar ≠ comprar).
         let plan_now = levels::plan(&snap, Verdict::Accumulate, lang);
         let plan_wait = levels::plan(&snap, Verdict::Wait, lang);
@@ -312,6 +338,11 @@ impl AnalysisEngine {
             v.idx.add_context(text);
         }
         v.idx.add_text(&levels_block, Segment::Levels);
+        // Una cifra citada de un fragmento recuperado cuenta como respaldada (solo el texto del
+        // fragmento: ni fechas ni URL de los metadatos).
+        for h in knowledge.hits() {
+            v.idx.add_text(&h.text, Segment::Other);
+        }
         let usage = Usage::default();
         let mut stage_notes: Vec<String> = Vec::new();
 
@@ -416,7 +447,8 @@ impl AnalysisEngine {
         } else {
             (format!("{judge_text}\n{levels_block}"), prompts::judge_task(lang, &digest, card.verdict, debated, deep, &lang_code))
         };
-        let judge_user = format!("{}{}", data_block(&judge_ctx), prompts::with_language(judge_task, &lang_code));
+        let knowledge_block = if knowledge.is_empty() { String::new() } else { format!("{}\n", knowledge.render(&lang_code)) };
+        let judge_user = format!("{}{knowledge_block}{}", data_block(&judge_ctx), prompts::with_language(judge_task, &lang_code));
         let judge_max = if quick {
             self.cfg.max_output_tokens.map_or(QUICK_JUDGE_MAX_TOKENS, |m| m.min(QUICK_JUDGE_MAX_TOKENS))
         } else {
@@ -475,6 +507,15 @@ impl AnalysisEngine {
                 if let Some(note) = self.fix_wording(&caps, &system, &lang_code, &mut j, &usage).await? {
                     quality_notes.push(note);
                 }
+                if !knowledge.is_empty() {
+                    let mut issues = Vec::new();
+                    for t in judge_texts_mut(&mut j) {
+                        let (clean, found) = knowledge.clean(t);
+                        *t = clean;
+                        issues.extend(found);
+                    }
+                    quality_notes.extend(crate::rag::issues_note(lang, &issues));
+                }
                 Ok(j)
             }
             Err(e) => Err(e),
@@ -531,6 +572,7 @@ impl AnalysisEngine {
             notes.push(tr!(lang, "El modelo no devolvió un JSON válido ni tras reintentarlo: se muestra el veredicto de la puntuación cuantitativa, sin análisis del LLM.", "The model did not return valid JSON even after a retry: showing the quantitative score's verdict, without LLM analysis."));
         }
         analysis.data_warnings = gaps::real_gaps(&snap, &card, lang);
+        analysis.data_warnings.extend(rag_warning);
         analysis.quality_notes = Some(notes);
         analysis.method = Some(tr!(
             lang,
@@ -549,6 +591,23 @@ impl AnalysisEngine {
         analysis.prompt_tokens = Some(usage.prompt.load(Ordering::Relaxed) as u32);
         analysis.completion_tokens = Some(usage.completion.load(Ordering::Relaxed) as u32);
         analysis.sources = v.sources();
+        if !knowledge.is_empty() {
+            // Solo las citas que sobrevivieron a la verificación y están en el texto final.
+            let mut texts: Vec<&str> = vec![&analysis.summary, &analysis.thesis];
+            texts.extend(analysis.bull_case.iter().chain(&analysis.bear_case).chain(&analysis.risks).map(String::as_str));
+            texts.extend(analysis.strategy.iter().chain(analysis.horizon_note.iter()).map(String::as_str));
+            texts.extend(analysis.would_change_if.iter().flatten().map(String::as_str));
+            texts.extend(analysis.catalysts.iter().map(|c| c.description.as_str()));
+            texts.extend(analysis.scenarios.iter().flatten().map(|s| s.description.as_str()));
+            let mut tags: Vec<String> = texts.iter().flat_map(|t| knowledge::citation::extract_tags(t)).map(|n| format!("D{n}")).collect();
+            tags.sort_by_key(|t| t[1..].parse::<usize>().unwrap_or(0));
+            tags.dedup();
+            for r in knowledge.source_refs(tags.iter().map(String::as_str)) {
+                if !analysis.sources.iter().any(|o| o.title == r.title && o.provider == r.provider) {
+                    analysis.sources.push(r);
+                }
+            }
+        }
         analysis.model = caps.id.clone();
         analysis.asset = snap.summary.id.clone();
         analysis.price_at_analysis = snap.quote.as_ref().map(|q| q.price).filter(|p| p.is_finite());
@@ -629,6 +688,7 @@ impl AnalysisEngine {
 fn numbers_of(t: &str) -> Vec<String> {
     let mut v: Vec<String> = extract_numbers(t).into_iter().filter(|n| !n.exempt).map(|n| n.raw).collect();
     v.extend(crate::context::extract_citations(t).into_iter().map(|n| format!("N{n}")));
+    v.extend(knowledge::citation::extract_tags(t).into_iter().map(|n| format!("D{n}")));
     v.sort();
     v
 }

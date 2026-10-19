@@ -28,6 +28,7 @@ pub mod dashboard;
 pub mod favorites;
 pub mod history;
 pub mod ipo;
+pub mod knowledge;
 pub mod learning;
 pub mod market;
 pub mod models;
@@ -92,6 +93,7 @@ fn api(state: AppState) -> Router {
         .route("/ipo/{symbol}/prospectus", get(ipo::prospectus))
         .route("/ipo/{symbol}/performance", get(ipo::performance))
         .route("/ipo/{symbol}/risk-profile", get(ipo::risk_profile))
+        .route("/knowledge/stats", get(knowledge::stats))
         .route("/learning/performance", get(learning::performance))
         .route("/learning/weights", get(learning::weights))
         .route("/learning/weights/rollback", post(learning::rollback))

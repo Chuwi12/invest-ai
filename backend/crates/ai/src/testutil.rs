@@ -165,3 +165,8 @@ impl SettingsStore for MemSettings {
     }
 }
 
+
+/// FNV-1a de 64 bits (sin dependencias): huella estable de un texto.
+pub fn fnv64(s: &str) -> u64 {
+    s.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3))
+}

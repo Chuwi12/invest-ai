@@ -26,7 +26,18 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::from_env()?;
     let pool = db::connect(&config.database_url).await?;
-    let (market, ipo, analyst, annotate_news, models) = build_services(&config, &pool).await?;
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    // RAG (opcional): un fallo al abrirlo nunca impide arrancar. Con datos simulados no se usa.
+    let kcfg = knowledge::KnowledgeConfig::from_env();
+    let rag = if !kcfg.enabled {
+        None
+    } else if config.fake {
+        tracing::warn!("INVEST_AI_FAKE activo: el archivo de conocimiento (RAG) se desactiva");
+        None
+    } else {
+        server::knowledge::open(kcfg, pool.clone(), shutdown.clone()).await
+    };
+    let (market, ipo, analyst, annotate_news, models) = build_services(&config, &pool, rag.as_ref()).await?;
 
     let mut state = AppState::new(
         market,
@@ -35,7 +46,12 @@ async fn main() -> anyhow::Result<()> {
         Settings { language: config.language.clone(), allowed_origins: config.frontend_origins.clone() },
     )
     .with_news_annotator(annotate_news)
-    .with_ipo(ipo);
+    .with_ipo(ipo)
+    .with_knowledge(rag.as_ref().map(|r| r.kb.clone()));
+    state.shutdown = shutdown.clone();
+    if let Some(rag) = rag {
+        rag.spawn_background(&state.tasks, shutdown.clone());
+    }
     if let Some(models) = models {
         state = state.with_models(models);
     }
@@ -108,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn build_services(config: &Config, pool: &sqlx::SqlitePool) -> anyhow::Result<Services> {
+async fn build_services(config: &Config, pool: &sqlx::SqlitePool, rag: Option<&server::knowledge::Rag>) -> anyhow::Result<Services> {
     if config.fake {
         tracing::warn!("INVEST_AI_FAKE activo: datos y analista simulados");
         let market = fake::FakeMarket { tick_interval: Duration::from_millis(250), ..Default::default() };
@@ -119,11 +135,16 @@ async fn build_services(config: &Config, pool: &sqlx::SqlitePool) -> anyhow::Res
         .context("no se pudo iniciar el servicio de mercado")?;
     // LLM local: el modelo activo se guarda en la tabla `settings` (ver docs/notes/ai.md).
     let settings = Arc::new(SqliteSettings::new(pool.clone()));
-    let analyst = ai::OllamaAnalyst::new(ai::AiConfig::from_env(), settings)
+    let analyst = ai::OllamaAnalyst::with_knowledge(ai::AiConfig::from_env(), settings, rag.map(server::knowledge::Rag::search_handle))
         .map_err(|e| anyhow::anyhow!("no se pudo iniciar el analista: {e}"))?;
     let models = analyst.models();
     let ipo: Arc<dyn IpoData> = Arc::new(market::MarketIpo(market.clone()));
-    Ok((market, ipo, Arc::new(analyst), ai::annotate_sentiment, Some(models)))
+    let analyst: Arc<dyn Analyst> = Arc::new(analyst);
+    let (market, ipo, analyst) = match rag {
+        Some(rag) => rag.wrap(market, ipo, analyst),
+        None => (market as Arc<dyn MarketData>, ipo, analyst),
+    };
+    Ok((market, ipo, analyst, ai::annotate_sentiment, Some(models)))
 }
 
 /// Espera Ctrl+C o SIGTERM.
