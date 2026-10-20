@@ -1,7 +1,8 @@
 # Archivo de conocimiento local (RAG)
 
-Estado: **cableado** en servidor e IA (apagado por defecto: `RAG_ENABLED=0`) y **medido con Ollama real** (ver «Medición real y
-recomendación»): convive con el LLM en la GPU, pero con `qwen2.5:7b` no mejora la tesis; la recomendación es no activarlo por defecto.
+Estado: **cableado** en servidor e IA y **medido con Ollama real** (ver «Medición real y recomendación»): convive con el LLM en la GPU,
+pero con `qwen2.5:7b` la recuperación no mejora la tesis. Desde el 20-oct el **archivado** y la **recuperación** son interruptores
+distintos (ver «Archivado frente a recuperación»): por defecto se archiva (`RAG_ARCHIVE=1`) y no se recupera (`RAG_ANALYSIS=0`, `RAG_CHAT=0`).
 
 ## Principio
 El LLM no aprende: consulta. El archivo guarda texto que la app ya tiene (noticias descargadas, secciones de
@@ -220,10 +221,11 @@ pide a Ollama CPU para no competir por VRAM (opción de Ollama, **sin verificar*
 - `purge(now)` hay que llamarla periódicamente (cada pocas horas); el crate no lanza temporizadores propios.
 - Los embeddings viven en la misma SQLite que las conversaciones: la BD crece cientos de MB. Si molesta, mover a un
   fichero propio es sencillo (misma migración, otro pool).
+- **Tamaño medido** (no estimado) y cómo se acota: ver «Archivado frente a recuperación» → «Coste del archivado por defecto».
 
 ## API pública (`knowledge`)
 ```rust
-KnowledgeConfig::from_env() / from_lookup(..)            // RAG_*; enabled=false por defecto
+KnowledgeConfig::from_env() / from_lookup(..)            // RAG_*; .modes = RagModes { archive: true, analysis: false, chat: false } por defecto; .notes = avisos
 OllamaEmbedder::new(cfg.embed.clone())?                   // impl Embedder sobre POST /api/embed (no descarga modelos)
 FakeEmbedder { dim }                                      // determinista, para tests y demo (no semántico)
 let kb = KnowledgeBase::open(pool, Arc<dyn Embedder>, cfg).await?;   // comprueba esquema, carga índice
@@ -274,12 +276,16 @@ degrada a vectores sin perder el documento; borrado, actualización y purga mant
 - Detección de cabeceras de folleto: heurística de texto plano; HTML de EDGAR conviene seccionarlo en origen.
 
 ## Cableado (hecho)
-**Cómo activarlo**: `ollama pull embeddinggemma:300m-qat-q8_0` (la app nunca descarga) y `RAG_ENABLED=1` en `.env`. Con
-`INVEST_AI_FAKE=1` se ignora. `GET /api/knowledge/stats` (ver `docs/API.md`) dice si está activo y cuántos fragmentos hay.
+**Cómo activarlo**: `ollama pull embeddinggemma:300m-qat-q8_0` (la app nunca descarga). Desde el 20-oct el **archivado está encendido por defecto**
+(`RAG_ARCHIVE=1`, sin tocar nada) y la recuperación apagada; para que el análisis o el chat consulten el archivo, `RAG_ANALYSIS=1` y/o
+`RAG_CHAT=1` en `.env` (ver «Archivado frente a recuperación»). Con `INVEST_AI_FAKE=1` los tres se ignoran. `GET /api/knowledge/stats`
+(ver `docs/API.md`) dice qué interruptores están activos y cuántos fragmentos hay.
 
 | Pieza | Dónde |
 |---|---|
-| Apertura tolerante a fallos, `TeeMarket` (noticias), `TeeIpo` (folletos como `Filing` con sus secciones), mantenimiento (`embed_pending(64)` al arrancar y cada 2 min, `purge` cada 6 h), pausa por actividad | `server/src/knowledge.rs` |
+| Apertura tolerante a fallos (`open_configured`), `TeeMarket` (noticias), `TeeIpo` (folletos como `Filing` con sus secciones), mantenimiento (`embed_pending(64)` al arrancar y cada 2 min, `purge` cada 6 h), pausa por actividad; `Rag::search()` entrega la búsqueda al análisis y al chat según `RAG_ANALYSIS` / `RAG_CHAT`; `ollama_analyst` es el único punto donde el RAG llega a la IA | `server/src/knowledge.rs` |
+| Interruptores `RAG_ARCHIVE` / `RAG_ANALYSIS` / `RAG_CHAT` y compatibilidad con `RAG_ENABLED` | `knowledge/src/config.rs` (`RagModes`) |
+| Motor de chat con su propia búsqueda, separada de la del análisis (`OllamaAnalyst::with_split_knowledge`) | `ai/src/analyst.rs` |
 | Cableado en el arranque, espera de los trabajadores en el apagado (`state.tasks`) | `server/src/main.rs`, `server/src/state.rs` |
 | Ruta `GET /api/knowledge/stats` | `server/src/routes/knowledge.rs` |
 | Recuperación en el análisis, reglas del system prompt, `[D#]`, fuentes | `ai/src/rag.rs`, `ai/src/analysis/mod.rs` |
@@ -304,12 +310,14 @@ degrada a vectores sin perder el documento; borrado, actualización y purga mant
   las subsecciones (el padre ya las contiene). `doc_key = filing:<accession>`.
 
 ### RAG apagado = idéntico byte a byte
-`knowledge` es `None` en el motor de análisis, en el de chat y en el `ToolRunner`; el servidor no envuelve nada. Garantías
+«Apagado» es, desde el 20-oct, **`RAG_ANALYSIS=0` y `RAG_CHAT=0`** (con o sin archivado, ver la sección siguiente): `knowledge` es `None` en el
+motor de análisis, en el de chat y en el `ToolRunner`. Garantías
 comprobadas: (1) tests `rag_off_standard_analysis_matches_golden_transcript` y `rag_off_chat_matches_golden_transcript` (en `ai`):
 huella FNV-64 de TODAS las peticiones enviadas a Ollama más el `Analysis`/eventos de chat sobre el fixture, calculada con el
 código anterior al RAG, antes de tocarlo (se enmascaran solo la hora y la antigüedad del dato); (2) `empty_archive_is_byte_identical_to_rag_off`:
 con el RAG encendido pero sin resultados la huella es la misma; (3) `definitions()` sigue devolviendo 9 herramientas y `search_knowledge`
-con el RAG apagado se rechaza como «herramienta desconocida»; (4) el servidor solo envuelve mercado/OPV/analista con el RAG abierto.
+con el RAG apagado se rechaza como «herramienta desconocida»; (4) el servidor solo envuelve mercado/OPV/analista con el archivado encendido, y esos decoradores solo delegan; (5) con el archivo abierto y
+archivando, `server/tests/rag_modes.rs` compara las peticiones al modelo y el resultado con los de «sin RAG» (ver abajo).
 
 ### Medición real (19–20 oct 2026) y recomendación
 **Entorno**: RTX 4070 Laptop 8 GB, enchufado, Ollama 0.40.6 con `OLLAMA_FLASH_ATTENTION=1` y caché KV `q8_0`; LLM `qwen2.5:7b`
@@ -384,7 +392,7 @@ n = 6 + 1, un modelo y un estilo de ataque; que no obedezca puede deberse a que 
 (5,8 s la primera, con carga). Útil solo si la VRAM se acaba; la ingesta masiva pasa de segundos a minutos.
 
 #### Recomendación
-- **No activar `RAG_ENABLED=1` por defecto** en este equipo con `qwen2.5:7b`. Coste medido: +20 % de tokens de entrada, +560 MiB de VRAM, una
+- **No activar la recuperación por defecto** (entonces `RAG_ENABLED=1`; hoy `RAG_ANALYSIS=1` / `RAG_CHAT=1`) en este equipo con `qwen2.5:7b`. Coste medido: +20 % de tokens de entrada, +560 MiB de VRAM, una
   búsqueda de decenas de ms (hasta ~2 s en frío) y una ingesta que compite con el uso. Beneficio medido: **ninguno apreciable** en la tesis; el
   modelo no cita ni usa los fragmentos y la regla del prompt le induce a ensuciar con citas que `clean` tiene que quitar (~9 por análisis).
 - **Seguro de dejar encendido si el usuario lo quiere** (p. ej. para acumular historial): el embedder en GPU convive con el LLM sin desplazarlo,
@@ -397,13 +405,126 @@ n = 6 + 1, un modelo y un estilo de ataque; que no obedezca puede deberse a que 
   frente a las noticias `[N#]` del snapshot (hoy la mayoría son las mismas); (4) repetir esta prueba tras 2–4 semanas de archivo y con ≥ 5 repeticiones por brazo
   para que el contraste de ⚠ tenga potencia.
 
+## Archivado frente a recuperación (20-oct-2026)
+
+**Decisión.** Hasta el 20-oct un solo interruptor (`RAG_ENABLED`) activaba a la vez dos cosas distintas. Ahora son tres, independientes:
+
+| Variable | Def. | Qué hace |
+|---|---|---|
+| `RAG_ARCHIVE` | **1** | **Archivado**: abre la base; `TeeMarket` archiva las noticias que la app ya descarga; `TeeIpo` y `fund_docs` archivan folletos de OPV y de ETF; el mantenimiento hace `embed_pending` y `purge`. |
+| `RAG_ANALYSIS` | **0** | **Recuperación en el análisis**: el bloque `<knowledge_base>` en el juez, la regla 7 del system prompt y las citas `[D#]`. |
+| `RAG_CHAT` | **0** | **Recuperación en el chat**: la herramienta `search_knowledge` y la regla de chat. |
+
+**Motivo.** La medición del 20-oct (ver «Medición real y recomendación»; 48 análisis, 12 activos) dice que con `qwen2.5:7b` la recuperación cuesta
+**+20 % de tokens de entrada** (12 016 → 14 448) y **no mejora la tesis** (ninguna cita válida salvo una en 24 análisis; 9,2 citas descartadas por
+`Citations::clean` por análisis). Por tanto no debe estar activa por defecto. Pero esa misma prueba reconoce que **no puede mostrar el valor de un
+archivo acumulado durante semanas** (solo tenía un día de historia), y el sistema de aprendizaje podrá usar estos datos con su fecha
+(`documents.published_at` es la fecha de la noticia o del folleto; `documents.ingested_at`, cuándo se archivó; ambas en ms Unix). Archivar no
+cuesta nada al modelo; recuperar sí. Por eso se separan: **se acumula historia ya y se decide más tarde si se consulta**. (Hoy nada en `learning`
+lee el archivo: es historia acumulada a la espera de usarla.)
+
+### Precedencia (para cada interruptor por separado)
+1. `INVEST_AI_FAKE=1` apaga los tres (el servidor ni abre el archivo).
+2. La propia variable (`RAG_ARCHIVE`, `RAG_ANALYSIS`, `RAG_CHAT`) si trae un valor legible: `1/true/yes/on/si/sí` o `0/false/no/off` (sin distinguir mayúsculas).
+   Un valor ilegible se ignora, cae al nivel siguiente y deja un aviso en el log.
+3. **`RAG_ENABLED` (obsoleta)**, si existe, para los interruptores que no se hayan fijado: `RAG_ENABLED=1` (o `true/yes/on/si/sí`) los pone a 1 y cualquier otro valor, como antes,
+   a 0. Si no se fijó ninguno, las tres quedan a 1 o las tres a 0. Deja un aviso `RAG_ENABLED está obsoleta…` en el log al arrancar.
+4. El valor por defecto de la tabla.
+
+Ejemplos: sin variables → `archive=1 analysis=0 chat=0`. `RAG_ENABLED=1` → `1 1 1` (como antes). `RAG_ENABLED=1 RAG_CHAT=0` → `1 1 0`. `RAG_ENABLED=0` →
+`0 0 0` (**ojo**: una `.env` antigua con `RAG_ENABLED=0` sigue apagando el archivado; para acumular historia hay que quitar la línea o poner `RAG_ARCHIVE=1`).
+`RAG_ENABLED=0 RAG_ARCHIVE=1` → `1 0 0`. La `.env` actual del proyecto no define ninguna variable `RAG_*`, así que aplica el valor por defecto.
+
+### Qué hace cada combinación
+| `ARCHIVE` | `ANALYSIS` | `CHAT` | Efecto |
+|---|---|---|---|
+| 1 | 0 | 0 | **Defecto.** Base abierta, se archiva y se mantiene. Análisis y chat idénticos a los de «sin RAG». |
+| 1 | 1 | 1 | Como antes con `RAG_ENABLED=1`. |
+| 1 | 1 | 0 | Solo el análisis recupera; el chat es idéntico a «sin RAG», salvo `analyze_asset` lanzado desde el chat, que no recupera. Ver «Límite conocido». |
+| 1 | 0 | 1 | Solo el chat recupera; el análisis lanzado desde la página es idéntico a «sin RAG», pero el que el chat lanza con `analyze_asset` usa el motor del chat y SÍ recupera (y se guarda como un análisis más, `origin='chat'`). Ver «Límite conocido». |
+| 0 | 1 | 0 o 1 | **Archivo de solo lectura**: se abre para consultar lo que ya hay; no hay decoradores, ni colas, ni `embed_pending`, ni `purge`. Útil para repetir la medición con el archivo congelado. |
+| 0 | 0 | 1 | Igual, de solo lectura, solo para el chat. |
+| 0 | 0 | 0 | Nada: ni se abre. `/knowledge/stats` → `{ enabled: false, … }`. |
+
+### Cómo se garantiza que el análisis y el chat no cambian
+- `server::knowledge::Rag::search()` solo entrega una búsqueda al análisis si `RAG_ANALYSIS=1` y al chat si `RAG_CHAT=1`; sin ella el motor correspondiente tiene
+  `knowledge = None`, que es exactamente el camino de código de «RAG apagado» (el mismo que fijan los tests golden de `ai`: `rag_off_standard_analysis_matches_golden_transcript`,
+  `rag_off_chat_matches_golden_transcript`, `empty_archive_is_byte_identical_to_rag_off`).
+- `ai::OllamaAnalyst::with_split_knowledge` recibe las dos búsquedas por separado. Con ambas a `None` construye un solo motor (igual que antes); si no, el chat usa su propio
+  `AnalysisEngine` (mismo cliente y mismo `ModelManager`, donde vive el modelo activo; el motor no guarda más estado), para que un interruptor nunca active al otro.
+- Los decoradores del archivado (`TeeMarket`, `TeeIpo`, `TrackedAnalyst`) solo delegan: no tocan ni los datos ni el orden de las llamadas.
+- **Prueba de servidor** (`server/tests/rag_modes.rs`, sin red ni GPU): monta el analista REAL por el mismo camino que `main` (`server::knowledge::ollama_analyst`) contra un Ollama
+  simulado que registra cada petición, con el archivo abierto, **archivando** y con documentos de AAPL que una recuperación encontraría. Comprueba que las peticiones al modelo
+  (análisis estándar y un turno de chat) y el resultado son idénticos a los de «sin RAG» con `1/0/0`, que el archivado siguió funcionando (las noticias del snapshot llegaron
+  al archivo), y, como control para que la prueba no sea vacía, que con `ANALYSIS=1` el juez recibe `<knowledge_base>`, con `CHAT=1` el chat ofrece `search_knowledge`, y que cada
+  interruptor afecta solo a su lado (`1/1/0` deja el chat idéntico; `1/0/1` deja el análisis idéntico).
+- **Límite conocido**: el análisis completo que el chat lanza con la herramienta `analyze_asset` pasa por el motor del chat, así que sigue a `RAG_CHAT` y no a `RAG_ANALYSIS`.
+  Solo importa si los dos interruptores difieren. Separarlo del todo exige tocar `ai/src/chat.rs` y `ai/src/analysis/mod.rs` (un campo `chat_knowledge` en `AnalysisEngine`).
+
+### Coste del archivado por defecto
+**Disco** (medido, no estimado). El archivo real de la medición (`~/.cache/invest-ai/rag-eval/db/B.db`: 387 documentos, 1 189 fragmentos de 768 dimensiones, índice FTS5 incluido; 383 noticias de
+~136 caracteres y 4 documentos de 806 fragmentos de ~1 240 caracteres) ocupa **7,3 MB solo en las tablas del archivo** → **≈ 6,2 KB por fragmento**, de los cuales los vectores son
+~4,2 KB (3 072 B de BLOB; SQLite guarda uno por página de 4 KiB), el texto ~1,2 KB y el índice léxico ~0,5 KB. Extrapolación lineal:
+
+| Fragmentos | Disco (≈ 6,2 KB c/u) | RAM del índice vectorial (≈ 3,1 KB c/u) |
+|---|---|---|
+| 1 000 | 6 MB | 3 MB |
+| 10 000 | 60 MB | 30 MB |
+| 40 000 | 250 MB | 120 MB |
+| 100 000 (tope, `RAG_MAX_CHUNKS`) | **≈ 620 MB** | ≈ 300 MiB |
+
+La cifra de «~250 MiB a 100 000 fragmentos» de la tabla de latencia léxica (`bench_lexical`, 203 → 248 MiB) es **solo texto + FTS5 con fragmentos sintéticos de ~1 KB, sin embeddings**; con los
+vectores de 768 dim son unos 600 MB, no 250. (Es lineal y depende del texto: las noticias son fragmentos pequeños y los folletos grandes; el tamaño por fragmento casi no cambia porque lo dominan los vectores.)
+
+Ritmo: la medición vio **356–387 documentos (1 158–1 189 fragmentos) tras un barrido de 12 activos**, de los cuales ~330–380 eran noticias (1 fragmento por noticia) y el resto 2 folletos de OPV
+(~400 fragmentos cada uno, ~2,5 MB cada uno). No se ha medido el ritmo diario en régimen estacionario con el feed real; con las noticias de 12 activos lo razonable es **del orden de 100–400
+noticias nuevas al día → 0,6–2,5 MB/día**, es decir **~55–225 MB** a los 90 días de retención de noticias, más los folletos (unos 2,5 MB por OPV consultada, 3 años). Es una estimación de orden de magnitud:
+`GET /api/knowledge/stats` (`chunks`, `textBytes`, `embeddingBytes`) da la cifra real.
+
+**Qué acota el disco** (comprobado):
+- `purge` se ejecuta al arrancar y cada 6 h (`run_maintenance`) y aplica (a) la retención por **fecha de publicación** (`RAG_NEWS_RETENTION_DAYS`=90, `RAG_FILING_RETENTION_DAYS`=1095, `RAG_ANALYSIS_RETENTION_DAYS`=0 = nunca)
+  y (b) el tope duro `RAG_MAX_CHUNKS`=100 000, que expulsa primero las noticias más antiguas y luego los folletos, nunca los fijados ni los análisis.
+- `knowledge/tests/archive.rs::retention_and_cap_keep_the_database_file_bounded`: 50 «días» × 20 noticias de ~0,9 KB con vectores de 768 dim, retención de 10 días y tope de 120 fragmentos → tras cada purga
+  `chunks ≤ 120` y el fichero **no crece** entre el día 25 y el 50 (892 928 B en ambos; SQLite reutiliza las páginas libres).
+- SQLite **no devuelve** al sistema los bytes liberados (no hay `VACUUM`): el fichero se estabiliza en el máximo alcanzado, no baja. Si se reduce la retención o el tope a posteriori, el fichero no se encoge
+  hasta un `VACUUM` manual.
+- Cuidado: **la retención es también el horizonte de la «historia acumulada»**. Con 90 días las noticias más antiguas se purgan; si la idea es conservar más para aprendizaje, hay que subir
+  `RAG_NEWS_RETENTION_DAYS` (0 = indefinida) y asumir el disco (~6 KB por noticia ≈ 0,6–2,5 MB/día con el ritmo de arriba).
+
+**RAM.** El índice vectorial se carga entero al abrir el archivo (~3,1 KB por fragmento a 768 dim) **aunque la recuperación esté apagada**: ~60–120 MiB con 20 000–40 000 fragmentos, ~300 MiB en el tope.
+Es RAM del sistema, no VRAM. Cargarlo de forma perezosa solo si `RAG_ANALYSIS` o `RAG_CHAT` están activos sería posible y no está hecho.
+
+**VRAM.** El embedder (`embeddinggemma:300m-qat-q8_0`) ocupa **~560 MiB de VRAM mientras está cargado** (79 → 639 MiB; medido el 20-oct) y convive con `qwen2.5:7b` de 16 k de contexto sin desplazarlo
+(5 754 MiB en total en una GPU de 8 GB). Solo se carga cuando entra texto nuevo que embeber (`embed_pending`, ingesta) y Ollama lo descarga a los **2 min** (`RAG_EMBED_KEEP_ALIVE=2m`). **La ingesta
+espera mientras hay un análisis o un chat en curso** (`TrackedAnalyst` + `GatedEmbedder`; las consultas no esperan, pero con la recuperación apagada no hay consultas), así que el embedder no compite con una
+generación. Con un LLM mayor (p. ej. `qwen3.5:9b`, 6,5 GB) el margen se acaba y no está medido: en ese caso `RAG_EMBED_NUM_GPU=0` (embedder en CPU: ~3,8 fragmentos/s frente a ~105 en GPU, medido) quita la VRAM
+a cambio de ingesta más lenta.
+
+**Sin GPU, sin Ollama o sin el modelo** (comprobado con tests, `knowledge/tests/archive.rs` y `server/tests/rag_modes.rs`): el archivado guarda el texto, deja los fragmentos «pendientes» y la búsqueda
+léxica (BM25) ya los encuentra. Tras el primer fallo el embedder queda en pausa (30 s si Ollama no responde, **5 min si el modelo no está instalado**: falta `ollama pull`) y no se le vuelve a llamar:
+con 30 documentos y 5 pasadas de `embed_pending` hay **1** llamada al embedder, y el mantenimiento no entra en bucle (`embed_pending` devuelve 0 y duerme 2 min). Hay **un solo `warn` por caída** (y un `info` al recuperarse); el rastro por documento va a `debug`. Antes de este cambio, con el modelo ausente cada documento y cada pasada llamaban a Ollama (35 llamadas en la misma prueba) y registraban un `warn` por documento: era un riesgo real al encender el
+archivado por defecto. Al volver Ollama, `embed_pending` completa lo pendiente solo. Sin GPU, Ollama usa la CPU (ver la tabla de velocidad: ~28× más lento al ingerir, sin efecto en el análisis).
+Una descarga extra de red: el folleto resumido de un ETF se pide a EDGAR en segundo plano la primera vez que se consulta ese ETF y luego como mucho cada 30 días (`fund_docs`); el resto del archivado no hace peticiones extra.
+
+### Cómo reactivar la recuperación para la nueva medición (dentro de 2–4 semanas)
+1. **Mira cuánta historia hay**: `curl -s localhost:<puerto>/api/knowledge/stats` (`documents`, `chunks`, `pending` debería ser 0) y, por fechas,
+   `sqlite3 -readonly data/invest-ai.db "SELECT date(min(published_at)/1000,'unixepoch'), date(max(published_at)/1000,'unixepoch'), count(*) FROM documents"`.
+2. **Congela el archivo** para que los dos brazos vean lo mismo: copia la BD y arranca dos servidores sobre copias, con
+   - brazo **sin**: `RAG_ARCHIVE=0 RAG_ANALYSIS=0 RAG_CHAT=0` (el archivo ni se abre);
+   - brazo **con**: `RAG_ARCHIVE=0 RAG_ANALYSIS=1 RAG_CHAT=1` (solo lectura: no entra nada nuevo durante la prueba).
+   Los scripts de `docs/notes/rag-eval-data/` siguen valiendo; `srv.sh` pasa `RAG_ENABLED=$rag`, que funciona por compatibilidad con un aviso, y admite `VAR=valor` extra para fijar las tres explícitamente.
+3. Para dejarlo encendido en el uso normal: `RAG_ANALYSIS=1` y/o `RAG_CHAT=1` en `.env` y reiniciar; `GET /api/knowledge/stats` debe mostrar `analysis: true` / `chat: true`. Volver a apagarlo es quitar la línea.
+4. Protocolo (de la «Medición real»): ABBA intercalado por activo, **≥ 5 repeticiones por brazo** (con 2 el contraste de ⚠ no tenía potencia), mismos 12 activos, `standard`; métricas: tokens de entrada, duración,
+   ⚠, citas `[D#]` válidas y descartadas, veredicto distinto. Antes de repetirla conviene probar las propuestas pendientes de la recomendación (no pedir `[D#]` en afirmaciones sobre datos de mercado,
+   consulta específica para OPV, deduplicar frente a las `[N#]` del snapshot).
+
 ## Para el coordinador (histórico: ya cableado, ver arriba)
 1. **Migración**: `0004_knowledge.sql` ya está en `server/migrations/`. `knowledge::SCHEMA_SQL` la incluye con `include_str!`
    (única copia); `KnowledgeBase::open` falla con un mensaje claro si no se aplicó. `Cargo.lock` cambia (paquete nuevo,
    dependencias que ya estaban en el lock).
 2. **Workspace**: `crates/knowledge` añadido a `members` y `knowledge = { path = … }` a `[workspace.dependencies]`.
 3. **`server/Cargo.toml`**: `knowledge.workspace = true`.
-4. **`server/src/main.rs`** (tras `db::connect` y antes de `AppState::new`; con `RAG_ENABLED=1`):
+4. **`server/src/main.rs`** (tras `db::connect` y antes de `AppState::new`; entonces con `RAG_ENABLED=1`, hoy `server::knowledge::open_configured`):
 ```rust
 let kcfg = knowledge::KnowledgeConfig::from_env();
 let mut kb = None;
@@ -447,8 +568,8 @@ pub struct TeeMarket { inner: Arc<dyn MarketData>, sink: knowledge::NewsSink }
    ya asignó 0004 a este crate y 0005 al agente de aprendizaje).
 
 ## Folletos resumidos de ETF (19-oct-2026)
-- Qué: la primera vez que se pide el snapshot (o el análisis, que lo necesita) de un ETF/fondo con `RAG_ENABLED=1`, `TeeMarket` ofrece su id a `server/src/fund_docs.rs`. Un trabajador en segundo plano llama a `FundDocs::fund_prospectus` (`MarketService`, ver `notes/market.md`) y lo archiva como `NewDocument { kind: Filing, subtype: 497K|485BPOS|497 }` con 5 secciones (`Investment Objective`, `Fees and Expenses`, `Principal Investment Strategies`, `Principal Risks`, `Portfolio Turnover`), `doc_key = etf:<TICKER>` (el del año siguiente sustituye al anterior), `assets = [etf:<TICKER>]` y la URL del documento en sec.gov.
-- Cola acotada (8) con `try_send`: nunca retrasa una respuesta. Sin RAG (o con `INVEST_AI_FAKE=1`) no se crea nada ni se pide nada a EDGAR. En memoria no se reintenta el mismo ETF antes de 6 h (éxito o fallo); en disco, como mucho una descarga cada 30 días, incluso tras reiniciar (se mira `ingested_at` y `meta.checkedAt` del documento; un folleto sin cambios solo actualiza `checkedAt`). Tiempo máximo de una descarga: 150 s.
+- Qué: la primera vez que se pide el snapshot (o el análisis, que lo necesita) de un ETF/fondo con `RAG_ARCHIVE=1`, `TeeMarket` ofrece su id a `server/src/fund_docs.rs`. Un trabajador en segundo plano llama a `FundDocs::fund_prospectus` (`MarketService`, ver `notes/market.md`) y lo archiva como `NewDocument { kind: Filing, subtype: 497K|485BPOS|497 }` con 5 secciones (`Investment Objective`, `Fees and Expenses`, `Principal Investment Strategies`, `Principal Risks`, `Portfolio Turnover`), `doc_key = etf:<TICKER>` (el del año siguiente sustituye al anterior), `assets = [etf:<TICKER>]` y la URL del documento en sec.gov.
+- Cola acotada (8) con `try_send`: nunca retrasa una respuesta. Sin archivado (`RAG_ARCHIVE=0`) o con `INVEST_AI_FAKE=1` no se crea nada ni se pide nada a EDGAR. En memoria no se reintenta el mismo ETF antes de 6 h (éxito o fallo); en disco, como mucho una descarga cada 30 días, incluso tras reiniciar (se mira `ingested_at` y `meta.checkedAt` del documento; un folleto sin cambios solo actualiza `checkedAt`). Tiempo máximo de una descarga: 150 s.
 - Gestión del embedder igual que el resto: la ingesta espera si hay un análisis en curso.
 - Tests: `server/tests/fund_docs.rs` (embedder simulado; 497K real de TLT), `market/tests/fund_prospectus.rs`.
 - No medido: ingesta con Ollama real (no se usó).

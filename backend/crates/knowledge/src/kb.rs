@@ -28,6 +28,9 @@ use crate::{
 
 /// Tras un fallo transitorio del embedder no se vuelve a intentar durante este tiempo.
 const EMBED_BACKOFF: Duration = Duration::from_secs(30);
+/// Si el modelo de embeddings no está instalado no hay nada que reintentar hasta que el usuario lo descargue
+/// (`ollama pull`): pausa más larga, para que el archivado por defecto no llame a Ollama con cada documento.
+const EMBED_BACKOFF_MODEL_MISSING: Duration = Duration::from_secs(300);
 
 /// Búsqueda de conocimiento. Contrato mínimo que puede consumir `ai` (o moverse a `domain`).
 #[async_trait]
@@ -45,6 +48,8 @@ pub struct KnowledgeBase {
     backoff_until: Mutex<Option<Instant>>,
     /// La tabla FTS5 existe y funciona (se pone a `false` si algo falla: se degrada a solo vectores).
     fts: AtomicBool,
+    /// El último intento de calcular embeddings falló: sirve para avisar UNA vez por caída (y otra al recuperarse).
+    embedder_down: AtomicBool,
 }
 
 fn meta_of(d: &DocumentInfo) -> DocMeta {
@@ -116,6 +121,7 @@ impl KnowledgeBase {
             write_gate: tokio::sync::Mutex::new(()),
             backoff_until: Mutex::new(None),
             fts: AtomicBool::new(fts),
+            embedder_down: AtomicBool::new(false),
         });
         if fts {
             // Los fragmentos anteriores a la tabla se indexan en segundo plano y en tandas.
@@ -189,10 +195,13 @@ impl KnowledgeBase {
         self.index.write().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// ¿El embedder está en pausa por un fallo reciente? (No se le llama hasta que pase.)
+    fn embedder_paused(&self) -> bool {
+        self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|until| Instant::now() < until)
+    }
+
     async fn embed_texts(&self, texts: &[String], kind: EmbedKind) -> std::result::Result<Vec<Vec<f32>>, EmbedError> {
-        if let Some(until) = *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner())
-            && Instant::now() < until
-        {
+        if self.embedder_paused() {
             return Err(EmbedError::Unavailable("embedder en pausa tras un fallo reciente".into()));
         }
         let res = self.embedder.embed(texts, kind).await;
@@ -209,11 +218,23 @@ impl KnowledgeBase {
                     normalize_l2(v)?;
                 }
                 *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                if self.embedder_down.swap(false, Ordering::Relaxed) {
+                    tracing::info!("embeddings disponibles otra vez: se completan los fragmentos pendientes");
+                }
                 Ok(vs)
             }
             Err(e) => {
-                if e.is_transient() {
-                    *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now() + EMBED_BACKOFF);
+                // Un solo aviso por caída (con Ollama parado el archivado sigue guardando texto y reintenta cada pausa).
+                if !self.embedder_down.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(error = %e, "embeddings no disponibles: el texto se sigue archivando y los vectores quedan pendientes (aviso único por caída)");
+                }
+                let pause = match &e {
+                    EmbedError::Unavailable(_) => Some(EMBED_BACKOFF),
+                    EmbedError::ModelMissing(_) => Some(EMBED_BACKOFF_MODEL_MISSING),
+                    EmbedError::Bad(_) => None,
+                };
+                if let Some(p) = pause {
+                    *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now() + p);
                 }
                 Err(e)
             }
@@ -286,7 +307,8 @@ impl KnowledgeBase {
                     }
                     embedded = hashes.iter().filter(|h| todo.iter().any(|t| &t.0 == *h)).count();
                 }
-                Err(e) => tracing::warn!(error = %e, doc_key = key, "sin embeddings: los fragmentos quedan pendientes"),
+                // El aviso (una vez por caída) lo da `embed_texts`; por documento solo queda rastro a nivel `debug`.
+                Err(e) => tracing::debug!(error = %e, doc_key = key, "sin embeddings: los fragmentos quedan pendientes"),
             }
         }
 
@@ -442,7 +464,8 @@ impl KnowledgeBase {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "embed_pending interrumpido");
+                    // Un embedder caído no debe llenar el log con un aviso en cada pasada de mantenimiento.
+                    tracing::debug!(error = %e, "embed_pending interrumpido");
                     break;
                 }
             }

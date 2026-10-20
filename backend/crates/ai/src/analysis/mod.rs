@@ -370,9 +370,11 @@ impl AnalysisEngine {
         }
         v.idx.add_text(&levels_block, Segment::Levels);
         // Una cifra citada de un fragmento recuperado cuenta como respaldada (solo el texto del
-        // fragmento: ni fechas ni URL de los metadatos).
-        for h in knowledge.hits() {
-            v.idx.add_text(&h.text, Segment::Other);
+        // fragmento: ni fechas ni URL de los metadatos). Se indexa EXACTAMENTE lo que el modelo ve
+        // (`rendered_texts`: saneado y recortado como en `<knowledge_base>`): la cola recortada del
+        // fragmento no puede avalar una cifra que el modelo no tuvo delante.
+        for text in knowledge.rendered_texts() {
+            v.idx.add_text(&text, Segment::Other);
         }
         let usage = Usage::default();
         let mut stage_notes: Vec<String> = Vec::new();

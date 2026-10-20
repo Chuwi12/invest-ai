@@ -8,16 +8,20 @@ use std::{sync::Arc, time::Duration};
 
 use axum::http::StatusCode;
 use common::TestApp;
-use knowledge::{DocKind, EmbedKind, Embedder, FakeEmbedder, KnowledgeConfig, SearchRequest};
+use knowledge::{DocKind, EmbedKind, Embedder, FakeEmbedder, KnowledgeConfig, RagModes, SearchRequest};
 use serde_json::json;
 use server::knowledge::{Activity, GatedEmbedder, Rag, TrackedAnalyst, open_with, run_maintenance};
 use tokio_util::sync::CancellationToken;
 
 /// App con el RAG cableado igual que en `main`, pero con embedder simulado.
 async fn app_with_rag() -> (TestApp, Arc<knowledge::KnowledgeBase>, CancellationToken) {
+    app_with_rag_cfg(KnowledgeConfig::default()).await
+}
+
+async fn app_with_rag_cfg(cfg: KnowledgeConfig) -> (TestApp, Arc<knowledge::KnowledgeBase>, CancellationToken) {
     let mut app = TestApp::new().await;
     let shutdown = CancellationToken::new();
-    let rag: Rag = open_with(KnowledgeConfig::default(), app.state.db.clone(), Arc::new(FakeEmbedder::default()), shutdown.clone()).await.expect("archivo abierto");
+    let rag: Rag = open_with(cfg, app.state.db.clone(), Arc::new(FakeEmbedder::default()), shutdown.clone()).await.expect("archivo abierto");
     let kb = rag.kb.clone();
     let (market, ipo, analyst) = rag.wrap(app.state.market.clone(), app.state.ipo.clone(), app.state.analyst.clone());
     let mut state = app.state.clone().with_knowledge(Some(kb.clone()));
@@ -43,8 +47,29 @@ async fn stats_route_reports_disabled_without_rag() {
     let app = TestApp::new().await;
     let (s, body) = app.get("/api/knowledge/stats").await;
     assert_eq!(s, StatusCode::OK);
-    assert_eq!(body, json!({ "enabled": false }));
+    assert_eq!(body, json!({ "enabled": false, "archive": false, "analysis": false, "chat": false }));
     assert!(app.state.knowledge.is_none());
+}
+
+#[tokio::test]
+async fn stats_route_reports_the_three_switches_and_the_counts() {
+    // Por defecto: se archiva y no se recupera.
+    let (app, _kb, shutdown) = app_with_rag().await;
+    let (s, body) = app.get("/api/knowledge/stats").await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!((&body["enabled"], &body["archive"], &body["analysis"], &body["chat"]), (&json!(true), &json!(true), &json!(false), &json!(false)), "{body}");
+    for k in ["documents", "chunks", "pending", "maxChunks", "newsRetentionDays", "filingRetentionDays"] {
+        assert!(body[k].is_u64(), "falta {k}: {body}");
+    }
+    assert_eq!((body["maxChunks"].as_u64(), body["newsRetentionDays"].as_u64(), body["filingRetentionDays"].as_u64()), (Some(100_000), Some(90), Some(1095)));
+    shutdown.cancel();
+
+    // Solo recuperación en el análisis, sin archivar.
+    let modes = RagModes { archive: false, analysis: true, chat: false };
+    let (app, _kb, shutdown) = app_with_rag_cfg(KnowledgeConfig { modes, ..KnowledgeConfig::default() }).await;
+    let (_, body) = app.get("/api/knowledge/stats").await;
+    assert_eq!((&body["archive"], &body["analysis"], &body["chat"]), (&json!(false), &json!(true), &json!(false)), "{body}");
+    shutdown.cancel();
 }
 
 #[tokio::test]

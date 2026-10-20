@@ -28,15 +28,8 @@ async fn main() -> anyhow::Result<()> {
     let pool = db::connect(&config.database_url).await?;
     let shutdown = tokio_util::sync::CancellationToken::new();
     // RAG (opcional): un fallo al abrirlo nunca impide arrancar. Con datos simulados no se usa.
-    let kcfg = knowledge::KnowledgeConfig::from_env();
-    let rag = if !kcfg.enabled {
-        None
-    } else if config.fake {
-        tracing::warn!("INVEST_AI_FAKE activo: el archivo de conocimiento (RAG) se desactiva");
-        None
-    } else {
-        server::knowledge::open(kcfg, pool.clone(), shutdown.clone()).await
-    };
+    // Archivado (RAG_ARCHIVE) y recuperación (RAG_ANALYSIS, RAG_CHAT) son interruptores distintos.
+    let rag = server::knowledge::open_configured(knowledge::KnowledgeConfig::from_env(), config.fake, pool.clone(), shutdown.clone()).await;
     // Redes sociales (opinión; apagadas sin credenciales). Con datos simulados no se usan.
     let social_cfg = market::social::SocialConfig::from_env();
     let social_notes = social_cfg.notes.clone();
@@ -145,12 +138,8 @@ async fn build_services(
         .context("no se pudo iniciar el servicio de mercado")?;
     // LLM local: el modelo activo se guarda en la tabla `settings` (ver docs/notes/ai.md).
     let settings = Arc::new(SqliteSettings::new(pool.clone()));
-    let analyst = ai::OllamaAnalyst::with_extras(
-        ai::AiConfig::from_env(),
-        settings,
-        rag.map(server::knowledge::Rag::search_handle),
-        social.map(|s| s as Arc<dyn domain::SocialData>),
-    )
+    // El RAG solo llega a la IA por `ollama_analyst`: la búsqueda del análisis con RAG_ANALYSIS=1 y la del chat con RAG_CHAT=1.
+    let analyst = server::knowledge::ollama_analyst(ai::AiConfig::from_env(), settings, rag, social.map(|s| s as Arc<dyn domain::SocialData>))
         .map_err(|e| anyhow::anyhow!("no se pudo iniciar el analista: {e}"))?;
     let models = analyst.models();
     let ipo: Arc<dyn IpoData> = Arc::new(market::MarketIpo(market.clone()));

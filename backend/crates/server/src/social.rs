@@ -23,8 +23,68 @@ use crate::db::{dt_from_ms, now_ms};
 
 /// Tras un fallo no se vuelve a intentar el mismo activo y red durante este tiempo.
 const FAILURE_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+/// Con el presupuesto mensual de X agotado tampoco: cada intento escribiría una fila en `social_runs`
+/// sin poder conseguir nada (B3). Se reintenta pasada una hora (o tras reiniciar con más presupuesto).
+const BUDGET_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 /// Las publicaciones se conservan más que los 30 días de la línea base + el día actual.
 const POSTS_RETENTION_DAYS: i64 = 45;
+/// `social_runs` dice qué periodos están observados; `stored_digest` mira 40 días atrás.
+const RUNS_RETENTION_DAYS: i64 = 45;
+/// Las instantáneas de `social_metrics` son el material que `learning` evaluará algún día: se
+/// guardan un año (con el tope de una por activo y hora son como mucho 8 760 filas por activo).
+const METRICS_RETENTION_DAYS: i64 = 365;
+/// Como mucho una instantánea de métricas por activo en este intervalo (B3).
+const METRICS_MIN_INTERVAL: Duration = Duration::from_secs(60 * 60);
+/// Ventana de recuento de activos distintos consultados en X.
+const X_ASSETS_WINDOW: Duration = Duration::from_secs(60 * 60);
+/// Activos DISTINTOS que se consultan en X por hora si no se define `X_MAX_ASSETS_PER_HOUR`.
+/// Una lista de seguimiento normal cabe de sobra; es la segunda barrera (tras el control de origen
+/// de `guard.rs`) contra quien intente agotar el presupuesto mensual con símbolos distintos.
+pub const DEFAULT_X_MAX_ASSETS_PER_HOUR: u32 = 30;
+const MAX_X_MAX_ASSETS_PER_HOUR: u32 = 1000;
+/// A partir de este número de activos se limpian los cerrojos y esperas que ya nadie usa.
+const PRUNE_AT: usize = 512;
+
+fn chrono_dur(d: Duration) -> chrono::Duration {
+    chrono::Duration::from_std(d).unwrap_or_default()
+}
+
+/// `X_MAX_ASSETS_PER_HOUR`: entero entre 1 y 1000; sin definir, vacío o inválido, el valor por defecto.
+pub fn parse_x_max_assets_per_hour(raw: Option<&str>) -> u32 {
+    match raw.map(str::trim).filter(|v| !v.is_empty()) {
+        None => DEFAULT_X_MAX_ASSETS_PER_HOUR,
+        Some(v) => match v.parse::<u32>() {
+            Ok(n) if n >= 1 => n.min(MAX_X_MAX_ASSETS_PER_HOUR),
+            _ => {
+                tracing::warn!(valor = v, "X_MAX_ASSETS_PER_HOUR no es un entero positivo: se usa {DEFAULT_X_MAX_ASSETS_PER_HOUR}");
+                DEFAULT_X_MAX_ASSETS_PER_HOUR
+            }
+        },
+    }
+}
+
+/// Resultado de un intento de refresco de un activo.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Refresh {
+    /// Último error (fallo de red, presupuesto agotado, tope de activos de X).
+    pub error: Option<String>,
+    /// Alguna red respondió y se guardó lo recibido: solo entonces hay datos nuevos que anotar.
+    pub refreshed: bool,
+}
+
+/// Activos distintos consultados en X en la última hora.
+#[derive(Default)]
+struct XWindow {
+    seen: HashMap<String, DateTime<Utc>>,
+    /// Última vez que se avisó en el log de que se alcanzó el tope (un aviso por ventana).
+    warned_at: Option<DateTime<Utc>>,
+}
+
+enum XSlot {
+    Granted,
+    /// `first`: es la primera denegación de esta ventana (para avisar una sola vez).
+    Denied { first: bool },
+}
 
 // ---------------------------------------------------------------------------------------------
 // Presupuesto de X en SQLite
@@ -111,7 +171,11 @@ pub struct SocialService {
     budget: Arc<SqliteBudget>,
     /// Un refresco a la vez por activo.
     locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Hasta cuándo no se vuelve a intentar un activo y red (fallo o presupuesto agotado).
     cooldown: std::sync::Mutex<HashMap<(String, SocialSource), DateTime<Utc>>>,
+    /// Tope de activos distintos consultados en X por hora (`X_MAX_ASSETS_PER_HOUR`).
+    x_max_assets: u32,
+    x_window: std::sync::Mutex<XWindow>,
 }
 
 impl SocialService {
@@ -144,12 +208,40 @@ impl SocialService {
             );
         }
         tracing::info!(reddit = cfg.reddit.is_some(), x = cfg.x.is_some(), "redes sociales activadas (opinión, no entra en la puntuación)");
-        Some(Arc::new(Self { pool, cfg, providers, budget, locks: Default::default(), cooldown: Default::default() }))
+        let x_max_assets = parse_x_max_assets_per_hour(std::env::var("X_MAX_ASSETS_PER_HOUR").ok().as_deref());
+        if cfg.x.is_some() {
+            tracing::info!(activos_por_hora = x_max_assets, "X: tope de activos distintos consultados por hora");
+        }
+        Some(Self::build(pool, cfg, providers, budget, x_max_assets))
     }
 
-    /// Con proveedores a medida (tests).
+    /// Con proveedores a medida (tests) y el tope de activos de X por defecto.
     pub fn with_providers(cfg: SocialConfig, pool: SqlitePool, providers: Vec<Arc<dyn SocialProvider>>, budget: Arc<SqliteBudget>) -> Arc<Self> {
-        Arc::new(Self { pool, cfg, providers, budget, locks: Default::default(), cooldown: Default::default() })
+        Self::build(pool, cfg, providers, budget, DEFAULT_X_MAX_ASSETS_PER_HOUR)
+    }
+
+    /// Como `with_providers`, con otro tope de activos distintos por hora en X (tests).
+    pub fn with_providers_and_x_cap(
+        cfg: SocialConfig,
+        pool: SqlitePool,
+        providers: Vec<Arc<dyn SocialProvider>>,
+        budget: Arc<SqliteBudget>,
+        x_max_assets_per_hour: u32,
+    ) -> Arc<Self> {
+        Self::build(pool, cfg, providers, budget, x_max_assets_per_hour.max(1))
+    }
+
+    fn build(pool: SqlitePool, cfg: SocialConfig, providers: Vec<Arc<dyn SocialProvider>>, budget: Arc<SqliteBudget>, x_max_assets: u32) -> Arc<Self> {
+        Arc::new(Self {
+            pool,
+            cfg,
+            providers,
+            budget,
+            locks: Default::default(),
+            cooldown: Default::default(),
+            x_max_assets,
+            x_window: Default::default(),
+        })
     }
 
     pub fn config(&self) -> &SocialConfig {
@@ -157,16 +249,55 @@ impl SocialService {
     }
 
     fn lock_for(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
-        self.locks.lock().unwrap_or_else(|p| p.into_inner()).entry(key.to_string()).or_default().clone()
+        let mut locks = self.locks.lock().unwrap_or_else(|p| p.into_inner());
+        if locks.len() >= PRUNE_AT {
+            // Sin más dueño que el mapa: nadie está refrescando ese activo. Evita que símbolos
+            // inventados hagan crecer el mapa sin límite.
+            locks.retain(|_, l| Arc::strong_count(l) > 1);
+        }
+        locks.entry(key.to_string()).or_default().clone()
+    }
+
+    /// No se vuelve a intentar `(activo, red)` hasta `until`. Poda de paso las esperas vencidas.
+    fn set_cooldown(&self, key: (String, SocialSource), until: DateTime<Utc>, now: DateTime<Utc>) {
+        let mut cd = self.cooldown.lock().unwrap_or_else(|p| p.into_inner());
+        if cd.len() >= PRUNE_AT {
+            cd.retain(|_, u| *u > now);
+        }
+        cd.insert(key, until);
+    }
+
+    /// Reserva un hueco para consultar `asset` en X: como mucho `x_max_assets` activos distintos en
+    /// la última hora. Un activo ya contado sigue entrando (no ocupa un hueco nuevo).
+    fn x_slot(&self, asset: &str, now: DateTime<Utc>) -> XSlot {
+        let mut w = self.x_window.lock().unwrap_or_else(|p| p.into_inner());
+        let since = now - chrono_dur(X_ASSETS_WINDOW);
+        w.seen.retain(|_, t| *t > since);
+        let max = usize::try_from(self.x_max_assets).unwrap_or(usize::MAX);
+        if w.seen.contains_key(asset) || w.seen.len() < max {
+            w.seen.insert(asset.to_string(), now);
+            return XSlot::Granted;
+        }
+        let first = w.warned_at.is_none_or(|t| t <= since);
+        if first {
+            w.warned_at = Some(now);
+        }
+        XSlot::Denied { first }
     }
 
     /// Consulta las redes si la última consulta correcta de ese activo y red es más antigua que
     /// `refresh_minutes`. Nunca falla: devuelve el último error (si lo hubo) como texto.
     pub async fn refresh_if_stale(&self, asset: &AssetSummary) -> Option<String> {
+        self.refresh(asset).await.error
+    }
+
+    /// Como `refresh_if_stale`, y además dice si hubo un refresco real (para anotar métricas).
+    pub async fn refresh(&self, asset: &AssetSummary) -> Refresh {
         let key = asset.id.to_string();
         let lock = self.lock_for(&key);
         let _g = lock.lock().await;
         let mut last_err = None;
+        let mut refreshed = false;
         for p in &self.providers {
             let source = p.source();
             let now = Utc::now();
@@ -182,13 +313,22 @@ impl SocialService {
                 continue;
             }
             let cd_key = (key.clone(), source);
-            let in_cooldown = self
-                .cooldown
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .get(&cd_key)
-                .is_some_and(|t| now - *t < chrono::Duration::from_std(FAILURE_COOLDOWN).unwrap_or_default());
+            let in_cooldown = self.cooldown.lock().unwrap_or_else(|p| p.into_inner()).get(&cd_key).is_some_and(|until| now < *until);
             if in_cooldown {
+                continue;
+            }
+            // Segunda barrera del presupuesto de X: activos DISTINTOS por hora. Va después de la
+            // caché y de la espera, así que solo cuentan consultas que de verdad iban a salir.
+            if source == SocialSource::X
+                && let XSlot::Denied { first } = self.x_slot(&key, now)
+            {
+                if first {
+                    tracing::warn!(
+                        tope = self.x_max_assets,
+                        "X: tope de activos distintos consultados por hora alcanzado (X_MAX_ASSETS_PER_HOUR); no se consulta X hasta que baje"
+                    );
+                }
+                last_err = Some("tope de activos distintos por hora en X alcanzado".to_string());
                 continue;
             }
             let q = SocialQuery { class: asset.class, symbol: asset.id.symbol.clone(), name: Some(asset.name.clone()), days: self.cfg.days };
@@ -196,18 +336,24 @@ impl SocialService {
                 Ok(batch) => {
                     let window_start = now - chrono::Duration::days(i64::from(self.cfg.days));
                     let ok = !batch.budget_exhausted;
-                    if let Err(e) = self.store(&key, source, &batch.posts, now, window_start, ok, batch.truncated, batch.reads, batch.budget_exhausted).await {
-                        tracing::warn!(error = %e, "no se pudieron guardar las publicaciones sociales");
-                        last_err = Some(e.to_string());
+                    match self.store(&key, source, &batch.posts, now, window_start, ok, batch.truncated, batch.reads, batch.budget_exhausted).await {
+                        Ok(()) => refreshed |= ok,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "no se pudieron guardar las publicaciones sociales");
+                            last_err = Some(e.to_string());
+                            self.set_cooldown(cd_key.clone(), now + chrono_dur(FAILURE_COOLDOWN), now);
+                        }
                     }
                     if batch.budget_exhausted {
                         last_err = Some("presupuesto mensual de lecturas de X agotado".into());
+                        // Sin esto, cada GET repetiría la consulta y escribiría otra fila en `social_runs`.
+                        self.set_cooldown(cd_key, now + chrono_dur(BUDGET_COOLDOWN), now);
                     }
                 }
                 Err(e) => {
                     let msg = market::secret::redact(&e.to_string(), &self.cfg.secrets());
                     tracing::warn!(activo = %key, red = source.as_str(), error = %msg, "redes sociales: la consulta falló");
-                    self.cooldown.lock().unwrap_or_else(|p| p.into_inner()).insert(cd_key, now);
+                    self.set_cooldown(cd_key, now + chrono_dur(FAILURE_COOLDOWN), now);
                     let _ = sqlx::query("INSERT INTO social_runs (asset_id, source, fetched_at, window_start, ok, error) VALUES (?1, ?2, ?3, ?4, 0, ?5)")
                         .bind(&key)
                         .bind(source.as_str())
@@ -216,11 +362,24 @@ impl SocialService {
                         .bind(&msg)
                         .execute(&self.pool)
                         .await;
+                    self.purge(now).await;
                     last_err = Some(msg);
                 }
             }
         }
-        last_err
+        Refresh { error: last_err, refreshed }
+    }
+
+    /// Retención de las tablas de redes (también cuando solo hay fallos y `store` no llega a correr).
+    async fn purge(&self, now: DateTime<Utc>) {
+        match self.pool.acquire().await {
+            Ok(mut conn) => {
+                if let Err(e) = purge_old(&mut conn, now).await {
+                    tracing::warn!(error = %e, "no se pudo aplicar la retención de las tablas de redes sociales");
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "no se pudo aplicar la retención de las tablas de redes sociales"),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -271,11 +430,14 @@ impl SocialService {
             .bind(budget_exhausted.then_some("presupuesto agotado"))
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM social_posts WHERE created_at < ?1").bind((now - chrono::Duration::days(POSTS_RETENTION_DAYS)).timestamp_millis()).execute(&mut *tx).await?;
+        purge_old(&mut tx, now).await?;
         tx.commit().await
     }
 
     /// Lo guardado para el activo, sin consultar a nadie. `None` si no hay publicaciones recientes.
+    /// Con `record` intenta añadir una instantánea de métricas: solo se anota si no hay otra del
+    /// mismo activo en la última hora (`METRICS_MIN_INTERVAL`); quien llama pasa `true` solo tras
+    /// un refresco real (`digest_for`), para que `learning` no vea instantáneas duplicadas.
     pub async fn stored_digest(&self, asset: &AssetSummary, record: bool) -> Result<Option<SocialDigest>, sqlx::Error> {
         let key = asset.id.to_string();
         let now = Utc::now();
@@ -330,11 +492,14 @@ impl SocialService {
         Ok(Some(SocialDigest { asset: asset.id.clone(), metrics, excerpts }))
     }
 
-    /// Añade una instantánea (nunca actualiza una anterior).
+    /// Añade una instantánea (nunca actualiza una anterior), salvo que ya haya otra del activo en
+    /// la última hora. Comprobación e inserción van en una sola sentencia: sin carreras.
     async fn record_metrics(&self, key: &str, m: &domain::SocialMetrics) -> Result<(), sqlx::Error> {
+        let recent_after = m.as_of - chrono_dur(METRICS_MIN_INTERVAL);
         sqlx::query(
             "INSERT INTO social_metrics (asset_id, as_of, window_days, mentions, authors, bullish, bearish, neutral, mentions_window, bullish_window, bearish_window, baseline_mean, baseline_days, ratio, z, truncated, by_source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+             WHERE NOT EXISTS (SELECT 1 FROM social_metrics WHERE asset_id = ?1 AND as_of > ?18)",
         )
         .bind(key)
         .bind(m.as_of.timestamp_millis())
@@ -353,15 +518,17 @@ impl SocialService {
         .bind(m.z)
         .bind(m.truncated)
         .bind(serde_json::to_string(&m.by_source).unwrap_or_else(|_| "[]".into()))
+        .bind(recent_after.timestamp_millis())
         .execute(&self.pool)
         .await
         .map(|_| ())
     }
 
-    /// Refresca si toca y devuelve lo guardado (con instantánea de métricas).
+    /// Refresca si toca y devuelve lo guardado. La instantánea de métricas solo se anota tras un
+    /// refresco real (no por cada lectura de lo ya guardado) y como mucho una por activo y hora.
     pub async fn digest_for(&self, asset: &AssetSummary) -> Result<Option<SocialDigest>, DomainError> {
-        let _ = self.refresh_if_stale(asset).await;
-        self.stored_digest(asset, true).await.map_err(|e| DomainError::Internal(format!("redes sociales: {e}")))
+        let refreshed = self.refresh(asset).await.refreshed;
+        self.stored_digest(asset, refreshed).await.map_err(|e| DomainError::Internal(format!("redes sociales: {e}")))
     }
 
     /// Ruta `GET /api/social/status`.
@@ -404,6 +571,16 @@ impl SocialService {
             "notes": self.cfg.notes,
         })
     }
+}
+
+/// Retención de las tres tablas de redes que crecen con el uso (el presupuesto mensual es una
+/// fila por mes). Se ejecuta tras cada refresco y tras cada fallo registrado.
+async fn purge_old(conn: &mut sqlx::SqliteConnection, now: DateTime<Utc>) -> Result<(), sqlx::Error> {
+    let cutoff = |days: i64| (now - chrono::Duration::days(days)).timestamp_millis();
+    sqlx::query("DELETE FROM social_posts WHERE created_at < ?1").bind(cutoff(POSTS_RETENTION_DAYS)).execute(&mut *conn).await?;
+    sqlx::query("DELETE FROM social_runs WHERE fetched_at < ?1").bind(cutoff(RUNS_RETENTION_DAYS)).execute(&mut *conn).await?;
+    sqlx::query("DELETE FROM social_metrics WHERE as_of < ?1").bind(cutoff(METRICS_RETENTION_DAYS)).execute(&mut *conn).await?;
+    Ok(())
 }
 
 fn round4(x: f64) -> f64 {

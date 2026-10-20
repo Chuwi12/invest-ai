@@ -2,7 +2,7 @@
 //! riesgo. El perfil es **determinista** (reglas sobre el folleto; sin LLM) y no es una
 //! recomendación: ver `docs/notes/ipo-risk.md`.
 
-use std::time::Duration;
+use std::{sync::LazyLock, time::Duration};
 
 use async_trait::async_trait;
 use axum::{
@@ -13,6 +13,7 @@ use chrono::{Duration as Days, NaiveDate, Utc};
 use domain::{
     DomainError, IpoBaseRate, IpoData, IpoEntry, IpoPerformance, IpoRiskProfile, IpoStatus, Prospectus,
 };
+use market::ipo_risk::{ProfileCache, ProfileInput};
 use serde::Deserialize;
 
 use crate::{
@@ -38,6 +39,10 @@ const MAX_MAX_CHARS: usize = 60_000;
 /// segundo plano y la próxima petición la encuentra en caché).
 const BASE_RATE_WAIT: Duration = Duration::from_secs(12);
 const BENCHMARKS: &[&str] = &["SPY", "IWM", "QQQ"];
+
+/// Perfiles ya construidos, por huella de sus entradas (folleto, calendario, tasa base). Global del
+/// proceso como el `HUB` de análisis: depende solo de las entradas, no del estado de la app.
+static PROFILES: LazyLock<ProfileCache> = LazyLock::new(ProfileCache::default);
 
 /// Implementación por defecto de `AppState::ipo`: sin datos de OPV configurados.
 pub struct NoIpoData;
@@ -289,13 +294,24 @@ pub async fn risk_profile(
     if entry.is_none() && prospectus.is_none() {
         return Err(ApiError::not_found("no se encontró la OPV ni su folleto"));
     }
-    let mut profile = market::ipo_risk::build_profile(market::ipo_risk::ProfileInput {
-        symbol: &sym,
-        entry: entry.as_ref(),
-        prospectus: prospectus.as_ref(),
-        base_rate,
-        now: Utc::now(),
-    });
+    // El perfil lee todo el texto del folleto (CPU pura, sin `await`): fuera del worker async, donde
+    // ni el timeout de 30 s podría cortarlo, y con caché para no repetirlo en cada recarga.
+    let name = sym.clone();
+    let built = tokio::task::spawn_blocking(move || {
+        PROFILES.get_or_build(ProfileInput {
+            symbol: &name,
+            entry: entry.as_ref(),
+            prospectus: prospectus.as_ref(),
+            base_rate,
+            now: Utc::now(),
+        })
+    })
+    .await
+    .map_err(|e| {
+        tracing::error!(symbol = %sym, error = %e, "el cálculo del perfil de OPV falló");
+        ApiError::internal("perfil de riesgo: error interno")
+    })?;
+    let mut profile = IpoRiskProfile::clone(&built);
     if let Some(note) = base_note {
         profile.warnings.retain(|w| !w.contains("tasa base de OPV recientes no está disponible"));
         profile.warnings.push(note.to_string());

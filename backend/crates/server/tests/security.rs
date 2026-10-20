@@ -156,6 +156,126 @@ async fn s02bis_optional_json_requires_json_content_type() {
     assert_eq!(st, StatusCode::OK);
 }
 
+// ---------- M1: los GET de /api también pasan por el control de origen ----------
+
+/// GET de `/api` con coste o efectos (redes sociales, folletos, rendimiento con `offerPrice` en la
+/// clave de caché) y otros de lectura: una web ajena los dispara con `<img src>` aunque no lea nada.
+const M1_URIS: &[&str] = &[
+    "/api/assets/stock:AAPL/social",
+    "/api/ipo/TRXB/prospectus",
+    "/api/ipo/TRXB/risk-profile",
+    "/api/ipo/TRXB/performance?offerPrice=10.5",
+    "/api/social/status",
+    "/api/conversations",
+    "/api/health",
+    "/api/nope",
+];
+
+#[tokio::test]
+async fn m1_api_gets_from_other_origins_are_rejected() {
+    let app = TestApp::new().await;
+    let r = &app.router;
+    let host = ("host", "127.0.0.1:8795");
+    let hostile: [Vec<(&str, &str)>; 5] = [
+        // `<img src="http://127.0.0.1:8795/api/...">` desde otra web: el navegador no manda Origin.
+        vec![host, ("sec-fetch-site", "cross-site"), ("sec-fetch-mode", "no-cors"), ("sec-fetch-dest", "image")],
+        vec![host, ("sec-fetch-site", "cross-site")],
+        // Navegación de nivel superior desde un enlace ajeno hacia la API.
+        vec![host, ("sec-fetch-site", "cross-site"), ("sec-fetch-mode", "navigate"), ("sec-fetch-dest", "document")],
+        // `fetch` con CORS: lleva Origin aunque no pueda leer la respuesta.
+        vec![host, ("origin", "https://evil.example")],
+        vec![host, ("origin", "http://localhost:9999"), ("sec-fetch-site", "same-site")],
+    ];
+    for uri in M1_URIS {
+        for h in &hostile {
+            for m in [Method::GET, Method::HEAD] {
+                let (st, _, body) = call(r, m.clone(), uri, h, None).await;
+                assert_eq!(st, StatusCode::FORBIDDEN, "{m} {uri} {h:?}: {body}");
+                if m == Method::GET {
+                    assert_eq!(code_of(&body), "forbidden", "{uri}");
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn m1_legitimate_api_gets_still_work() {
+    let app = TestApp::new().await;
+    let r = &app.router;
+    let legit: [Vec<(&str, &str)>; 7] = [
+        // curl, scripts, selftest: sin cabeceras de navegador.
+        vec![("host", "127.0.0.1:8795")],
+        // El frontend servido por el propio binario.
+        vec![("host", "127.0.0.1:8795"), ("sec-fetch-site", "same-origin"), ("sec-fetch-mode", "cors")],
+        vec![("host", "127.0.0.1:8795"), ("origin", "http://127.0.0.1:8795"), ("sec-fetch-site", "same-origin")],
+        // El usuario teclea la URL de la API.
+        vec![("host", "127.0.0.1:8795"), ("sec-fetch-site", "none"), ("sec-fetch-mode", "navigate")],
+        // Vite en 5180 con proxy sin changeOrigin: Host = localhost:5180, sin Origin en un GET del mismo origen.
+        vec![("host", "localhost:5180"), ("sec-fetch-site", "same-origin")],
+        // El proxy de Vite hacia el backend cuando el navegador no manda ninguna cabecera Sec-Fetch.
+        vec![("host", "localhost:5180")],
+        // Vite con changeOrigin: Host = backend, Origin = FRONTEND_ORIGIN.
+        vec![("host", "127.0.0.1:8787"), ("origin", "http://localhost:5180")],
+    ];
+    for h in &legit {
+        let (st, _, body) = call(r, Method::GET, "/api/health", h, None).await;
+        assert_eq!(st, StatusCode::OK, "{h:?}: {body}");
+        let (st, ..) = call(r, Method::HEAD, "/api/health", h, None).await;
+        assert_eq!(st, StatusCode::OK, "HEAD {h:?}");
+        let (st, _, body) = call(r, Method::GET, "/api/assets/stock:AAPL/social", h, None).await;
+        assert_eq!(st, StatusCode::OK, "{h:?}: {body}");
+        let (st, ..) = call(r, Method::GET, "/api/ipo/TRXB/prospectus", h, None).await;
+        assert_ne!(st, StatusCode::FORBIDDEN, "{h:?}");
+    }
+    // El preflight CORS de la app en desarrollo no lo corta el control de origen.
+    let (st, hd, _) = call(
+        r, Method::OPTIONS, "/api/assets/stock:AAPL/social",
+        &[("host", "127.0.0.1:8787"), ("origin", "http://localhost:5180"), ("access-control-request-method", "GET")], None,
+    ).await;
+    assert!(st.is_success(), "{st}");
+    assert_eq!(hd.get("access-control-allow-origin").and_then(|v| v.to_str().ok()), Some("http://localhost:5180"));
+    // El SSE del análisis es un POST con `fetch`: mismo origen sigue funcionando.
+    let (st, hd, body) = call(
+        r, Method::POST, "/api/assets/stock:AAPL/analysis/stream",
+        &[("host", "127.0.0.1:8795"), ("origin", "http://127.0.0.1:8795"), ("sec-fetch-site", "same-origin")], None,
+    ).await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    assert!(hd[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/event-stream"), "{hd:?}");
+}
+
+#[tokio::test]
+async fn m1_static_frontend_files_still_open_from_other_sites() {
+    let dir = temp_static();
+    let app = TestApp::with_static(Default::default(), Default::default(), Some(dir.clone())).await;
+    let r = &app.router;
+    // Un enlace desde otra web hacia la app: navegación cross-site (y, por si acaso, con Origin ajeno).
+    let nav = [("host", "127.0.0.1:8795"), ("sec-fetch-site", "cross-site"), ("sec-fetch-mode", "navigate"), ("sec-fetch-dest", "document")];
+    for path in ["/", "/asset/stock%3AAAPL", "/dashboard", "/assets/index-CV56swxT.js", "/assets/plain.js"] {
+        let (st, _, body) = call(r, Method::GET, path, &nav, None).await;
+        assert_eq!(st, StatusCode::OK, "{path}: {body}");
+        let (st, ..) = call(r, Method::GET, path, &[("host", "127.0.0.1:8795"), ("origin", "https://evil.example")], None).await;
+        assert_eq!(st, StatusCode::OK, "{path} con Origin ajeno");
+    }
+    // Y la API de la misma instancia sigue cerrada para ese mismo origen.
+    let (st, ..) = call(r, Method::GET, "/api/health", &nav, None).await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    // El host sigue validándose también en los estáticos (DNS rebinding).
+    let (st, ..) = call(r, Method::GET, "/", &[("host", "evil.example:8795")], None).await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
+async fn m1_websocket_with_foreign_origin_is_still_rejected_and_legit_ones_connect() {
+    // El upgrade ya se comprobaba (S-01/S-04); el control de GET de /api no debe haberlo roto.
+    let app = TestApp::new().await;
+    let addr = serve(app.state.clone()).await;
+    assert_eq!(ws(addr, None, Some("https://evil.example")).await.err(), Some(StatusCode::FORBIDDEN));
+    assert!(ws(addr, None, Some(&format!("http://{addr}"))).await.is_ok());
+    assert!(ws(addr, Some("localhost:5180"), Some("http://localhost:5180")).await.is_ok());
+}
+
 // ---------- S-03: cabeceras ----------
 
 /// `frontend/dist`, o la carpeta de `INVEST_AI_DIST_DIR` (para probar otra compilación, p. ej. una

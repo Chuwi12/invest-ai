@@ -511,3 +511,145 @@ fn lockup_scan_does_not_panic_on_non_ascii_before_a_spelled_out_number() {
     let pr = profile(&p, None);
     assert_eq!(ind(&pr, "lock_up").value.as_deref(), Some("6 meses"));
 }
+
+// ---- float_offered: clases repetidas ---------------------------------------------------------
+
+#[test]
+fn repeated_share_class_rows_count_once_in_the_float() {
+    // Las filas con la misma etiqueta (p. ej. la tabla repetida en el resumen y en «The Offering»)
+    // cuentan una sola vez: 1 000 000 de la clase A y 500 000 de la B, no 3 000 000.
+    let mut p = trxb();
+    p.sections = vec![section(
+        "offering",
+        "Class A common stock offered by us | 500,000 shares\n\
+         Class A shares outstanding immediately after this offering | 1,000,000 shares\n\
+         Class A shares outstanding immediately after this offering | 1,000,000 shares\n\
+         Class B shares outstanding immediately after this offering | 500,000 shares\n\
+         Class A shares outstanding immediately after this offering | 1,000,000 shares\n",
+    )];
+    let pr = profile(&p, None);
+    let f = ind(&pr, "float_offered");
+    assert_eq!(f.status, IpoIndicatorStatus::Extracted, "{:?}", f.note);
+    approx(f.numeric, 500_000.0 / 1_500_000.0 * 100.0);
+}
+
+// ---- Caché de perfiles -----------------------------------------------------------------------
+
+mod profile_cache {
+    use std::{sync::Arc, time::Duration};
+
+    use market::ipo_risk::ProfileCache;
+
+    use super::*;
+
+    fn build(cache: &ProfileCache, p: &Prospectus, entry: Option<&IpoEntry>, base: Option<domain::IpoBaseRate>) -> Arc<IpoRiskProfile> {
+        cache.get_or_build(ProfileInput { symbol: "trxb", entry, prospectus: Some(p), base_rate: base, now: now() })
+    }
+
+    #[test]
+    fn identical_inputs_are_built_once_and_served_from_the_cache() {
+        let cache = ProfileCache::default();
+        let p = trxb();
+        let a = build(&cache, &p, None, None);
+        let b = build(&cache, &p, None, None);
+        assert_eq!(cache.builds(), 1);
+        assert!(Arc::ptr_eq(&a, &b), "la segunda lectura es la guardada");
+        assert_eq!(a.symbol, "TRXB");
+        // El resultado es el mismo que el de construirlo directamente.
+        let direct = build_profile(ProfileInput { symbol: "trxb", entry: None, prospectus: Some(&p), base_rate: None, now: now() });
+        assert_eq!(serde_json::to_value(&*a).unwrap(), serde_json::to_value(&direct).unwrap());
+    }
+
+    #[test]
+    fn downloading_the_same_prospectus_again_does_not_invalidate_the_profile() {
+        let cache = ProfileCache::default();
+        let p = trxb();
+        let a = build(&cache, &p, None, None);
+        let mut again = p.clone();
+        again.fetched_at += chrono::Duration::hours(3);
+        let b = build(&cache, &again, None, None);
+        assert_eq!(cache.builds(), 1);
+        assert!(Arc::ptr_eq(&a, &b));
+    }
+
+    #[test]
+    fn any_change_in_the_inputs_builds_a_new_profile() {
+        let cache = ProfileCache::default();
+        let p = trxb();
+        build(&cache, &p, None, None);
+        // Otro texto en una sección del folleto (misma accession).
+        let mut edited = p.clone();
+        edited.sections[0].text.push_str(" Cambio mínimo.");
+        build(&cache, &edited, None, None);
+        // Otra entrada del calendario.
+        let entry = IpoEntry {
+            date: NaiveDate::from_ymd_opt(2026, 10, 9).unwrap(),
+            symbol: Some("TRXB".into()),
+            name: "TRex Bio".into(),
+            exchange: None,
+            status: IpoStatus::Priced,
+            price_low: Some(14.0),
+            price_high: Some(14.0),
+            shares: Some(8_333_334),
+            total_value: Some(116_666_676.0),
+            spac_likely: false,
+            source: "finnhub".into(),
+            source_url: None,
+            as_of: now(),
+        };
+        build(&cache, &p, Some(&entry), None);
+        let mut moved = entry.clone();
+        moved.price_low = Some(15.0);
+        moved.price_high = Some(15.0);
+        build(&cache, &p, Some(&moved), None);
+        // Con tasa base.
+        let base = compute_base_rate(&[], 12, "SPY", now());
+        build(&cache, &p, None, Some(base));
+        assert_eq!(cache.builds(), 5);
+        // Y todas siguen guardadas: repetir cualquiera no construye de nuevo.
+        build(&cache, &p, Some(&entry), None);
+        build(&cache, &edited, None, None);
+        assert_eq!(cache.builds(), 5);
+    }
+
+    #[test]
+    fn simultaneous_requests_share_one_build() {
+        let cache = Arc::new(ProfileCache::default());
+        let p = Arc::new(trxb());
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let (cache, p) = (cache.clone(), p.clone());
+                std::thread::spawn(move || build(&cache, &p, None, None))
+            })
+            .collect();
+        let profiles: Vec<_> = handles.into_iter().map(|h| h.join().expect("sin panic")).collect();
+        assert_eq!(cache.builds(), 1);
+        assert!(profiles.windows(2).all(|w| Arc::ptr_eq(&w[0], &w[1])));
+    }
+
+    #[test]
+    fn the_cache_is_bounded_in_bytes() {
+        // Cada perfil pesa unos kilobytes: con 40 KB caben muy pocos de los 30 distintos.
+        let cache = ProfileCache::with_limits(40 * 1024, Duration::from_secs(600));
+        let p = trxb();
+        for k in 0..30 {
+            let mut other = p.clone();
+            other.sections[0].text.push_str(&format!(" variante {k}"));
+            build(&cache, &other, None, None);
+        }
+        assert_eq!(cache.builds(), 30);
+        let (entries, bytes) = cache.stats();
+        assert!(bytes <= 40 * 1024, "{bytes} bytes");
+        assert!(entries < 30, "{entries} perfiles guardados");
+    }
+
+    #[test]
+    fn entries_expire() {
+        let cache = ProfileCache::with_limits(1 << 20, Duration::from_millis(100));
+        let p = trxb();
+        build(&cache, &p, None, None);
+        std::thread::sleep(Duration::from_millis(400));
+        build(&cache, &p, None, None);
+        assert_eq!(cache.builds(), 2);
+    }
+}

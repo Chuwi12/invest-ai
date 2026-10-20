@@ -96,7 +96,7 @@ fn classify(l: &Line, norm: &str) -> Option<Head> {
         "fund summary",
     ];
     // «The Trust», «Performance» y similares solo cuentan como título si la línea es corta.
-    (words <= 8 && STARTS.iter().any(|s| norm == *s || norm.starts_with(&format!("{s} ")))).then_some(Head::Boundary)
+    (words <= 8 && STARTS.iter().any(|s| norm.strip_prefix(s).is_some_and(|rest| rest.is_empty() || rest.starts_with(' ')))).then_some(Head::Boundary)
 }
 
 /// Palabra completa (sin letras ni dígitos pegados) en `hay`.
@@ -141,7 +141,12 @@ pub fn extract(html: &str, ticker: &str, max_chars: usize) -> FundExtract {
         .map(|(i, _)| i)
         .collect();
 
-    let end_of = |from: usize| heads.iter().find(|(i, _)| *i > from).map_or(lines.len(), |(i, _)| *i);
+    // `heads` va ordenado por posición: búsqueda binaria en vez de recorrerlo entero en cada cabecera
+    // (con miles de «Investment Objective» sin cuerpo era O(n²)).
+    let end_of = |from: usize| {
+        let k = heads.partition_point(|(i, _)| *i <= from);
+        heads.get(k).map_or(lines.len(), |(i, _)| *i)
+    };
     let body = |s: usize, e: usize| lines[s..e].iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
 
     let mut sections = Vec::new();

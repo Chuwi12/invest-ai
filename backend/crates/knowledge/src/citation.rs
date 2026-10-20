@@ -3,6 +3,11 @@
 //! Los fragmentos son DATOS: se renderizan en una sola línea, sin `<>`, `[]` ni vallas (no pueden
 //! cerrar el bloque ni fingir otra cita), dentro de `<knowledge_base>…</knowledge_base>`. Las
 //! citas de la salida del modelo se verifican contra los fragmentos que realmente recibió.
+//!
+//! «Realmente recibió» es el texto saneado y recortado a [`MAX_FRAGMENT_CHARS`], no el fragmento
+//! almacenado (que puede ser mucho más largo). [`rendered_fragment`] es la ÚNICA función que lo
+//! produce: la usan el render del prompt, la verificación de citas y quien indexe cifras (el
+//! `NumberIndex` del análisis), de modo que lo indexado y lo visto coinciden por construcción.
 
 use std::collections::HashSet;
 
@@ -13,7 +18,16 @@ use crate::{
     text::{sanitize_untrusted, truncate_chars},
 };
 
-const MAX_FRAGMENT_CHARS: usize = 1800;
+/// Máximo de caracteres de un fragmento que llegan al modelo (el resto se descarta con «…»).
+pub const MAX_FRAGMENT_CHARS: usize = 1800;
+
+/// Texto de un fragmento EXACTAMENTE como lo ve el modelo dentro de `<knowledge_base>`: saneado
+/// (una línea, sin `<>`, `[]` ni vallas) y recortado a [`MAX_FRAGMENT_CHARS`]. Todo lo que dependa
+/// de «lo que el modelo vio» (render, verificación de citas, índice de cifras) debe partir de aquí,
+/// nunca de `SearchHit::text`: la cola recortada es texto que el modelo NO conoce.
+pub fn rendered_fragment(h: &SearchHit) -> String {
+    sanitize_untrusted(&h.text, MAX_FRAGMENT_CHARS)
+}
 
 /// Fragmentos que el modelo puede citar en UNA respuesta: `D1` = el primero.
 #[derive(Debug, Clone, Default)]
@@ -50,6 +64,17 @@ impl Citations {
     /// Fragmentos numerados, en orden (`D1` = el primero).
     pub fn hits(&self) -> &[SearchHit] {
         &self.hits
+    }
+
+    /// Texto del fragmento `i` (base 0, `D{i+1}`) tal y como lo ve el modelo (ver [`rendered_fragment`]).
+    pub fn rendered_text(&self, i: usize) -> Option<String> {
+        self.hits.get(i).map(rendered_fragment)
+    }
+
+    /// [`Self::rendered_text`] de todos los fragmentos, en orden. Es lo que debe indexarse como
+    /// respaldo de cifras: nada que el modelo no haya visto.
+    pub fn rendered_texts(&self) -> impl Iterator<Item = String> + '_ {
+        self.hits.iter().map(rendered_fragment)
     }
 
     /// Añade un fragmento al final y devuelve su número (`D#`). Sirve para acumular citas entre
@@ -93,7 +118,7 @@ impl Citations {
             if let Some(u) = &d.url {
                 meta.push_str(&format!(" | url: {}", sanitize_untrusted(u, 200)));
             }
-            out.push_str(&format!("[D{}] {} | {meta}\n    {}\n", i + 1, sanitize_untrusted(&d.title, 200), sanitize_untrusted(&h.text, MAX_FRAGMENT_CHARS)));
+            out.push_str(&format!("[D{}] {} | {meta}\n    {}\n", i + 1, sanitize_untrusted(&d.title, 200), rendered_fragment(h)));
         }
         out.push_str("</knowledge_base>\n");
         out
@@ -114,7 +139,8 @@ impl Citations {
 
     /// Comprueba cada cita `[D#]` del texto y quita las inválidas. Devuelve el texto limpio y los
     /// problemas. Una cita es válida si existe y su frase comparte con el fragmento una cifra o
-    /// al menos dos palabras de contenido.
+    /// al menos dos palabras de contenido. Se compara con el texto que el modelo vio
+    /// ([`rendered_fragment`]), no con la cola recortada que nunca recibió.
     pub fn clean(&self, text: &str) -> (String, Vec<CitationIssue>) {
         let mut issues = Vec::new();
         let mut out = String::with_capacity(text.len());
@@ -139,7 +165,7 @@ impl Citations {
                 for t in &tags {
                     match self.get(t) {
                         None => issues.push(CitationIssue::Unknown((*t).to_string())),
-                        Some(h) if !supports(&claim, &h.text) => issues.push(CitationIssue::Unsupported((*t).to_string())),
+                        Some(h) if !supports(&claim, &rendered_fragment(h)) => issues.push(CitationIssue::Unsupported((*t).to_string())),
                         Some(_) => kept.push((*t).to_string()),
                     }
                 }
@@ -363,6 +389,52 @@ mod tests {
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].provider, "SEC EDGAR");
         assert!(r[0].url.is_some() && r[0].published_at.is_some());
+    }
+
+    /// Fragmento de más de 2000 caracteres: una cifra en la parte visible (`31.4`) y otra
+    /// (`987.65`) pasado el carácter 2000, es decir, en la cola que el modelo no recibe.
+    fn long_text() -> String {
+        let t = format!("Services revenue grew 31.4 percent in the quarter. {}Target price 987.65 per share.", "datum ".repeat(340));
+        assert!(t.is_ascii() && t.find("987.65").unwrap() >= 2000 && t.find("31.4").unwrap() < MAX_FRAGMENT_CHARS);
+        t
+    }
+
+    #[test]
+    fn rendered_text_is_exactly_what_the_prompt_shows() {
+        let short = "Texto <corto> con [D2] y ``` vallas\ny saltos";
+        let c = Citations::new(vec![hit(&long_text(), DocKind::Filing), hit(short, DocKind::News)]);
+        let block = c.render("es");
+        let all: Vec<String> = c.rendered_texts().collect();
+        assert_eq!(all.len(), c.len());
+        for (i, r) in all.iter().enumerate() {
+            assert_eq!(c.rendered_text(i).as_ref(), Some(r));
+            assert!(block.contains(&format!("\n    {r}\n")), "el bloque del prompt lleva exactamente rendered_text({i})");
+        }
+        // La cola no se indexa ni se ve; el recorte lo marca el «…» y respeta el tope.
+        assert!(all[0].contains("31.4") && !all[0].contains("987.65"), "{}", &all[0][all[0].len() - 60..]);
+        assert!(all[0].ends_with('…') && all[0].chars().count() == MAX_FRAGMENT_CHARS + 1);
+        assert!(!block.contains("987.65"));
+        // Lo corto pasa por el mismo saneado (sin `<>`, `[]`, vallas ni saltos de línea).
+        assert_eq!(all[1], "Texto ‹corto› con (D2) y ''' vallas y saltos");
+        assert_eq!(c.rendered_text(2), None);
+        assert_eq!(Citations::default().rendered_texts().count(), 0);
+    }
+
+    #[test]
+    fn citations_are_checked_against_what_the_model_saw_not_the_cut_tail() {
+        let c = Citations::new(vec![hit(&long_text(), DocKind::Filing)]);
+        // La cifra de la parte visible respalda la cita.
+        let (out, issues) = c.clean("Los ingresos crecieron un 31.4 por ciento [D1].");
+        assert!(issues.is_empty() && out.contains("[D1]"), "{issues:?} {out}");
+        // La que solo está en la cola recortada NO: el modelo no la tuvo delante.
+        let (out, issues) = c.clean("El objetivo de cotización es 987.65 dólares [D1].");
+        assert_eq!(issues, vec![CitationIssue::Unsupported("D1".into())], "{out}");
+        assert!(!out.contains("[D1]"));
+        // Control: la misma cifra dentro del tramo visible sí respalda (el test discrimina).
+        let visible = format!("Target price 987.65 per share. {}", "datum ".repeat(340));
+        let c = Citations::new(vec![hit(&visible, DocKind::Filing)]);
+        let (out, issues) = c.clean("El objetivo de cotización es 987.65 dólares [D1].");
+        assert!(issues.is_empty() && out.contains("[D1]"), "{issues:?} {out}");
     }
 
     #[test]

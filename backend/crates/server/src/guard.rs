@@ -2,12 +2,21 @@
 //!
 //! - `Host` debe ser `localhost`, `127.0.0.1`, `[::1]` (cualquier puerto: el nombre es lo que un
 //!   atacante de DNS rebinding no controla) o el authority de algún `FRONTEND_ORIGIN`.
-//! - En métodos que cambian estado y en el upgrade del WebSocket, si hay `Origin` debe estar en
-//!   la lista exacta (esquema + host + puerto) o ser el propio servidor (`Origin` = `Host`).
+//! - En métodos que cambian estado, en el upgrade del WebSocket y en TODA petición bajo `/api`
+//!   (también los GET: M1, varios hacen trabajo con coste, como consultar X o bajar folletos), si
+//!   hay `Origin` debe estar en la lista exacta (esquema + host + puerto) o ser el propio servidor
+//!   (`Origin` = `Host`).
 //! - `Sec-Fetch-Site: cross-site` se rechaza en esos mismos casos.
+//! - Los ficheros estáticos del frontend (fuera de `/api`) NO pasan por el control de origen: un
+//!   enlace desde otra web a la app debe poder abrirla. El preflight (`OPTIONS`) tampoco: no tiene
+//!   efectos y lo resuelve la capa CORS.
 //!
-//! Sin `Origin` (curl, scripts) todo sigue funcionando: un navegador siempre lo envía en POST/PUT/
-//! PATCH/DELETE cross-origin y en WebSockets.
+//! Sin `Origin` ni `Sec-Fetch-Site` (curl, scripts, el proxy de Vite en desarrollo cuando el
+//! navegador no los manda) todo sigue funcionando: un navegador siempre envía `Origin` en
+//! POST/PUT/PATCH/DELETE cross-origin, en WebSockets y en los GET con CORS, y `Sec-Fetch-Site` en
+//! cualquier petición (Chrome 76+, Firefox 90+, Safari 16.4+). Un `<img src>` cross-origin sin CORS
+//! no lleva `Origin` y solo lo delata `Sec-Fetch-Site`; en navegadores que no lo envían la
+//! segunda barrera es el tope de activos por hora de X (`social.rs`).
 
 use std::sync::Arc;
 
@@ -62,6 +71,12 @@ fn cross_site(headers: &HeaderMap) -> bool {
     headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()).is_some_and(|v| v.eq_ignore_ascii_case("cross-site"))
 }
 
+/// `/api` o cualquier ruta bajo `/api/`. `req.uri()` lleva la ruta completa (el guard envuelve al
+/// router raíz, antes del `nest`).
+fn is_api_path(path: &str) -> bool {
+    path == "/api" || path.starts_with("/api/")
+}
+
 fn is_ws_upgrade(headers: &HeaderMap) -> bool {
     headers.get(header::UPGRADE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
 }
@@ -79,8 +94,12 @@ pub async fn guard(State(settings): State<Arc<Settings>>, req: Request, next: Ne
     {
         return forbidden("host no permitido");
     }
-    let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    if (!safe || is_ws_upgrade(headers)) && !browser_request_allowed(headers, &settings.allowed_origins) {
+    let method = req.method();
+    let safe = matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS);
+    // M1: los GET de `/api` también hacen trabajo (redes sociales, folletos, caché): una web ajena
+    // los dispararía con un `<img src>` aunque no pudiera leer la respuesta.
+    let api_read = matches!(*method, Method::GET | Method::HEAD) && is_api_path(req.uri().path());
+    if (!safe || api_read || is_ws_upgrade(headers)) && !browser_request_allowed(headers, &settings.allowed_origins) {
         return forbidden("origen no permitido");
     }
     next.run(req).await
@@ -109,6 +128,16 @@ mod tests {
         }
         for bad in ["evil.example:8787", "localhost.evil.example", "127.0.0.1.evil.example:80", "app.example.com:81", "", "[::2]:80"] {
             assert!(!host_allowed(bad, &allowed), "{bad}");
+        }
+    }
+
+    #[test]
+    fn api_paths() {
+        for api in ["/api", "/api/health", "/api/assets/stock%3AAAPL/social", "/api/"] {
+            assert!(is_api_path(api), "{api}");
+        }
+        for other in ["/", "/assets/index-CV56swxT.js", "/apix", "/apicture", "/asset/api", "//api/health", "/API/health"] {
+            assert!(!is_api_path(other), "{other}");
         }
     }
 

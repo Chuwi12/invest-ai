@@ -266,22 +266,30 @@ fn sentences(text: &str) -> Vec<String> {
     // Algunos folletos traen el párrafo cortado en líneas: se une una línea con la siguiente si la
     // primera no termina en puntuación y la segunda empieza en minúscula, cifra o «$».
     let mut logical: Vec<String> = Vec::new();
+    // ¿La última línea lógica contiene « | »? Se arrastra como booleano: releer la línea acumulada
+    // en cada línea nueva costaba O(n²) con un folleto hostil de líneas cortas sin puntuación.
+    let mut last_has_pipe = false;
     for raw in text.lines() {
         let raw = raw.trim();
         if raw.is_empty() {
             continue;
         }
+        let raw_has_pipe = raw.contains(" | ");
         let cont = logical.last().is_some_and(|prev| {
-            !prev.contains(" | ")
-                && !raw.contains(" | ")
+            !last_has_pipe
+                && !raw_has_pipe
                 && !prev.ends_with(['.', ':', ';', '!', '?', '”', '"'])
                 && raw.chars().next().is_some_and(|c| c.is_lowercase() || c.is_ascii_digit() || c == '$' || c == '(')
         });
         if cont {
             let last = logical.last_mut().expect("hay");
+            // Ni `last` ni `raw` traen « | »; la unión (`last` + ' ' + `raw`) solo puede formarlo si
+            // `last` termina en « |» (la línea de `raw` nunca empieza por «|»).
+            last_has_pipe = last.ends_with(" |");
             last.push(' ');
             last.push_str(raw);
         } else {
+            last_has_pipe = raw_has_pipe;
             logical.push(raw.to_string());
         }
     }
@@ -644,6 +652,8 @@ fn float_offered(c: &Ctx) -> IpoRiskIndicator {
     let sec = c.section("offering").expect("offering existe si hay acciones");
     let mut totals: Vec<(String, u64, String)> = Vec::new();
     let mut classes: Vec<(String, u64, String)> = Vec::new();
+    // Etiquetas de clase ya vistas: buscarlas en `classes` era O(n²) con miles de filas distintas.
+    let mut seen_classes: HashSet<String> = HashSet::new();
     for r in rows(&sec.text) {
         let l = r.label.to_ascii_lowercase();
         let after = l.contains("after this offering") || l.contains("immediately after") || l.contains("following this offering") || l.contains("after the offering");
@@ -656,7 +666,7 @@ fn float_offered(c: &Ctx) -> IpoRiskIndicator {
         let Some(n) = r.cells.first().and_then(|c| leading_count(c)) else { continue };
         if l.contains("total") {
             totals.push((l.clone(), n, r.raw.clone()));
-        } else if !classes.iter().any(|(k, _, _)| *k == l) {
+        } else if seen_classes.insert(l.clone()) {
             classes.push((l, n, r.raw.clone()));
         }
     }
@@ -767,12 +777,21 @@ fn duration_candidates(text: &str) -> Vec<(usize, usize, u64, bool)> {
         ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5), ("six", 6), ("seven", 7), ("eight", 8),
         ("nine", 9), ("ten", 10), ("eleven", 11), ("twelve", 12), ("eighteen", 18),
     ];
+    // La palabra más larga de `WORDS` es «eighteen»: no hace falta mirar más atrás de eso. Retroceder
+    // por todas las letras previas era O(n²) con «monthmonthmonth…». Se trabaja en bytes: una letra
+    // ASCII es siempre un carácter entero, así que `word_start` cae en un límite de carácter aunque
+    // lo anterior sea multibyte (comillas tipográficas, acentos).
+    const MAX_WORD: usize = 8;
     let mut from = 0;
     while let Some(p) = lower[from..].find("month") {
         let at = from + p;
         from = at + 5;
         let head = lower[..at].trim_end_matches([' ', '-']);
-        let word_start = head.char_indices().rev().find(|(_, c)| !c.is_ascii_alphabetic()).map_or(0, |(x, c)| x + c.len_utf8());
+        let letters = head.as_bytes().iter().rev().take(MAX_WORD + 1).take_while(|c| c.is_ascii_alphabetic()).count();
+        if letters == 0 || letters > MAX_WORD {
+            continue;
+        }
+        let word_start = head.len() - letters;
         let w = &head[word_start..];
         if let Some(&(_, n)) = WORDS.iter().find(|(name, _)| *name == w) {
             out.push((word_start, at, n, true));
@@ -1110,13 +1129,15 @@ fn percent_near(s: &str, anchor: &str) -> Option<f64> {
 }
 
 fn strip_footnote(label: &str) -> String {
-    let mut l = label.trim().to_ascii_lowercase();
+    let lower = label.trim().to_ascii_lowercase();
+    // Se recorta con trozos (`&str`) en vez de reasignar un `String` en cada vuelta: con
+    // «net loss(1)(1)(1)…» copiar la etiqueta entera por cada nota era O(n²).
+    let mut l: &str = &lower;
     // «net loss(1)» / «net loss (1)»
     while l.ends_with(')') {
         match l.rfind('(') {
             Some(p) if l[p + 1..l.len() - 1].chars().all(|c| c.is_ascii_digit() || c == ',') && !l[p + 1..l.len() - 1].is_empty() => {
-                l.truncate(p);
-                l = l.trim_end().to_string();
+                l = l[..p].trim_end();
             }
             _ => break,
         }
@@ -1444,12 +1465,17 @@ pub fn compute_base_rate_sized(items: &[SizedPerf], months: u32, benchmark: &str
 // ---------------------------------------------------------------------------------------------
 
 use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
+    collections::{HashMap, HashSet},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use futures::{FutureExt, future::{BoxFuture, Shared}};
+use moka::sync::Cache;
+use sha2::{Digest, Sha256};
 
 use crate::service::MarketService;
 
@@ -1513,6 +1539,119 @@ impl MarketService {
                 Err(domain::DomainError::Unavailable("no se pudo calcular la tasa base de OPV recientes".into()))
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Caché de perfiles
+// ---------------------------------------------------------------------------------------------
+
+/// Vida de un perfil en caché. Los datos de los que depende (folleto, calendario, tasa base) van
+/// en la clave, así que caducar no es cuestión de frescura sino de no retener memoria sin uso.
+const PROFILE_TTL: Duration = Duration::from_secs(30 * 60);
+/// Tope de la caché en bytes (JSON serializado de los perfiles guardados). Un perfil normal pesa
+/// 10-40 KB; uno que supere el tope entero no se guarda.
+const PROFILE_CACHE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Escribe en un `Sha256` lo que serializa `serde_json`, sin construir el JSON en memoria.
+struct HashWriter<'a>(&'a mut Sha256);
+
+impl std::io::Write for HashWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Huella de TODO lo que determina el perfil (símbolo, calendario, folleto completo y tasa base;
+/// no `now`): mismas entradas, mismo perfil. `None` si no se pudo serializar (entonces no se cachea).
+///
+/// Del folleto se descarta `fetchedAt` (cuándo se descargó): el perfil no lo usa, y una descarga
+/// nueva del mismo documento no debe invalidar el perfil ya calculado. Si el campo cambiara de
+/// nombre, el único efecto sería no reconocer esas descargas (más fallos de caché, nunca perfiles
+/// equivocados).
+fn profile_key(input: &ProfileInput<'_>) -> Option<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    let prospectus = match input.prospectus {
+        Some(p) => {
+            let mut v = serde_json::to_value(p).ok()?;
+            if let Some(o) = v.as_object_mut() {
+                o.remove("fetchedAt");
+            }
+            Some(v)
+        }
+        None => None,
+    };
+    let value = (input.symbol.to_ascii_uppercase(), input.entry, prospectus, &input.base_rate);
+    serde_json::to_writer(HashWriter(&mut hasher), &value).ok()?;
+    let digest = hasher.finalize();
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&digest);
+    Some(key)
+}
+
+/// Peso de un perfil en la caché: su tamaño serializado.
+fn profile_weight(p: &IpoRiskProfile) -> u32 {
+    serde_json::to_vec(p).map_or(1 << 20, |b| b.len()).saturating_add(256).try_into().unwrap_or(u32::MAX)
+}
+
+/// Caché de perfiles de riesgo ya construidos, acotada en bytes y con caducidad.
+///
+/// `build_profile` es puro pero recorre todo el texto del folleto: cachearlo evita repetir ese
+/// trabajo en cada recarga de la ficha, y `get_with` de moka hace que dos peticiones simultáneas
+/// con las mismas entradas compartan un único cálculo (la segunda espera, no recalcula). El
+/// cálculo es síncrono: llámese desde `spawn_blocking`, no desde una tarea async.
+///
+/// `generated_at` es el momento en que se construyó el perfil, que puede ser de hace hasta
+/// `PROFILE_TTL` si salió de la caché.
+pub struct ProfileCache {
+    cache: Cache<[u8; 32], Arc<IpoRiskProfile>>,
+    builds: AtomicU64,
+}
+
+impl Default for ProfileCache {
+    fn default() -> Self {
+        Self::with_limits(PROFILE_CACHE_BYTES, PROFILE_TTL)
+    }
+}
+
+impl ProfileCache {
+    /// Caché con tope de `max_bytes` (JSON serializado) y caducidad `ttl`.
+    pub fn with_limits(max_bytes: u64, ttl: Duration) -> Self {
+        let cache = Cache::builder()
+            .max_capacity(max_bytes)
+            .weigher(|_key: &[u8; 32], value: &Arc<IpoRiskProfile>| profile_weight(value))
+            .time_to_live(ttl)
+            .build();
+        Self { cache, builds: AtomicU64::new(0) }
+    }
+
+    /// Perfil de `input`: el guardado si ya se construyó con exactamente estas entradas; si no, lo
+    /// construye y lo guarda.
+    pub fn get_or_build(&self, input: ProfileInput<'_>) -> Arc<IpoRiskProfile> {
+        let Some(key) = profile_key(&input) else {
+            self.builds.fetch_add(1, Ordering::Relaxed);
+            return Arc::new(build_profile(input));
+        };
+        self.cache.get_with(key, || {
+            self.builds.fetch_add(1, Ordering::Relaxed);
+            Arc::new(build_profile(input))
+        })
+    }
+
+    /// Cuántas veces se ha construido un perfil de verdad (las lecturas de caché no cuentan).
+    pub fn builds(&self) -> u64 {
+        self.builds.load(Ordering::Relaxed)
+    }
+
+    /// Perfiles guardados y su peso total en bytes, tras aplicar las expulsiones pendientes.
+    pub fn stats(&self) -> (u64, u64) {
+        self.cache.run_pending_tasks();
+        (self.cache.entry_count(), self.cache.weighted_size())
     }
 }
 
@@ -1581,5 +1720,244 @@ mod tests {
         assert_eq!(strip_footnote("Net loss(1)"), "net loss");
         assert_eq!(strip_footnote("Net loss (2)"), "net loss");
         assert_eq!(strip_footnote("Net income (loss)"), "net income (loss)");
+    }
+
+    // ---- Equivalencia con el código anterior a B1 ------------------------------------------------
+    //
+    // Los arreglos de coste cuadrático no deben cambiar ningún resultado. Cada función tocada se
+    // compara con una copia literal de la versión original (el oráculo, con su coste cuadrático) sobre
+    // entradas aleatorias deterministas, acotadas y con texto no ASCII, y sobre los folletos reales.
+
+    /// Generador pseudoaleatorio determinista (xorshift64): mismas entradas en cada ejecución.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+
+        fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+            items[(self.next() % items.len() as u64) as usize]
+        }
+
+        fn soup(&mut self, items: &[&str], pieces: usize) -> String {
+            (0..pieces).map(|_| self.pick(items)).collect()
+        }
+    }
+
+    /// `sentences` tal como era antes de B1.
+    fn sentences_reference(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut logical: Vec<String> = Vec::new();
+        for raw in text.lines() {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                continue;
+            }
+            let cont = logical.last().is_some_and(|prev| {
+                !prev.contains(" | ")
+                    && !raw.contains(" | ")
+                    && !prev.ends_with(['.', ':', ';', '!', '?', '”', '"'])
+                    && raw.chars().next().is_some_and(|c| c.is_lowercase() || c.is_ascii_digit() || c == '$' || c == '(')
+            });
+            if cont {
+                let last = logical.last_mut().expect("hay");
+                last.push(' ');
+                last.push_str(raw);
+            } else {
+                logical.push(raw.to_string());
+            }
+        }
+        for line in logical.iter().map(String::as_str) {
+            if line.is_empty() {
+                continue;
+            }
+            let chars: Vec<(usize, char)> = line.char_indices().collect();
+            let mut start = 0usize;
+            for k in 0..chars.len() {
+                let (i, c) = chars[k];
+                if !matches!(c, '.' | '!' | '?' | ';') {
+                    continue;
+                }
+                let Some(&(_, next)) = chars.get(k + 1) else { continue };
+                if !next.is_whitespace() {
+                    continue;
+                }
+                let after = chars[k + 1..].iter().map(|&(_, ch)| ch).find(|ch| !ch.is_whitespace());
+                if !after.is_some_and(|a| a.is_uppercase() || matches!(a, '“' | '"' | '•' | '(')) {
+                    continue;
+                }
+                let tok = line[start..i + c.len_utf8()].rsplit(char::is_whitespace).next().unwrap_or("");
+                if c == '.' && is_abbrev(tok) {
+                    continue;
+                }
+                let s = line[start..i + c.len_utf8()].trim();
+                if !s.is_empty() {
+                    out.push(s.to_string());
+                }
+                start = i + c.len_utf8();
+            }
+            let tail = line[start..].trim();
+            if !tail.is_empty() {
+                out.push(tail.to_string());
+            }
+        }
+        out
+    }
+
+    /// `duration_candidates` tal como era antes de B1 (retroceso sin límite por las letras previas).
+    fn duration_candidates_reference(text: &str) -> Vec<(usize, usize, u64, bool)> {
+        let b = text.as_bytes();
+        let lower = text.to_ascii_lowercase();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < b.len() {
+            if !b[i].is_ascii_digit() || (i > 0 && (b[i - 1].is_ascii_digit() || b[i - 1] == b',' || b[i - 1] == b'.')) {
+                i += 1;
+                continue;
+            }
+            let mut j = i;
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            let n: u64 = text[i..j].parse().unwrap_or(0);
+            let mut k = j;
+            if lower[k..].starts_with("th ") || lower[k..].starts_with("st ") || lower[k..].starts_with("nd ") || lower[k..].starts_with("rd ") {
+                k += 2;
+            }
+            while k < b.len() && matches!(b[k], b' ' | b')' | b'-') {
+                k += 1;
+            }
+            let tail = &lower[k..floor(&lower, k + 8)];
+            let months = tail.starts_with("month");
+            let days = tail.starts_with("day");
+            if (days && (30..=1100).contains(&n)) || (months && (1..=36).contains(&n)) {
+                out.push((i, k, n, months));
+            }
+            i = j;
+        }
+        const WORDS: &[(&str, u64)] = &[
+            ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5), ("six", 6), ("seven", 7), ("eight", 8),
+            ("nine", 9), ("ten", 10), ("eleven", 11), ("twelve", 12), ("eighteen", 18),
+        ];
+        let mut from = 0;
+        while let Some(p) = lower[from..].find("month") {
+            let at = from + p;
+            from = at + 5;
+            let head = lower[..at].trim_end_matches([' ', '-']);
+            let word_start = head.char_indices().rev().find(|(_, c)| !c.is_ascii_alphabetic()).map_or(0, |(x, c)| x + c.len_utf8());
+            let w = &head[word_start..];
+            if let Some(&(_, n)) = WORDS.iter().find(|(name, _)| *name == w) {
+                out.push((word_start, at, n, true));
+            }
+        }
+        out
+    }
+
+    /// `strip_footnote` tal como era antes de B1.
+    fn strip_footnote_reference(label: &str) -> String {
+        let mut l = label.trim().to_ascii_lowercase();
+        while l.ends_with(')') {
+            match l.rfind('(') {
+                Some(p) if l[p + 1..l.len() - 1].chars().all(|c| c.is_ascii_digit() || c == ',') && !l[p + 1..l.len() - 1].is_empty() => {
+                    l.truncate(p);
+                    l = l.trim_end().to_string();
+                }
+                _ => break,
+            }
+        }
+        l.trim_end_matches([':', ',']).to_string()
+    }
+
+    /// Texto de las secciones de los cinco folletos reales de los tests de integración.
+    fn fixture_section_texts() -> Vec<String> {
+        const FIXTURES: [&str; 5] = [
+            include_str!("../tests/fixtures/sec_prospectus_trxb_excerpt.json"),
+            include_str!("../tests/fixtures/sec_prospectus_lynx_excerpt.json"),
+            include_str!("../tests/fixtures/sec_prospectus_oig_excerpt.json"),
+            include_str!("../tests/fixtures/sec_prospectus_crwv_excerpt.json"),
+            include_str!("../tests/fixtures/sec_prospectus_snsc_excerpt.json"),
+        ];
+        FIXTURES
+            .iter()
+            .flat_map(|j| serde_json::from_str::<Prospectus>(j).expect("fixture válido").sections)
+            .map(|s| s.text)
+            .collect()
+    }
+
+    #[test]
+    fn sentence_split_matches_the_original_on_real_and_random_text() {
+        let texts = fixture_section_texts();
+        assert!(texts.len() >= 20, "los fixtures aportan secciones reales");
+        for t in &texts {
+            assert_eq!(sentences(t), sentences_reference(t));
+        }
+        let pieces = [
+            "a", "b c", "foo |", "| y", " | ", "x | y", "Foo.", "J.P.", "Inc.", "end.", "The", "(1)", "$5", "5%", "…", "“q”", "é", ";", "!", "?", ".", ". ",
+            "  ", " ",
+        ];
+        let seps = ["\n", "\n", " ", "\n\n", "  \n", "\t"];
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        for _ in 0..3_000 {
+            let n = 1 + (rng.next() % 40) as usize;
+            let mut t = String::new();
+            for _ in 0..n {
+                t.push_str(rng.pick(&pieces));
+                t.push_str(rng.pick(&seps));
+            }
+            assert_eq!(sentences(&t), sentences_reference(&t), "{t:?}");
+        }
+        // Una unión que forma « | » (la línea acumulada termina en « |»): la siguiente ya no se pega.
+        let t = "foo |\nbar\nbaz\nqux";
+        assert_eq!(sentences(t), sentences_reference(t));
+        assert_eq!(sentences(t), vec!["foo | bar", "baz qux"]);
+    }
+
+    #[test]
+    fn duration_candidates_match_the_original_on_real_and_random_text() {
+        for t in &fixture_section_texts() {
+            assert_eq!(duration_candidates(t), duration_candidates_reference(t));
+        }
+        let pieces = [
+            "six", "Six", "months", "month", "Month", "-", " ", "  ", "“", "”", "é", "seventeen", "eighteen", "neighteen", "eightee", "nineteen", "twelve",
+            "eleven", "ten", "one", "two", "180", "days", "30", "day", "1", "3", "36", "37", "th ", "st ", "(", ")", "x", "abcdefgh", "abcdefghi", ",", ".", "5",
+            "of this prospectus", "\n", "—", "日本",
+        ];
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        for _ in 0..6_000 {
+            let n = 1 + (rng.next() % 30) as usize;
+            let t = rng.soup(&pieces, n);
+            assert_eq!(duration_candidates(&t), duration_candidates_reference(&t), "{t:?}");
+        }
+    }
+
+    /// Los plazos reales de un lock-up siguen saliendo igual: en letra, en cifra, en meses y en días,
+    /// y con comillas tipográficas (multibyte) pegadas a la palabra.
+    #[test]
+    fn real_lockup_phrasings_are_still_found() {
+        let found = |t: &str| -> Vec<(u64, bool)> { duration_candidates(t).into_iter().map(|(_, _, n, m)| (n, m)).collect() };
+        assert_eq!(found("for a period of six months from the date of this prospectus"), vec![(6, true)]);
+        assert_eq!(found("for 180 days after the date of this prospectus"), vec![(180, false)]);
+        assert_eq!(found("for a period of 3 months from the date"), vec![(3, true)]);
+        assert_eq!(found("on the 180th day following the date"), vec![(180, false)]);
+        assert_eq!(found("the 1st month after, “six months” and a twelve-month, eighteen months term"), vec![(1, true), (6, true), (12, true), (18, true)]);
+        assert_eq!(found("xxxxxxxxxxxxsix months and neighteen months"), Vec::new(), "una palabra más larga que «eighteen» no coincide");
+    }
+
+    #[test]
+    fn footnote_stripping_matches_the_original() {
+        let pieces = ["Net loss", "net income (loss)", "(1)", "(2,3)", "()", "(a)", " (4)", "(1", "1)", ":", ",", " ", "é", ")", "(", "Revenue"];
+        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+        for _ in 0..4_000 {
+            let n = 1 + (rng.next() % 12) as usize;
+            let t = rng.soup(&pieces, n);
+            assert_eq!(strip_footnote(&t), strip_footnote_reference(&t), "{t:?}");
+        }
+        assert_eq!(strip_footnote(&format!("Net loss{}", "(1)".repeat(5_000))), "net loss");
     }
 }

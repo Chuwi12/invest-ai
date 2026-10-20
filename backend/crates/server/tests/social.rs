@@ -6,7 +6,7 @@ mod common;
 use std::{
     net::SocketAddr,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU32, Ordering},
     },
     time::Duration,
@@ -26,25 +26,55 @@ use market::{
 use server::social::{SocialService, SqliteBudget};
 use sqlx::Row;
 
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Ok,
+    Fail,
+    /// Responde bien pero sin presupuesto: `budget_exhausted` y sin publicaciones.
+    Exhausted,
+}
+
 struct Fake {
     calls: AtomicU32,
-    fail: bool,
+    mode: Mutex<Mode>,
+    source: SocialSource,
+}
+
+impl Fake {
+    fn new(source: SocialSource, mode: Mode) -> Arc<Self> {
+        Arc::new(Self { calls: AtomicU32::new(0), mode: Mutex::new(mode), source })
+    }
+    fn reddit(mode: Mode) -> Arc<Self> {
+        Self::new(SocialSource::Reddit, mode)
+    }
+    fn set(&self, mode: Mode) {
+        *self.mode.lock().unwrap() = mode;
+    }
+    fn calls(&self) -> u32 {
+        self.calls.load(Ordering::SeqCst)
+    }
 }
 
 #[async_trait]
 impl SocialProvider for Fake {
     fn source(&self) -> SocialSource {
-        SocialSource::Reddit
+        self.source
     }
     async fn fetch(&self, _: &SocialQuery) -> PResult<SocialBatch> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        if self.fail {
+        let mode = *self.mode.lock().unwrap();
+        if mode == Mode::Fail {
             return Err(ProviderError::upstream("HTTP 503 con la clave sk-supersecreta"));
         }
+        if mode == Mode::Exhausted {
+            return Ok(SocialBatch { budget_exhausted: true, ..Default::default() });
+        }
         let now = Utc::now();
+        let prefix = self.source.as_str();
+        let source = self.source;
         let mk = |i: i64, score: i64, text: &str| SocialPost {
-            id: format!("reddit:p{i}"),
-            source: SocialSource::Reddit,
+            id: format!("{prefix}:p{i}"),
+            source,
             community: "stocks".into(),
             author: format!("autor{}", i % 2),
             title: Some("AAPL".into()),
@@ -59,13 +89,26 @@ impl SocialProvider for Fake {
 }
 
 async fn app_with(provider: Arc<Fake>, refresh_minutes: u64) -> TestApp {
+    app_with_providers(vec![provider], refresh_minutes, None).await
+}
+
+/// `x_cap`: tope de activos distintos por hora en X (`None` = el de por defecto).
+async fn app_with_providers(providers: Vec<Arc<Fake>>, refresh_minutes: u64, x_cap: Option<u32>) -> TestApp {
     let mut app = TestApp::new().await;
     let cfg = SocialConfig { refresh_minutes, ..Default::default() };
     let budget = Arc::new(SqliteBudget::new(app.state.db.clone()));
-    let svc = SocialService::with_providers(cfg, app.state.db.clone(), vec![provider], budget);
+    let providers: Vec<Arc<dyn SocialProvider>> = providers.into_iter().map(|p| p as Arc<dyn SocialProvider>).collect();
+    let svc = match x_cap {
+        Some(cap) => SocialService::with_providers_and_x_cap(cfg, app.state.db.clone(), providers, budget, cap),
+        None => SocialService::with_providers(cfg, app.state.db.clone(), providers, budget),
+    };
     app.state = app.state.clone().with_social(Some(svc), vec![]);
     app.router = server::app(app.state.clone(), None);
     app
+}
+
+async fn count(app: &TestApp, table: &str) -> i64 {
+    sqlx::query(&format!("SELECT COUNT(*) FROM {table}")).fetch_one(&app.state.db).await.unwrap().get(0)
 }
 
 #[tokio::test]
@@ -89,7 +132,7 @@ async fn off_by_default_routes_report_disabled_and_write_nothing() {
 
 #[tokio::test]
 async fn asset_route_returns_metrics_and_excerpts_and_stores_them_with_dates() {
-    let fake = Arc::new(Fake { calls: AtomicU32::new(0), fail: false });
+    let fake = Fake::reddit(Mode::Ok);
     let app = app_with(fake.clone(), 360).await;
     let (st, v) = app.get("/api/assets/stock:AAPL/social").await;
     assert_eq!(st, StatusCode::OK, "{v}");
@@ -110,23 +153,225 @@ async fn asset_route_returns_metrics_and_excerpts_and_stores_them_with_dates() {
     assert!(created < Utc::now().timestamp_millis() - 3_000_000 && created > Utc::now().timestamp_millis() - 4 * 3_600_000);
     let snaps: i64 = sqlx::query("SELECT COUNT(*) FROM social_metrics").fetch_one(&app.state.db).await.unwrap().get(0);
     assert_eq!(snaps, 1);
-    // Una segunda vista dentro del periodo de refresco no vuelve a consultar la red (ni gasta).
+    // Una segunda vista dentro del periodo de refresco no vuelve a consultar la red (ni gasta) y
+    // tampoco anota otra instantánea: no hay datos nuevos y duplicarla sesgaría a `learning` (B3).
     app.get("/api/assets/stock:AAPL/social").await;
-    assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
-    let snaps: i64 = sqlx::query("SELECT COUNT(*) FROM social_metrics").fetch_one(&app.state.db).await.unwrap().get(0);
-    assert_eq!(snaps, 2, "las instantáneas se añaden, nunca se pisan");
+    assert_eq!(fake.calls(), 1);
+    assert_eq!(count(&app, "social_metrics").await, 1, "una lectura de lo guardado no es una observación nueva");
+}
+
+#[tokio::test]
+async fn metrics_snapshot_needs_a_real_refresh_and_is_at_most_hourly() {
+    let fake = Fake::reddit(Mode::Ok);
+    // `refresh_minutes: 0`: todas las vistas refrescan, así se prueba el tope horario por separado.
+    let app = app_with(fake.clone(), 0).await;
+    app.get("/api/assets/stock:AAPL/social").await;
+    app.get("/api/assets/stock:AAPL/social").await;
+    app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(fake.calls(), 3, "cada vista refrescó");
+    assert_eq!(count(&app, "social_metrics").await, 1, "como mucho una instantánea por activo y hora");
+    // Otro activo tiene la suya.
+    app.get("/api/assets/stock:MSFT/social").await;
+    assert_eq!(count(&app, "social_metrics").await, 2);
+    // Pasada una hora, la siguiente observación sí se anota (las instantáneas se añaden, nunca se pisan).
+    sqlx::query("UPDATE social_metrics SET as_of = as_of - 7200000").execute(&app.state.db).await.unwrap();
+    app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(count(&app, "social_metrics").await, 3);
+    let n: i64 = sqlx::query("SELECT COUNT(*) FROM social_metrics WHERE asset_id = 'stock:AAPL'").fetch_one(&app.state.db).await.unwrap().get(0);
+    assert_eq!(n, 2);
+}
+
+#[tokio::test]
+async fn a_failed_or_exhausted_refresh_records_no_snapshot() {
+    let fake = Fake::reddit(Mode::Ok);
+    let app = app_with(fake.clone(), 0).await;
+    app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(count(&app, "social_metrics").await, 1);
+    sqlx::query("UPDATE social_metrics SET as_of = as_of - 7200000").execute(&app.state.db).await.unwrap();
+    // Con lo guardado de antes y el refresco fallido, el digest se sirve pero no es una observación nueva.
+    fake.set(Mode::Fail);
+    let (st, v) = app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["digest"]["metrics"]["mentions"], 3, "se sirve lo guardado");
+    assert_eq!(count(&app, "social_metrics").await, 1);
+    // Y con el presupuesto agotado (otro activo con datos previos) tampoco.
+    let fake_x = Fake::new(SocialSource::X, Mode::Ok);
+    let app = app_with(fake_x.clone(), 0).await;
+    app.get("/api/assets/stock:AAPL/social").await;
+    sqlx::query("UPDATE social_metrics SET as_of = as_of - 7200000").execute(&app.state.db).await.unwrap();
+    fake_x.set(Mode::Exhausted);
+    app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(count(&app, "social_metrics").await, 1);
+}
+
+#[tokio::test]
+async fn exhausted_budget_has_a_cooldown_and_does_not_write_a_run_per_get() {
+    let fake = Fake::new(SocialSource::X, Mode::Exhausted);
+    let app = app_with(fake.clone(), 360).await;
+    for _ in 0..5 {
+        let (st, v) = app.get("/api/assets/stock:AAPL/social").await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert!(v["digest"].is_null());
+    }
+    assert_eq!(fake.calls(), 1, "con el presupuesto agotado no se vuelve a intentar durante la espera");
+    assert_eq!(count(&app, "social_runs").await, 1, "una fila, no una por GET");
+    assert_eq!(count(&app, "social_metrics").await, 0);
+    // Otro activo no hereda la espera.
+    app.get("/api/assets/stock:MSFT/social").await;
+    assert_eq!(fake.calls(), 2);
+}
+
+#[tokio::test]
+async fn retention_purges_old_runs_and_metrics_but_keeps_recent_ones() {
+    let day: i64 = 86_400_000;
+    let now = Utc::now().timestamp_millis();
+    let seed = |app: &TestApp| {
+        let db = app.state.db.clone();
+        async move {
+            for (asset, age_days) in [("stock:OLDRUN", 50), ("stock:NEWRUN", 20)] {
+                sqlx::query("INSERT INTO social_runs (asset_id, source, fetched_at, window_start, ok) VALUES (?1, 'reddit', ?2, ?2, 1)")
+                    .bind(asset)
+                    .bind(now - age_days * day)
+                    .execute(&db)
+                    .await
+                    .unwrap();
+            }
+            for (asset, age_days) in [("stock:OLDMET", 400), ("stock:NEWMET", 200)] {
+                sqlx::query(
+                    "INSERT INTO social_metrics (asset_id, as_of, window_days, mentions, authors, bullish, bearish, neutral, mentions_window, bullish_window, bearish_window, baseline_days, truncated, by_source)
+                     VALUES (?1, ?2, 7, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, '[]')",
+                )
+                .bind(asset)
+                .bind(now - age_days * day)
+                .execute(&db)
+                .await
+                .unwrap();
+            }
+        }
+    };
+    let survivors = |app: &TestApp| {
+        let db = app.state.db.clone();
+        async move {
+            let runs: Vec<String> = sqlx::query("SELECT asset_id FROM social_runs WHERE asset_id LIKE 'stock:%RUN' ORDER BY asset_id")
+                .fetch_all(&db)
+                .await
+                .unwrap()
+                .iter()
+                .map(|r| r.get(0))
+                .collect();
+            let mets: Vec<String> = sqlx::query("SELECT asset_id FROM social_metrics WHERE asset_id LIKE 'stock:%MET' ORDER BY asset_id")
+                .fetch_all(&db)
+                .await
+                .unwrap()
+                .iter()
+                .map(|r| r.get(0))
+                .collect();
+            (runs, mets)
+        }
+    };
+
+    // Tras un refresco correcto.
+    let app = app_with(Fake::reddit(Mode::Ok), 360).await;
+    seed(&app).await;
+    app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(survivors(&app).await, (vec!["stock:NEWRUN".to_string()], vec!["stock:NEWMET".to_string()]));
+
+    // Y también cuando solo hay fallos (`store` no corre): si no, la tabla crecería sin límite.
+    let app = app_with(Fake::reddit(Mode::Fail), 360).await;
+    seed(&app).await;
+    app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(survivors(&app).await, (vec!["stock:NEWRUN".to_string()], vec!["stock:NEWMET".to_string()]));
+}
+
+// --- M1: segunda barrera de X (activos distintos por hora) y control de origen --------------------
+
+#[test]
+fn x_asset_cap_setting_is_parsed_safely() {
+    use server::social::{DEFAULT_X_MAX_ASSETS_PER_HOUR as D, parse_x_max_assets_per_hour as parse};
+    assert_eq!(D, 30);
+    for unset in [None, Some(""), Some("  "), Some("abc"), Some("0"), Some("-3"), Some("1.5")] {
+        assert_eq!(parse(unset), D, "{unset:?}");
+    }
+    assert_eq!(parse(Some("5")), 5);
+    assert_eq!(parse(Some(" 12 ")), 12);
+    assert_eq!(parse(Some("99999")), 1000, "con techo");
+}
+
+#[tokio::test]
+async fn x_is_queried_for_a_limited_number_of_distinct_assets_per_hour() {
+    let reddit = Fake::reddit(Mode::Ok);
+    let x = Fake::new(SocialSource::X, Mode::Ok);
+    // Sin caché de refresco (0 min) para que repetir un activo vuelva a salir a las redes.
+    let app = app_with_providers(vec![reddit.clone(), x.clone()], 0, Some(2)).await;
+    let ok = |v: &serde_json::Value| v["enabled"] == true;
+    for id in ["AAPL", "MSFT", "TSLA"] {
+        let (st, v) = app.get(&format!("/api/assets/stock:{id}/social")).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert!(ok(&v));
+    }
+    assert_eq!(x.calls(), 2, "el tercer activo distinto no llega a X");
+    assert_eq!(reddit.calls(), 3, "Reddit no tiene ese tope");
+    // Un activo ya contado en la hora sigue pudiendo consultarse.
+    app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(x.calls(), 3);
+    // El rechazado no escribió nada de X: ni ejecuciones ni publicaciones.
+    let n: i64 = sqlx::query("SELECT COUNT(*) FROM social_runs WHERE asset_id = 'stock:TSLA' AND source = 'x'").fetch_one(&app.state.db).await.unwrap().get(0);
+    assert_eq!(n, 0);
+    // Lo de Reddit de TSLA sí se sirve.
+    let (_, v) = app.get("/api/assets/stock:TSLA/social").await;
+    assert_eq!(v["digest"]["metrics"]["mentions"], 3);
+    assert_eq!(x.calls(), 3, "TSLA sigue sin hueco en X");
+}
+
+async fn get_with(app: &TestApp, uri: &str, headers: &[(&str, &str)]) -> StatusCode {
+    let mut b = axum::http::Request::builder().method("GET").uri(uri);
+    for (k, v) in headers {
+        b = b.header(*k, *v);
+    }
+    app.call(b.body(axum::body::Body::empty()).unwrap()).await.status()
+}
+
+#[tokio::test]
+async fn cross_origin_gets_never_reach_the_networks() {
+    let fake = Fake::reddit(Mode::Ok);
+    let app = app_with(fake.clone(), 0).await;
+    let uri = "/api/assets/stock:AAPL/social";
+    let host = ("host", "127.0.0.1:8787");
+    // `<img src>` desde otra web: Sec-Fetch-Site cross-site (sin Origin) o con Origin ajeno.
+    for h in [
+        vec![host, ("sec-fetch-site", "cross-site")],
+        vec![host, ("sec-fetch-site", "cross-site"), ("sec-fetch-mode", "no-cors"), ("sec-fetch-dest", "image")],
+        vec![host, ("origin", "https://evil.example")],
+        vec![host, ("origin", "http://localhost:9999")],
+    ] {
+        assert_eq!(get_with(&app, uri, &h).await, StatusCode::FORBIDDEN, "{h:?}");
+    }
+    assert_eq!(fake.calls(), 0, "ninguna consulta a las redes");
+    assert_eq!(count(&app, "social_runs").await + count(&app, "social_posts").await + count(&app, "social_metrics").await, 0);
+    // Legítimos: sin cabeceras, mismo origen, Vite (FRONTEND_ORIGIN), navegación directa del usuario.
+    for h in [
+        vec![host],
+        vec![host, ("sec-fetch-site", "same-origin")],
+        vec![host, ("sec-fetch-site", "none")],
+        vec![host, ("origin", "http://127.0.0.1:8787"), ("sec-fetch-site", "same-origin")],
+        vec![("host", "localhost:5180"), ("sec-fetch-site", "same-origin")],
+        vec![host, ("origin", "http://localhost:5180")],
+    ] {
+        assert_eq!(get_with(&app, uri, &h).await, StatusCode::OK, "{h:?}");
+    }
+    assert_eq!(fake.calls(), 6, "cada petición legítima sí consulta");
 }
 
 #[tokio::test]
 async fn a_failing_network_never_breaks_the_route_and_is_reported() {
-    let fake = Arc::new(Fake { calls: AtomicU32::new(0), fail: true });
+    let fake = Fake::reddit(Mode::Fail);
     let app = app_with(fake.clone(), 360).await;
     let (st, v) = app.get("/api/assets/stock:AAPL/social").await;
     assert_eq!(st, StatusCode::OK);
     assert!(v["digest"].is_null());
     // El segundo intento cae en el periodo de espera tras fallo: no martillea a la red.
     app.get("/api/assets/stock:AAPL/social").await;
-    assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(fake.calls(), 1);
     let (_, s) = app.get("/api/social/status").await;
     assert_eq!(s["enabled"], true);
     assert!(s["lastError"]["message"].as_str().unwrap().contains("503"), "{s}");

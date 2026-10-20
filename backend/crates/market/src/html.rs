@@ -12,6 +12,8 @@
 //! - cada línea recuerda si TODO su texto va en negrita o con énfasis (cursiva/subrayado): así
 //!   se reconocen los títulos de sección sin depender del texto.
 
+use std::collections::HashMap;
+
 /// Una línea de texto ya limpia.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Line {
@@ -49,6 +51,23 @@ fn strip_sgml_header(s: &str) -> &str {
 
 fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Posición de la primera `</name` de `hay` (sin distinguir mayúsculas), sin copiar nada. `name` es
+/// ASCII. Recorre `hay` una sola vez: cada `<` cuesta una comparación de longitud fija.
+fn find_close_tag(hay: &[u8], name: &[u8]) -> Option<usize> {
+    let need = 2 + name.len();
+    let mut from = 0;
+    while let Some(p) = hay[from..].iter().position(|&c| c == b'<') {
+        let at = from + p;
+        // Si no cabe la etiqueta entera en lo que queda, tampoco cabrá en un `<` posterior.
+        let w = hay.get(at..at + need)?;
+        if w[1] == b'/' && w[2..].eq_ignore_ascii_case(name) {
+            return Some(at);
+        }
+        from = at + 1;
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -170,6 +189,10 @@ struct Parser {
     lines: Vec<Line>,
     cur: TextBuf,
     stack: Vec<Frame>,
+    /// Marcos abiertos por nombre (siempre coincide con el contenido de `stack`). Permite saber en
+    /// O(1) si un `</x>` tiene apertura; sin esto cada cierre huérfano recorría la pila entera
+    /// (hasta `MAX_DEPTH`), y un documento de cierres sueltos costaba O(n · MAX_DEPTH).
+    open: HashMap<String, usize>,
     hidden: usize,
     table_depth: usize,
     row: Option<Row>,
@@ -348,7 +371,7 @@ impl Parser {
         if AUTO_CLOSE.contains(&name)
             && self.stack.last().is_some_and(|f| f.name == name)
         {
-            self.stack.pop();
+            self.pop_frame();
         }
         self.push_frame(name, style, false);
     }
@@ -381,13 +404,34 @@ impl Parser {
             emph,
             hidden,
         });
+        match self.open.get_mut(name) {
+            Some(n) => *n += 1,
+            None => {
+                self.open.insert(name.to_string(), 1);
+            }
+        }
+    }
+
+    /// Saca el último marco de la pila manteniendo `open` al día.
+    fn pop_frame(&mut self) -> Option<Frame> {
+        let f = self.stack.pop()?;
+        if let Some(n) = self.open.get_mut(f.name.as_str()) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                self.open.remove(f.name.as_str());
+            }
+        }
+        Some(f)
     }
 
     fn end(&mut self, name: &str) {
-        // Cierre implícito de lo que quedó abierto dentro (HTML sin cerrar).
-        if let Some(pos) = self.stack.iter().rposition(|f| f.name == name) {
+        // Cierre implícito de lo que quedó abierto dentro (HTML sin cerrar). Un cierre sin
+        // apertura (`open` no lo conoce) no recorre la pila.
+        if self.open.contains_key(name)
+            && let Some(pos) = self.stack.iter().rposition(|f| f.name == name)
+        {
             while self.stack.len() > pos {
-                if let Some(f) = self.stack.pop()
+                if let Some(f) = self.pop_frame()
                     && f.hidden
                 {
                     self.hidden = self.hidden.saturating_sub(1);
@@ -460,10 +504,9 @@ impl Parser {
             }
             let style = attr_value(&body[name_end..], "style");
             if matches!(name.as_str(), "script" | "style") && !self_closing {
-                // Texto crudo hasta el cierre.
-                let close = format!("</{name}");
-                let lower_rest = html[i..].to_ascii_lowercase();
-                let skip = lower_rest.find(&close).unwrap_or(html.len() - i);
+                // Texto crudo hasta el cierre. Se busca sin copiar el resto del documento: pasarlo a
+                // minúsculas en cada <style> era O(n²) con miles de <style></style>.
+                let skip = find_close_tag(&b[i..], name.as_bytes()).unwrap_or(html.len() - i);
                 i += skip;
                 text_start = i;
                 continue;
@@ -597,7 +640,8 @@ fn merge_financial_cells(cells: Vec<(String, bool, bool)>) -> Vec<(String, bool,
             continue;
         }
         if matches!(t, "$" | "€" | "£" | "US$" | "(" | "$(") {
-            prefix = Some(format!("{}{}", prefix.unwrap_or_default(), t));
+            // Se acumula en sitio: reconstruir el `String` en cada celda era O(n²) con miles de «$».
+            prefix.get_or_insert_with(String::new).push_str(t);
             continue;
         }
         if matches!(t, ")" | "%" | ")%" | "%)" | "*" | "†" | "‡") && let Some(last) = out.last_mut() {
@@ -811,5 +855,131 @@ mod tests {
         assert_eq!(attr_value(" class=\"a\" style='x: y; z' ", "style"), Some("x: y; z"));
         assert_eq!(attr_value(" data-style=\"no\" style=bold ", "style"), Some("bold"));
         assert_eq!(attr_value(" class=\"a\"", "style"), None);
+    }
+
+    // ---- Equivalencia con el código anterior a B1 ------------------------------------------------
+    //
+    // Los arreglos de coste cuadrático no deben cambiar ningún resultado: se comparan con una copia
+    // de la versión original sobre entradas aleatorias deterministas y acotadas.
+
+    /// Generador pseudoaleatorio determinista (xorshift64).
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+
+        fn soup(&mut self, items: &[&str], pieces: usize) -> String {
+            (0..pieces).map(|_| items[(self.next() % items.len() as u64) as usize]).collect()
+        }
+    }
+
+    #[test]
+    fn style_and_script_end_at_the_first_closer_in_any_case() {
+        assert_eq!(texts("<p>a</p><STYLE>x{}</Style><p>b</p>"), vec!["a", "b"]);
+        assert_eq!(texts("<p>a</p><script>if (a<b) {}</SCRIPT ><p>b</p>"), vec!["a", "b"]);
+        assert_eq!(texts("<p>a</p><style>p{} <p>nunca</p>"), vec!["a"], "sin cierre se descarta el resto");
+        assert_eq!(texts("<p>a</p><style type=\"text/css\">p{}</style\n><p>b</p>"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn close_tag_search_matches_the_lowercase_copy_search() {
+        let pieces = [
+            "<", "/", ">", "style", "STYLE", "StYlE", "script", "SCRIPT", "</style", "</STYLE>", "</Style >", "</sty", "<style>", "é", "日", "a", " ", "</",
+            "<//style", "</script", "</SCRIPT",
+        ];
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        for name in ["style", "script"] {
+            for _ in 0..4_000 {
+                let n = 1 + (rng.next() % 20) as usize;
+                let h = rng.soup(&pieces, n);
+                let want = h.to_ascii_lowercase().find(&format!("</{name}"));
+                assert_eq!(find_close_tag(h.as_bytes(), name.as_bytes()), want, "{name}: {h:?}");
+            }
+        }
+    }
+
+    /// `open` debe coincidir siempre con el contenido de la pila: `end()` se fía de él para no
+    /// recorrerla, así que un descuadre cambiaría qué cierres se aplican.
+    #[test]
+    fn open_counts_follow_the_stack_on_tag_soup() {
+        let tags = [
+            "<p>", "</p>", "<div>", "</div>", "<b>", "</b>", "<i>", "</i>", "<u>", "</u>", "<span>", "</span>", "<br>", "<table>", "</table>", "<tr>", "</tr>",
+            "<td>", "</td>", "<th>", "</th>", "<li>", "</li>", "<h2>", "</h2>", "<style>", "</style>", "<script>", "<span style=\"display:none\">", "<ix:header>",
+            "</ix:header>", "<head>", "</head>", "<title>", "</title>", "</x>", "<x>", "text", " ", "<!-- c -->", "<STYLE>", "</STYLE>", "<option>", "<dd>",
+        ];
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        for _ in 0..4_000 {
+            let n = 1 + (rng.next() % 60) as usize;
+            let h = rng.soup(&tags, n);
+            let mut p = Parser::default();
+            p.run(&h);
+            let mut want: HashMap<String, usize> = HashMap::new();
+            for f in &p.stack {
+                *want.entry(f.name.clone()).or_default() += 1;
+            }
+            assert_eq!(p.open, want, "{h:?}");
+        }
+        // Pila llena: los marcos que no caben no se cuentan y un cierre huérfano no la recorre.
+        let mut p = Parser::default();
+        p.run(&format!("{}{}", "<i>".repeat(MAX_DEPTH + 50), "</u>".repeat(100)));
+        assert_eq!(p.stack.len(), MAX_DEPTH);
+        assert_eq!(p.open.get("i"), Some(&MAX_DEPTH));
+        assert!(!p.open.contains_key("u"));
+    }
+
+    /// `merge_financial_cells` tal como era antes de B1 (reconstruía el prefijo en cada celda).
+    fn merge_reference(cells: Vec<(String, bool, bool)>) -> Vec<(String, bool, bool)> {
+        let mut out: Vec<(String, bool, bool)> = Vec::with_capacity(cells.len());
+        let mut prefix: Option<String> = None;
+        for (text, bold, emph) in cells {
+            let t = text.trim();
+            if t.is_empty() {
+                continue;
+            }
+            if matches!(t, "$" | "€" | "£" | "US$" | "(" | "$(") {
+                prefix = Some(format!("{}{}", prefix.unwrap_or_default(), t));
+                continue;
+            }
+            if matches!(t, ")" | "%" | ")%" | "%)" | "*" | "†" | "‡") && let Some(last) = out.last_mut() {
+                last.0.push_str(t);
+                continue;
+            }
+            let text = match prefix.take() {
+                Some(p) => format!("{p}{t}"),
+                None => t.to_string(),
+            };
+            out.push((text, bold, emph));
+        }
+        if let Some(p) = prefix
+            && !p.is_empty()
+        {
+            out.push((p, false, false));
+        }
+        out
+    }
+
+    #[test]
+    fn financial_cells_merge_like_the_original() {
+        let cells = ["$", "(", "$(", "US$", "€", "£", ")", "%", ")%", "%)", "*", "†", "‡", "1,234", "12.5", "x", "", "  ", "(5", "Revenue", " $ "];
+        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+        for _ in 0..4_000 {
+            let n = 1 + (rng.next() % 14) as usize;
+            let row: Vec<(String, bool, bool)> = (0..n)
+                .map(|_| {
+                    let r = rng.next();
+                    (cells[(r % cells.len() as u64) as usize].to_string(), r & 0x100 != 0, r & 0x200 != 0)
+                })
+                .collect();
+            assert_eq!(merge_financial_cells(row.clone()), merge_reference(row.clone()), "{row:?}");
+        }
+        let row = vec![("Label".to_string(), false, false), ("$".into(), false, false), ("$".into(), false, false), ("5".into(), true, false)];
+        assert_eq!(merge_financial_cells(row)[1].0, "$$5");
     }
 }

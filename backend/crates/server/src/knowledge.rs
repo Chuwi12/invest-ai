@@ -1,8 +1,14 @@
 //! Cableado del archivo de conocimiento local (RAG, crate `knowledge`). Diseño en `docs/notes/rag.md`.
 //!
-//! Todo es opcional y **nunca impide arrancar**: con `RAG_ENABLED=0` (valor por defecto) o con
+//! Todo es opcional y **nunca impide arrancar**: con los tres interruptores a 0 o con
 //! `INVEST_AI_FAKE=1` no se crea nada y la app es idéntica a la que no conoce el RAG; si abrir el
 //! archivo falla, se registra con `tracing::error!` y la app sigue sin RAG.
+//!
+//! Archivado y recuperación son cosas distintas (`knowledge::RagModes`, `docs/notes/rag.md`):
+//! - `RAG_ARCHIVE` (def. 1): abre la base y la alimenta (decoradores, trabajadores, mantenimiento).
+//!   Por sí solo NO cambia ni un byte de lo que se envía al modelo: la IA no recibe ninguna búsqueda.
+//! - `RAG_ANALYSIS` / `RAG_CHAT` (def. 0): entregan la búsqueda al análisis / al chat ([`Rag::search`]).
+//!   Se pueden encender sin archivar (el archivo queda de solo lectura: ni ingesta ni mantenimiento).
 //!
 //! Piezas:
 //! - [`TeeMarket`] / [`TeeIpo`]: decoradores que archivan lo que la app YA descarga (noticias,
@@ -31,8 +37,8 @@ use domain::{
 };
 use futures::{StreamExt, stream::BoxStream};
 use knowledge::{
-    DocKind, EmbedError, EmbedKind, Embedder, KnowledgeBase, KnowledgeConfig, KnowledgeSearch, NewDocument, NewsSink, OllamaEmbedder, Section,
-    spawn_news_worker,
+    DocKind, EmbedError, EmbedKind, Embedder, KnowledgeBase, KnowledgeConfig, KnowledgeSearch, NewDocument, NewsSink, OllamaEmbedder, RagModes,
+    Section, spawn_news_worker,
 };
 use sqlx::SqlitePool;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -341,18 +347,61 @@ fn spawn_filing_worker(kb: Arc<KnowledgeBase>, shutdown: CancellationToken) -> (
 
 // -------------------------------------------------------------------------------------- cableado
 
-/// Archivo de conocimiento abierto y sus colas de ingesta.
-pub struct Rag {
-    pub kb: Arc<KnowledgeBase>,
-    pub activity: Activity,
+/// Colas de ingesta y trabajadores: solo existen con `RAG_ARCHIVE=1`.
+struct Archiver {
     news: NewsSink,
     filings: FilingSink,
     funds: crate::fund_docs::FundArchive,
     workers: Vec<JoinHandle<()>>,
 }
 
+/// Archivo de conocimiento abierto y, con `RAG_ARCHIVE=1`, sus colas de ingesta.
+pub struct Rag {
+    pub kb: Arc<KnowledgeBase>,
+    pub activity: Activity,
+    modes: RagModes,
+    archiver: Option<Archiver>,
+}
+
+/// Búsquedas que se entregan a la IA. Cada una existe solo si su interruptor está encendido; con
+/// `None` el motor correspondiente es idéntico al que no conoce el RAG.
+#[derive(Clone, Default)]
+pub struct RagSearch {
+    /// Para el análisis (`RAG_ANALYSIS`).
+    pub analysis: Option<Arc<dyn KnowledgeSearch>>,
+    /// Para la herramienta `search_knowledge` del chat (`RAG_CHAT`).
+    pub chat: Option<Arc<dyn KnowledgeSearch>>,
+}
+
+/// Arranque: registra los avisos de configuración y abre el archivo si procede. `None` si los tres
+/// interruptores valen 0, si `fake` (`INVEST_AI_FAKE=1`: los datos simulados no se mezclan con el
+/// archivo real) o si abrirlo falla (`tracing::error!`; la app sigue sin RAG).
+pub async fn open_configured(cfg: KnowledgeConfig, fake: bool, pool: SqlitePool, shutdown: CancellationToken) -> Option<Rag> {
+    for note in &cfg.notes {
+        tracing::warn!("{note}");
+    }
+    if !cfg.modes.any() {
+        tracing::info!("archivo de conocimiento (RAG) apagado: RAG_ARCHIVE, RAG_ANALYSIS y RAG_CHAT valen 0");
+        return None;
+    }
+    if fake {
+        tracing::info!("INVEST_AI_FAKE activo: el archivo de conocimiento (RAG) se desactiva");
+        return None;
+    }
+    let modes = cfg.modes;
+    let rag = open(cfg, pool, shutdown).await;
+    if rag.is_some() {
+        tracing::info!(archivado = modes.archive, analisis = modes.analysis, chat = modes.chat, "archivo de conocimiento (RAG) abierto");
+    }
+    rag
+}
+
 /// Abre el archivo con `OllamaEmbedder`. `None` (y `tracing::error!`) si algo falla: la app sigue sin RAG.
+/// Si no hay ningún interruptor encendido tampoco se abre.
 pub async fn open(cfg: KnowledgeConfig, pool: SqlitePool, shutdown: CancellationToken) -> Option<Rag> {
+    if !cfg.modes.any() {
+        return None;
+    }
     let embedder = match OllamaEmbedder::new(cfg.embed.clone()) {
         Ok(e) => Arc::new(e) as Arc<dyn Embedder>,
         Err(e) => {
@@ -365,6 +414,7 @@ pub async fn open(cfg: KnowledgeConfig, pool: SqlitePool, shutdown: Cancellation
 
 /// Como [`open`], con un embedder dado (tests: embedder simulado, sin Ollama).
 pub async fn open_with(cfg: KnowledgeConfig, pool: SqlitePool, embedder: Arc<dyn Embedder>, shutdown: CancellationToken) -> Option<Rag> {
+    let modes = cfg.modes;
     let activity = Activity::default();
     let gated = Arc::new(GatedEmbedder::new(embedder, activity.clone(), shutdown.clone()));
     let kb = match KnowledgeBase::open(pool.clone(), gated, cfg).await {
@@ -374,18 +424,29 @@ pub async fn open_with(cfg: KnowledgeConfig, pool: SqlitePool, embedder: Arc<dyn
             return None;
         }
     };
-    let (news, w1) = spawn_news_worker(kb.clone(), shutdown.clone());
-    let (filings, w2) = spawn_filing_worker(kb.clone(), shutdown.clone());
-    let funds = crate::fund_docs::FundArchive::new(kb.clone(), pool, shutdown);
-    Some(Rag { kb, activity, news, filings, funds, workers: vec![w1, w2] })
+    // Sin `RAG_ARCHIVE` el archivo es de solo lectura: ni colas, ni trabajadores, ni mantenimiento.
+    let archiver = modes.archive.then(|| {
+        let (news, w1) = spawn_news_worker(kb.clone(), shutdown.clone());
+        let (filings, w2) = spawn_filing_worker(kb.clone(), shutdown.clone());
+        let funds = crate::fund_docs::FundArchive::new(kb.clone(), pool, shutdown);
+        Archiver { news, filings, funds, workers: vec![w1, w2] }
+    });
+    Some(Rag { kb, activity, modes, archiver })
 }
 
 impl Rag {
+    /// Interruptores con los que se abrió.
+    pub fn modes(&self) -> RagModes {
+        self.modes
+    }
+
     /// Envuelve mercado, OPV y analista: archivan lo que pasa por ellos y marcan la actividad del LLM.
+    /// Sin `RAG_ARCHIVE` devuelve los mismos objetos, sin envolver.
     pub fn wrap(&self, market: Arc<dyn MarketData>, ipo: Arc<dyn IpoData>, analyst: Arc<dyn Analyst>) -> (Arc<dyn MarketData>, Arc<dyn IpoData>, Arc<dyn Analyst>) {
+        let Some(a) = &self.archiver else { return (market, ipo, analyst) };
         (
-            Arc::new(TeeMarket::new(market, self.news.clone())),
-            Arc::new(TeeIpo::new(ipo, self.filings.clone())),
+            Arc::new(TeeMarket::new(market, a.news.clone())),
+            Arc::new(TeeIpo::new(ipo, a.filings.clone())),
             Arc::new(TrackedAnalyst::new(analyst, self.activity.clone())),
         )
     }
@@ -399,28 +460,44 @@ impl Rag {
         analyst: Arc<dyn Analyst>,
         funds: Arc<dyn domain::FundDocs>,
     ) -> (Arc<dyn MarketData>, Arc<dyn IpoData>, Arc<dyn Analyst>) {
-        self.funds.start(funds);
+        let Some(a) = &self.archiver else { return (market, ipo, analyst) };
+        a.funds.start(funds);
         (
-            Arc::new(TeeMarket::new(market, self.news.clone()).with_funds(self.funds.sink())),
-            Arc::new(TeeIpo::new(ipo, self.filings.clone())),
+            Arc::new(TeeMarket::new(market, a.news.clone()).with_funds(a.funds.sink())),
+            Arc::new(TeeIpo::new(ipo, a.filings.clone())),
             Arc::new(TrackedAnalyst::new(analyst, self.activity.clone())),
         )
     }
 
-    /// Búsqueda para `ai`.
-    pub fn search_handle(&self) -> Arc<dyn KnowledgeSearch> {
-        self.kb.clone()
+    /// Búsquedas para `ai`: la del análisis solo con `RAG_ANALYSIS=1` y la del chat solo con `RAG_CHAT=1`.
+    pub fn search(&self) -> RagSearch {
+        let kb: Arc<dyn KnowledgeSearch> = self.kb.clone();
+        RagSearch { analysis: self.modes.analysis.then(|| kb.clone()), chat: self.modes.chat.then_some(kb) }
     }
 
     /// Lanza el mantenimiento y registra los trabajadores en `tasks` (el apagado los espera).
+    /// Sin `RAG_ARCHIVE` no hay nada que mantener (ni `embed_pending` ni `purge`).
     pub fn spawn_background(self, tasks: &TaskTracker, shutdown: CancellationToken) {
-        for w in self.workers.into_iter().chain(self.funds.take_handles()) {
+        let Some(a) = self.archiver else { return };
+        for w in a.workers.into_iter().chain(a.funds.take_handles()) {
             tasks.spawn(async move {
                 let _ = w.await;
             });
         }
         tasks.spawn(run_maintenance(self.kb, self.activity, shutdown));
     }
+}
+
+/// El analista real, con la búsqueda que corresponde a cada interruptor (`rag = None`: ninguna).
+/// Es el único punto donde el RAG llega a la IA: ver [`Rag::search`].
+pub fn ollama_analyst(
+    cfg: ai::AiConfig,
+    settings: Arc<dyn domain::SettingsStore>,
+    rag: Option<&Rag>,
+    social: Option<Arc<dyn domain::SocialData>>,
+) -> domain::Result<ai::OllamaAnalyst> {
+    let search = rag.map(Rag::search).unwrap_or_default();
+    ai::OllamaAnalyst::with_split_knowledge(cfg, settings, search.analysis, search.chat, social)
 }
 
 /// `embed_pending` al arrancar y de forma periódica (en tandas pequeñas, solo sin generaciones en

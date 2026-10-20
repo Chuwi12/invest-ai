@@ -318,7 +318,7 @@ async fn rag_off_chat_matches_golden_transcript() {
 
 mod rag_on {
     use chrono::TimeZone;
-    use knowledge::{DocKind, FakeEmbedder, KnowledgeBase, KnowledgeConfig, NewDocument, Section, testutil};
+    use knowledge::{DocKind, DocumentInfo, FakeEmbedder, KnowledgeBase, KnowledgeConfig, NewDocument, SearchHit, SearchResults, Section, citation::MAX_FRAGMENT_CHARS, testutil};
 
     use super::*;
 
@@ -388,6 +388,71 @@ mod rag_on {
         let second = reqs[2]["messages"].as_array().unwrap().iter().rfind(|m| m["role"] == "tool").unwrap()["content"].as_str().unwrap().to_string();
         assert!(second.contains("[D2]") && !second.contains("[D1]"), "{second}");
         assert!(text_of(&ev).contains("⚠") && text_of(&ev).contains("cita"), "{}", text_of(&ev));
+    }
+
+    /// Archivo que devuelve siempre un único fragmento largo (el troceado por defecto nunca pasa de 1800 caracteres).
+    struct OneHit(String);
+    #[async_trait::async_trait]
+    impl knowledge::KnowledgeSearch for OneHit {
+        async fn search(&self, _: &knowledge::SearchRequest) -> knowledge::Result<SearchResults> {
+            let hit = SearchHit {
+                chunk_id: 7,
+                section: None,
+                text: self.0.clone(),
+                score: 1.0,
+                similarity: 1.0,
+                lexical: false,
+                recency: 1.0,
+                source_weight: 1.0,
+                doc: DocumentInfo {
+                    id: 1,
+                    doc_key: "filing:long".into(),
+                    kind: DocKind::Filing,
+                    subtype: Some("S-1".into()),
+                    source: "sec".into(),
+                    publisher: None,
+                    title: "Apple prospectus".into(),
+                    url: Some("https://example.test/filing-long".into()),
+                    issuer: None,
+                    language: Some("en".into()),
+                    published_at: chrono::Utc.with_ymd_and_hms(2026, 10, 5, 12, 0, 0).unwrap(),
+                    assets: vec!["stock:AAPL".into()],
+                    pinned: false,
+                },
+            };
+            Ok(SearchResults { hits: vec![hit], scanned: 1, model: "fake".into() })
+        }
+    }
+
+    /// Turno de chat con una búsqueda que devuelve el fragmento largo y la respuesta final dada.
+    /// Devuelve el mensaje de la herramienta (lo que ve el modelo) y el texto de la respuesta con avisos.
+    async fn answer_with_long_fragment(answer: &str) -> (String, String) {
+        let text = format!("Services revenue growth of 31.4 percent in the third quarter. {}Target price of 987.65 per share.", "datum ".repeat(340));
+        assert!(text.find("987.65").unwrap() >= 2000 && text.find("31.4").unwrap() < MAX_FRAGMENT_CHARS);
+        let e = env_kb(Arc::new(OneHit(text))).await;
+        e.mock.push_chat(vec![tool_call_line("search_knowledge", json!({"query": "precio objetivo"})), done_line()]);
+        e.mock.push_chat(reply(answer));
+        let ev = collect(&e, request(&e, "¿qué dice el folleto?", &[])).await;
+        let reqs = e.mock.chat_requests();
+        let tool_msg = reqs[1]["messages"].as_array().unwrap().iter().find(|m| m["role"] == "tool").unwrap()["content"].as_str().unwrap().to_string();
+        (tool_msg, text_of(&ev))
+    }
+
+    #[tokio::test]
+    async fn chat_figure_from_the_cut_tail_of_a_fragment_is_flagged_but_the_visible_one_is_not() {
+        let (tool_msg, text) = answer_with_long_fragment("Los servicios crecieron 31.4 percent y el precio objetivo es 987.65 [D1].").await;
+        assert!(tool_msg.contains("[D1]") && tool_msg.contains("31.4 percent") && !tool_msg.contains("987.65"), "la cola no llega al modelo");
+        // El aviso lista solo las cifras sin respaldo (la respuesta, antes del aviso, repite ambas).
+        let note = text.split("Cifras de esta respuesta").nth(1).unwrap_or_default();
+        assert!(note.contains("987.65") && !note.contains("31.4"), "solo la cifra de la cola queda sin respaldo: {text}");
+        let (_, text) = answer_with_long_fragment("Los servicios crecieron 31.4 percent en el trimestre [D1].").await;
+        assert!(!text.contains('⚠'), "cita válida y cifra visible: {text}");
+    }
+
+    #[tokio::test]
+    async fn chat_citation_resting_only_on_the_cut_tail_is_removed() {
+        let (_, text) = answer_with_long_fragment("El precio objetivo del folleto es 987.65 dólares [D1].").await;
+        assert!(text.contains("Se quitaron 1 cita"), "la cita solo se apoyaba en la cola recortada: {text}");
     }
 
     #[tokio::test]

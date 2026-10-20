@@ -287,7 +287,8 @@ pub fn is_boundary(n: &str) -> bool {
         "comparison of", "conflicts of interest", "information about", "executive officers", "directors, executive",
         "limitation of liability", "transfer agent", "financial statements", "report of independent",
     ];
-    STARTS.iter().any(|s| n == *s || n.starts_with(&format!("{s} ")))
+    // `n == s` o `n` empieza por `s` seguido de un espacio (sin construir una cadena por prefijo).
+    STARTS.iter().any(|s| n.strip_prefix(s).is_some_and(|rest| rest.is_empty() || rest.starts_with(' ')))
 }
 
 struct Headings<'a> {
@@ -337,8 +338,12 @@ impl<'a> Headings<'a> {
         Self { lines, terms, cands }
     }
 
+    /// Primer título de primer nivel posterior a `after` (o el final). `terms` está ordenado:
+    /// la búsqueda binaria evita O(títulos) por candidato, que con miles de «DILUTION» en negrita
+    /// era O(n²).
     fn next_term(&self, after: usize) -> usize {
-        self.terms.iter().copied().find(|&t| t > after).unwrap_or(self.lines.len())
+        let k = self.terms.partition_point(|&t| t <= after);
+        self.terms.get(k).copied().unwrap_or(self.lines.len())
     }
 
     fn chars_between(&self, a: usize, b: usize) -> usize {
@@ -403,12 +408,16 @@ impl<'a> Headings<'a> {
             let l = &self.lines[i];
             if is_lock_heading(l) && (l.bold || l.emph) {
                 let mut end = pe;
+                // Bytes acumulados de las líneas posteriores al título (suma corrida: recalcularla
+                // en cada vuelta era O(12 000²) con miles de líneas de un carácter).
+                let mut acc = 0usize;
                 for (body, j) in (i + 1..pe).enumerate() {
+                    acc += self.lines[j].text.len();
                     if self.is_heading_like(j) && !is_lock_heading(&self.lines[j]) && body >= 1 {
                         end = j;
                         break;
                     }
-                    if self.lines[i + 1..=j].iter().map(|x| x.text.len()).sum::<usize>() > 12_000 {
+                    if acc > 12_000 {
                         end = j + 1;
                         break;
                     }
@@ -528,5 +537,50 @@ mod tests {
         let lock = get("lock_up").unwrap();
         assert!(lock.contains("180 day lock-up") && !lock.contains("other"), "{lock}");
         assert!(e.missing.contains(&"capitalization".to_string()));
+    }
+
+    fn line(text: &str) -> L {
+        L { text: text.into(), norm: normalize(text), bold: false, emph: false, table: false, page_start: false }
+    }
+
+    /// `next_term` (búsqueda binaria) debe dar lo mismo que el recorrido lineal original.
+    #[test]
+    fn next_term_matches_a_linear_scan() {
+        let lines: Vec<L> = (0..60).map(|i| line(&format!("l{i}"))).collect();
+        for terms in [vec![], vec![0], vec![5, 6, 7], vec![3, 10, 59], (0..60).step_by(7).collect::<Vec<_>>()] {
+            let h = Headings { lines: &lines, terms: terms.clone(), cands: Vec::new() };
+            for after in 0..65 {
+                let want = terms.iter().copied().find(|&t| t > after).unwrap_or(lines.len());
+                assert_eq!(h.next_term(after), want, "terms={terms:?} after={after}");
+            }
+        }
+    }
+
+    #[test]
+    fn boundary_titles_need_the_whole_word() {
+        assert!(is_boundary("business"));
+        assert!(is_boundary("business overview"));
+        assert!(is_boundary("management s discussion and analysis"));
+        assert!(!is_boundary("businesses"));
+        assert!(!is_boundary("managementteam"));
+        assert!(!is_boundary("our"));
+        assert!(!is_boundary(""));
+    }
+
+    /// El lock-up bajo su título acaba, como mucho, cuando las líneas del cuerpo suman más de
+    /// 12 000 bytes: con líneas de 100 bytes, la 121.ª es la última que entra.
+    #[test]
+    fn lockup_body_stops_after_twelve_thousand_bytes() {
+        let filler = "Lorem ipsum dolor sit amet ".repeat(20);
+        let body = format!("{}b", "a".repeat(99));
+        let rows = format!("<p>{body}</p>").repeat(200);
+        let html = format!(
+            "<html><body><p>Table of Contents</p><p><b>UNDERWRITING</b></p><p>{filler}</p><p><i>Lock-Up Agreements</i></p>{rows}\
+             <p>Table of Contents</p><p><b>LEGAL MATTERS</b></p><p>x</p></body></html>"
+        );
+        let e = extract(&html, 0);
+        let lock = e.sections.iter().find(|s| s.key == "lock_up").expect("hay lock-up");
+        assert_eq!(lock.text.lines().count(), 121, "{}", lock.text.len());
+        assert!(lock.text.lines().all(|l| l == body));
     }
 }

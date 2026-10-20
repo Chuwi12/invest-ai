@@ -6,7 +6,7 @@
 //! comisiones, estrategia, riesgos y rotación).
 //!
 //! - La respuesta al usuario nunca espera: `offer` es síncrono y no bloquea (cola acotada).
-//! - Solo existe con `RAG_ENABLED=1` (sin RAG no se crea nada y no se pide nada a EDGAR).
+//! - Solo existe con `RAG_ARCHIVE=1` (sin archivado no se crea nada y no se pide nada a EDGAR).
 //! - Como mucho una descarga por ETF cada [`REFRESH_DAYS`] días, también entre reinicios (se mira
 //!   la fecha del documento ya archivado) y un reintento en memoria cada [`RETRY`] tras un fallo.
 

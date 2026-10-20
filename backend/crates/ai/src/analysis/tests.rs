@@ -729,7 +729,7 @@ mod rag_on {
 
     use async_trait::async_trait;
     use chrono::{TimeZone, Utc};
-    use knowledge::{DocKind, FakeEmbedder, KnowledgeBase, KnowledgeConfig, KnowledgeError, KnowledgeSearch, NewDocument, SearchRequest, SearchResults, Section, testutil};
+    use knowledge::{DocKind, DocumentInfo, FakeEmbedder, KnowledgeBase, KnowledgeConfig, KnowledgeError, KnowledgeSearch, NewDocument, SearchHit, SearchRequest, SearchResults, Section, citation::MAX_FRAGMENT_CHARS, testutil};
 
     use super::*;
 
@@ -834,6 +834,76 @@ mod rag_on {
         let reqs = e.mock.chat_requests();
         assert!(!system_of(&reqs[0]).contains("knowledge_base"));
         assert!(!user_of(&reqs[4]).contains("knowledge_base"));
+    }
+
+    /// Archivo que devuelve siempre un único fragmento con el texto dado (sin pasar por el troceado,
+    /// que nunca produce fragmentos de más de 1800 caracteres con la configuración por defecto).
+    struct OneHit(String);
+    #[async_trait]
+    impl KnowledgeSearch for OneHit {
+        async fn search(&self, _: &SearchRequest) -> knowledge::Result<SearchResults> {
+            let hit = SearchHit {
+                chunk_id: 1,
+                section: None,
+                text: self.0.clone(),
+                score: 1.0,
+                similarity: 1.0,
+                lexical: false,
+                recency: 1.0,
+                source_weight: 1.0,
+                doc: DocumentInfo {
+                    id: 1,
+                    doc_key: "filing:long".into(),
+                    kind: DocKind::Filing,
+                    subtype: Some("S-1".into()),
+                    source: "sec".into(),
+                    publisher: None,
+                    title: "Apple prospectus".into(),
+                    url: Some("https://example.test/filing-long".into()),
+                    issuer: None,
+                    language: Some("en".into()),
+                    published_at: Utc.with_ymd_and_hms(2026, 10, 5, 12, 0, 0).unwrap(),
+                    assets: vec!["stock:AAPL".into()],
+                    pinned: false,
+                },
+            };
+            Ok(SearchResults { hits: vec![hit], scanned: 1, model: "fake".into() })
+        }
+    }
+
+    /// Análisis con un único fragmento recuperado y dos afirmaciones del juez SIN citas `[D#]` (para
+    /// aislar el `NumberIndex` de la verificación de citas): devuelve el análisis y el prompt del juez.
+    async fn analyze_with_fragment(text: String) -> (domain::Analysis, String) {
+        let e = with_kb(env().await, Arc::new(OneHit(text)));
+        script(&e, ["Los ingresos de servicios crecieron un 31.4 percent en el tercer trimestre", "El precio objetivo del folleto es 987.65 dólares", "Valoración exigente según los múltiplos"]);
+        let a = e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Standard)).await.unwrap();
+        let judge = user_of(&e.mock.chat_requests()[4]);
+        (a, judge)
+    }
+
+    #[tokio::test]
+    async fn a_figure_only_in_the_cut_tail_of_a_fragment_is_not_backed() {
+        // 31.4 en el tramo visible; 987.65 pasado el carácter 2000: el modelo recibe solo 1800.
+        let text = format!("Services revenue growth of 31.4 percent in the third quarter. {}Target price of 987.65 per share.", "datum ".repeat(340));
+        assert!(text.find("987.65").unwrap() >= 2000 && text.find("31.4").unwrap() < MAX_FRAGMENT_CHARS);
+        let (a, judge) = analyze_with_fragment(text).await;
+        // El modelo vio la cifra visible y NO la de la cola (esto es lo que se indexa).
+        assert!(judge.contains("<knowledge_base>") && judge.contains("31.4 percent") && !judge.contains("987.65"), "la cola no llega al juez");
+        let bull = a.bull_case.join("\n");
+        assert!(bull.contains("31.4"), "la cifra visible sí cuenta como respaldada: {:?}", a.bull_case);
+        assert!(!bull.contains("987.65"), "la cifra de la cola recortada no puede avalar nada: {:?}", a.bull_case);
+        assert!(a.quality_notes.as_ref().unwrap().iter().any(|n| n.contains("987.65")), "se avisa de la cifra sin respaldo: {:?}", a.quality_notes);
+    }
+
+    #[tokio::test]
+    async fn the_same_figure_inside_the_visible_part_is_backed() {
+        // Control: el mismo fragmento con 987.65 al principio. Si este test y el anterior pasan, lo que
+        // decide es la posición respecto del recorte y no la cifra.
+        let text = format!("Target price of 987.65 per share. Services revenue growth of 31.4 percent in the third quarter. {}", "datum ".repeat(340));
+        let (a, judge) = analyze_with_fragment(text).await;
+        assert!(judge.contains("987.65") && judge.contains("31.4"));
+        let bull = a.bull_case.join("\n");
+        assert!(bull.contains("31.4") && bull.contains("987.65"), "{:?}", a.bull_case);
     }
 
     #[tokio::test]

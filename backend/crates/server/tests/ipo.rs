@@ -3,10 +3,19 @@
 
 mod common;
 
-use std::sync::Arc;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
+use async_trait::async_trait;
 use axum::http::{Method, StatusCode};
+use chrono::{NaiveDate, Utc};
 use common::{TestApp, assert_keys};
+use domain::{DomainError, IpoBaseRate, IpoEntry, IpoPerformance, Prospectus, ProspectusSection};
 use serde_json::Value;
 use server::{AppState, Settings, db, fake::{FakeAnalyst, FakeMarket}};
 
@@ -179,4 +188,100 @@ async fn without_ipo_data_configured_the_routes_say_unavailable_without_internal
     .await
     .unwrap();
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+// ---- Perfil de riesgo: fuera del worker async y con caché ----------------------------------------
+
+/// El perfil con las mismas entradas es el mismo: la segunda petición sale de la caché (si se
+/// reconstruyera, `generatedAt` cambiaría).
+#[tokio::test]
+async fn risk_profile_is_served_from_the_cache_for_identical_inputs() {
+    let app = TestApp::new().await;
+    let (s, first) = app.get("/api/ipo/ORFS/risk-profile").await;
+    assert_eq!(s, StatusCode::OK, "{first}");
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let (_, second) = app.get("/api/ipo/ORFS/risk-profile").await;
+    assert_eq!(first, second);
+    // Otro símbolo (otras entradas) no se mezcla con el anterior.
+    let (_, other) = app.get("/api/ipo/CBME/risk-profile").await;
+    assert_eq!(other["symbol"], "CBME");
+    assert_ne!(other["indicators"], first["indicators"]);
+}
+
+/// Folleto de 1,6 MB de líneas de un carácter: coste lineal, pero cientos de milisegundos de CPU
+/// en debug. Sirve para ver si el cálculo se hace dentro o fuera del hilo del runtime.
+struct HostileIpo {
+    text: String,
+}
+
+#[async_trait]
+impl domain::IpoData for HostileIpo {
+    async fn calendar(&self, _: NaiveDate, _: NaiveDate) -> domain::Result<Vec<IpoEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn prospectus(&self, _: &str) -> domain::Result<Prospectus> {
+        Ok(Prospectus {
+            issuer: "Hostile Corp.".into(),
+            cik: 1,
+            ticker: Some("HOST".into()),
+            form: "424B4".into(),
+            preliminary: false,
+            filed_on: NaiveDate::from_ymd_opt(2026, 10, 9).unwrap(),
+            accession: "0000000000-26-000001".into(),
+            url: "https://www.sec.gov/Archives/edgar/data/1/x.htm".into(),
+            index_url: "https://www.sec.gov/Archives/edgar/data/1/".into(),
+            offer_price: None,
+            sections: vec![ProspectusSection {
+                key: "use_of_proceeds".into(),
+                title: "Use of proceeds".into(),
+                original_chars: self.text.chars().count(),
+                text: self.text.clone(),
+                parent: None,
+                truncated: false,
+            }],
+            missing: Vec::new(),
+            document_chars: self.text.len(),
+            source: "sec".into(),
+            fetched_at: Utc::now(),
+        })
+    }
+
+    async fn performance(&self, _: &str, _: NaiveDate, _: Option<f64>, _: &str) -> domain::Result<IpoPerformance> {
+        Err(DomainError::NotFound("sin rendimiento".into()))
+    }
+
+    async fn base_rate(&self, _: u32) -> domain::Result<IpoBaseRate> {
+        Err(DomainError::Unavailable("sin tasa base".into()))
+    }
+}
+
+/// Con un solo hilo en el runtime, si el perfil se calculara dentro del handler async nada más
+/// avanzaría mientras tanto: el temporizador de fondo no daría ni un tic hasta que acabase. Con el
+/// cálculo en `spawn_blocking`, el runtime sigue vivo. La segunda petición sale de la caché.
+#[tokio::test(flavor = "current_thread")]
+async fn risk_profile_is_computed_off_the_async_worker() {
+    let base = TestApp::new().await;
+    let state = base.state.clone().with_ipo(Arc::new(HostileIpo { text: "a\n".repeat(800 * 1024) }));
+    let app = TestApp { router: server::app(state.clone(), None), state, market: base.market.clone(), analyst: base.analyst.clone() };
+
+    let ticks = Arc::new(AtomicUsize::new(0));
+    let ticker = tokio::spawn({
+        let ticks = ticks.clone();
+        async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                ticks.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    });
+    let (s, first) = app.get("/api/ipo/HOST/risk-profile").await;
+    let during = ticks.load(Ordering::SeqCst);
+    assert_eq!(s, StatusCode::OK, "{first}");
+    assert_eq!(first["indicators"].as_array().unwrap().len(), 11);
+    assert!(during >= 5, "el runtime estuvo bloqueado durante el cálculo del perfil ({during} tics)");
+
+    let (_, second) = app.get("/api/ipo/HOST/risk-profile").await;
+    assert_eq!(first, second, "mismas entradas: perfil guardado");
+    ticker.abort();
 }

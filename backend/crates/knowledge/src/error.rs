@@ -7,7 +7,7 @@ pub enum EmbedError {
     #[error("servidor de embeddings no disponible: {0}")]
     Unavailable(String),
     /// El modelo no está instalado (`ollama pull <modelo>`; este crate nunca descarga modelos).
-    #[error("modelo de embeddings no instalado: {0}")]
+    #[error("modelo de embeddings no instalado: {0} (descárgalo con `ollama pull {0}`; la app nunca lo descarga)")]
     ModelMissing(String),
     /// Respuesta inválida (número de vectores, NaN, dimensiones incoherentes…).
     #[error("respuesta de embeddings inválida: {0}")]

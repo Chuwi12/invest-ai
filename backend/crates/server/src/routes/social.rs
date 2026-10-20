@@ -24,6 +24,10 @@ pub async fn status(State(state): State<AppState>) -> Json<Value> {
 
 /// `GET /api/assets/{id}/social`: métricas y extractos. Consulta las redes solo si lo guardado
 /// tiene más de `SOCIAL_REFRESH_MINUTES`; un fallo de redes nunca devuelve un error (`digest: null`).
+///
+/// Es un GET con efectos (consulta X, que es de pago, escribe en la BD): `guard.rs` lo somete al
+/// mismo control de origen que los POST y `SocialService` limita los activos distintos por hora en
+/// X (`X_MAX_ASSETS_PER_HOUR`) y las instantáneas de métricas (una por activo y hora).
 pub async fn asset_social(State(state): State<AppState>, AssetPath(id): AssetPath) -> ApiResult<Json<Value>> {
     let Some(social) = &state.social else {
         return Ok(Json(json!({ "enabled": false, "digest": null, "disclaimer": DISCLAIMER_ES })));

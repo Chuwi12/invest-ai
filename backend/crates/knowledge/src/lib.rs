@@ -25,7 +25,7 @@ pub mod text;
 
 pub use chunk::{ChunkConfig, Section, chunk_sections, sections_from_text};
 pub use citation::{CitationIssue, Citations};
-pub use config::{DEFAULT_EMBED_MODEL, KnowledgeConfig};
+pub use config::{DEFAULT_EMBED_MODEL, KnowledgeConfig, RagModes};
 pub use embed::{EmbedKind, Embedder, FakeEmbedder};
 pub use error::{EmbedError, KnowledgeError, Result};
 pub use ingest::{NewsSink, spawn_news_worker};

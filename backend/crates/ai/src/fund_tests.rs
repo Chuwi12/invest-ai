@@ -114,6 +114,24 @@ fn derived_fund_rows_are_computed_in_rust_and_only_with_data() {
     assert!(j.contains("Concentración (peso de las 10 primeras posiciones)") && !j.contains("## Perfil del fondo"), "{j}");
 }
 
+/// B2: el saneado del perfil (Yahoo -> prompt) no toca un perfil normal: los datos y el contexto
+/// renderizado son idénticos con y sin `sanitize_snapshot`, en los dos idiomas y a varios presupuestos.
+#[test]
+fn sanitising_leaves_a_normal_fund_profile_and_its_context_unchanged() {
+    for name in ["spy", "qqq", "tlt"] {
+        for with_profile in [true, false] {
+            let raw = etf(name, with_profile);
+            let clean = crate::safety::sanitize_snapshot(&raw);
+            let (r, c) = (raw.fundamentals.as_ref().unwrap(), clean.fundamentals.as_ref().unwrap());
+            assert_eq!(r.fund_profile, c.fund_profile, "{name}");
+            assert_eq!(r.top_holdings, c.top_holdings, "{name}");
+            for (lang, budget) in [(Lang::Es, 8000), (Lang::En, 8000), (Lang::Es, 1500)] {
+                assert_eq!(ctx(&raw, lang, budget), ctx(&clean, lang, budget), "{name} profile={with_profile} {lang:?} {budget}");
+            }
+        }
+    }
+}
+
 #[test]
 fn the_score_does_not_change_when_the_fund_profile_is_added() {
     for name in ["spy", "tlt"] {

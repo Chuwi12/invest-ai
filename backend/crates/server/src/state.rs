@@ -54,7 +54,7 @@ pub struct AppState {
     pub clock: Arc<dyn Clock>,
     /// Fuente de energía (la pasada diaria se aplaza si el equipo va con batería).
     pub power: Arc<dyn PowerProbe>,
-    /// Archivo de conocimiento local (RAG). `None` con `RAG_ENABLED=0` o si no pudo abrirse.
+    /// Archivo de conocimiento local (RAG). `None` con los tres interruptores a 0, con `INVEST_AI_FAKE=1` o si no pudo abrirse.
     pub knowledge: Option<Arc<knowledge::KnowledgeBase>>,
     /// Redes sociales (Reddit/X; opinión). `None` sin credenciales: la app es idéntica a la que no las conoce.
     pub social: Option<Arc<crate::social::SocialService>>,

@@ -15,6 +15,7 @@ use domain::{
 use crate::{
     derived, fmt,
     lang::{Lang, tr},
+    safety::sanitize_snapshot,
     scoring::{Scorecard, verdict_name},
     sentiment,
     tokens::{estimate_tokens, truncate_chars, truncate_to_tokens},
@@ -1008,6 +1009,9 @@ pub enum Part {
 /// Renderiza una sola sección (misma tabla y misma cabecera con fuente y hora que en el análisis).
 /// `snap` solo necesita lo que usa la sección pedida.
 pub fn render_part(snap: &AssetSnapshot, part: Part, lang: Lang) -> String {
+    // Las herramientas del chat entregan el snapshot tal cual sale del proveedor (no pasa por el
+    // saneado del análisis): se sanea aquí, en el único punto por el que sale el texto. Es idempotente.
+    let snap = &sanitize_snapshot(snap);
     let lv = &LEVELS[0];
     let mut out = String::new();
     match part {
