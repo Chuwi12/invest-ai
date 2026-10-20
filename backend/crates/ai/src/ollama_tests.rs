@@ -164,3 +164,72 @@ async fn pull_error_line_ends_with_error() {
     let events: Vec<PullEvent> = client(&m).pull_stream("nada:1b").collect().await;
     assert!(matches!(&events[0], PullEvent::Error { message } if message.contains("does not exist")));
 }
+
+#[tokio::test]
+async fn num_gpu_goes_in_options_only_when_set() {
+    let m = MockOllama::start().await;
+    m.push_chat(reply("a"));
+    m.push_chat(reply("b"));
+    let c = client(&m);
+    c.chat(params("qwen3:8b")).await.unwrap();
+    c.chat(ChatParams { num_gpu: Some(999), ..params("qwen3:8b") }).await.unwrap();
+    let reqs = m.chat_requests();
+    assert!(reqs[0]["options"].get("num_gpu").is_none(), "por defecto decide Ollama");
+    assert_eq!(reqs[1]["options"]["num_gpu"], 999);
+}
+
+#[tokio::test]
+async fn forced_gpu_that_runs_out_of_memory_retries_without_forcing_and_remembers() {
+    // Los textos de falta de memoria de llama.cpp/CUDA tal como Ollama 0.40.x los devuelve en un 500.
+    for msg in [
+        "llama runner process has terminated: cudaMalloc failed: out of memory",
+        "unable to allocate CUDA0 buffer of size 6710886400",
+        "model requires more system memory (12.3 GiB) than is available (9.1 GiB)",
+        "memory layout cannot be allocated",
+    ] {
+        let m = MockOllama::start().await;
+        m.push_chat_failure(500, msg);
+        m.push_chat(reply("respuesta sin forzar"));
+        let c = client(&m);
+        let out = c.chat(ChatParams { num_gpu: Some(999), ..params("qwen3:8b") }).await.unwrap_or_else(|e| panic!("{msg}: {e}"));
+        assert_eq!(out.content, "respuesta sin forzar", "{msg}");
+        let reqs = m.chat_requests();
+        assert_eq!(reqs.len(), 2, "{msg}");
+        assert_eq!(reqs[0]["options"]["num_gpu"], 999);
+        assert!(reqs[1]["options"].get("num_gpu").is_none(), "el reintento no fuerza");
+        // Se recuerda, se avisa una sola vez y se puede olvidar.
+        assert!(c.gpu_fallback("qwen3:8b").is_some());
+        assert!(c.take_gpu_fallback_notice("qwen3:8b").is_some());
+        assert!(c.take_gpu_fallback_notice("qwen3:8b").is_none(), "el aviso se da una vez");
+        assert!(c.gpu_fallback("qwen3:8b").is_some());
+        assert!(c.gpu_fallback("otro:1b").is_none());
+        c.clear_gpu_fallback("qwen3:8b");
+        assert!(c.gpu_fallback("qwen3:8b").is_none());
+    }
+}
+
+#[tokio::test]
+async fn other_errors_with_forced_gpu_are_not_swallowed() {
+    let m = MockOllama::start().await;
+    m.push_chat_failure(500, "alguna otra cosa rara del servidor");
+    let c = client(&m);
+    let err = c.chat(ChatParams { num_gpu: Some(999), ..params("qwen3:8b") }).await.unwrap_err();
+    assert!(matches!(err, DomainError::Upstream { .. }));
+    assert_eq!(m.chat_requests().len(), 1, "sin reintento");
+    assert!(c.gpu_fallback("qwen3:8b").is_none());
+    // Y sin forzar, un fallo de memoria no se reintenta (no hay nada que relajar).
+    m.push_chat_failure(500, "cudaMalloc failed: out of memory");
+    assert!(c.chat(params("qwen3:8b")).await.is_err());
+    assert_eq!(m.chat_requests().len(), 2);
+}
+
+#[test]
+fn memory_error_detection_is_specific() {
+    let up = |m: &str| DomainError::Upstream { provider: "ollama".into(), message: m.into() };
+    assert!(is_gpu_memory_error(&up("500 Internal Server Error: CUDA error: out of memory")));
+    assert!(is_gpu_memory_error(&up("failed to allocate 6.2 GiB")));
+    assert!(is_gpu_memory_error(&up("runner OOM")));
+    assert!(!is_gpu_memory_error(&up("modelo no encontrado")));
+    assert!(!is_gpu_memory_error(&up("room for improvement"))); // «oom» dentro de una palabra
+    assert!(!is_gpu_memory_error(&DomainError::Unavailable("out of memory".into())));
+}

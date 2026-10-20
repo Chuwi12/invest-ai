@@ -38,6 +38,24 @@ pub struct AiConfig {
     /// Ollama (`LLM_KV_CACHE_TYPE`): f16 = 1, q8_0 = 34/64 ≈ 0,53, q4_0 = 18/64 ≈ 0,28 (bloques de
     /// 32 valores de llama.cpp). Solo afecta a los requisitos de VRAM que muestra el catálogo.
     pub kv_cache_factor: f64,
+    /// Capas del modelo que se piden en GPU (`options.num_gpu` de Ollama) para TODOS los modelos
+    /// (`LLM_NUM_GPU`). `None` = lo decide Ollama (comportamiento por defecto). `Some(999)` = todas.
+    /// Un ajuste por modelo en la app (`ModelManager::set_force_gpu`) tiene prioridad sobre este valor.
+    pub num_gpu: Option<i32>,
+}
+
+/// Capas que se piden con «forzar todas las capas en GPU»: más que las de cualquier modelo del catálogo
+/// (Ollama recorta al número real de capas).
+pub const ALL_GPU_LAYERS: i32 = 999;
+
+/// `LLM_NUM_GPU`: vacío/`auto` = Ollama decide (`None`); `all`/`max`/`gpu` = todas las capas; un entero
+/// 0..=999 = ese número de capas (0 = solo CPU). Cualquier otra cosa se ignora.
+pub fn parse_num_gpu(v: &str) -> Option<i32> {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "" | "auto" | "default" => None,
+        "all" | "max" | "gpu" | "todas" => Some(ALL_GPU_LAYERS),
+        n => n.parse::<i32>().ok().filter(|n| (0..=ALL_GPU_LAYERS).contains(n)),
+    }
 }
 
 /// Factor de tamaño de la caché KV para un `OLLAMA_KV_CACHE_TYPE`; desconocido = f16.
@@ -66,6 +84,7 @@ impl Default for AiConfig {
             parallel: 1,
             models_dir: None,
             kv_cache_factor: 1.0,
+            num_gpu: None,
         }
     }
 }
@@ -90,6 +109,9 @@ impl AiConfig {
         }
         if let Some(v) = text("LLM_KV_CACHE_TYPE") {
             c.kv_cache_factor = kv_cache_factor(&v);
+        }
+        if let Some(v) = text("LLM_NUM_GPU") {
+            c.num_gpu = parse_num_gpu(&v);
         }
         if let Some(v) = text("LLM_NUM_CTX").and_then(|v| v.parse::<u32>().ok()) {
             c.num_ctx = v.clamp(1024, 262_144);
@@ -178,6 +200,15 @@ mod tests {
         let c = AiConfig::from_lookup(env(&[("LLM_NUM_CTX", "abc"), ("LLM_MODEL", "  ")]));
         assert_eq!(c.num_ctx, AiConfig::default().num_ctx);
         assert_eq!(c.model, DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn num_gpu_is_opt_in_and_validated() {
+        assert_eq!(AiConfig::default().num_gpu, None);
+        for (v, want) in [("all", Some(999)), ("ALL", Some(999)), ("999", Some(999)), ("33", Some(33)), ("0", Some(0)), ("auto", None), ("", None), ("-1", None), ("1000", None), ("muchas", None)] {
+            let c = AiConfig::from_lookup(env(&[("LLM_NUM_GPU", v)]));
+            assert_eq!(c.num_gpu, want, "LLM_NUM_GPU={v:?}");
+        }
     }
 
     #[test]

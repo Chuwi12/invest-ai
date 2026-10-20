@@ -1,7 +1,7 @@
 import { Brain, Check, Download, Trash2, Wrench, X } from 'lucide-react'
 import { memo, useState } from 'react'
 import type { PullState } from '@/api/hooks'
-import type { HardwareInfo, LlmModel } from '@/api/types'
+import type { HardwareInfo, LlmModel, LoadedModel } from '@/api/types'
 import { formatBytes } from '@/lib/bytes'
 import { modelFit } from '@/lib/modelFit'
 
@@ -19,9 +19,12 @@ interface Props {
   onDismiss: (id: string) => void
   onActivate: (id: string) => void
   onDelete: (id: string) => void
+  onForceGpu: (id: string, force: boolean) => void
+  /** Si este modelo está cargado ahora en Ollama: su reparto real GPU/CPU (`/api/ps`). */
+  loaded?: LoadedModel | undefined
 }
 
-export const ModelCard = memo(function ModelCard({ model: m, hardware, pull, busy, onPull, onCancel, onDismiss, onActivate, onDelete }: Props) {
+export const ModelCard = memo(function ModelCard({ model: m, hardware, pull, busy, onPull, onCancel, onDismiss, onActivate, onDelete, onForceGpu, loaded }: Props) {
   const [confirming, setConfirming] = useState(false)
   const fit = modelFit(m, hardware)
   const r = m.requirements
@@ -53,6 +56,14 @@ export const ModelCard = memo(function ModelCard({ model: m, hardware, pull, bus
           </span>
         ) : null}
         {!m.curated ? <span className="chip">Fuera del catálogo</span> : null}
+        {loaded ? (
+          <span
+            className={`chip ${loaded.gpuShare < 0.995 ? 'warn' : ''}`}
+            title={`Cargado en Ollama: ${gb(loaded.sizeVram / 2 ** 30)} en VRAM de ${gb(loaded.size / 2 ** 30)}`}
+          >
+            Cargado: {Math.round(loaded.gpuShare * 100)} % en GPU
+          </span>
+        ) : null}
       </div>
 
       <p className="small muted">{m.description}</p>
@@ -76,6 +87,30 @@ export const ModelCard = memo(function ModelCard({ model: m, hardware, pull, bus
           {fit.note ? <span className="down"> {fit.note}</span> : null}
         </span>
       </div>
+
+      {m.installed ? (
+        <div className="stack" style={{ gap: '0.25rem' }}>
+          <label className="row small" style={{ gap: '0.4rem' }}>
+            <input
+              type="checkbox"
+              checked={m.forceGpu}
+              disabled={busy}
+              onChange={(e) => onForceGpu(m.id, e.target.checked)}
+            />
+            <span>Forzar todas las capas en GPU</span>
+          </label>
+          <p className="small muted" style={{ margin: 0 }}>
+            Por defecto decide Ollama y, si la tarjeta va justa, deja parte del modelo en la CPU (más lento). Forzarlo
+            lo mantiene entero en la VRAM si cabe; deja menos memoria libre para el escritorio y, si falta, la app
+            vuelve sola al reparto automático y te avisa.
+          </p>
+          {m.forceGpu && m.gpuFallback ? (
+            <div className="notice warn" role="status">
+              No había memoria para forzar la GPU; se usa el reparto automático (se reintenta en 30 min o al cambiar el ajuste). Ollama dijo: {m.gpuFallback}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {pull ? (
         <div className="stack" style={{ gap: '0.3rem' }}>

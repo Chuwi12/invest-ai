@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useActivateModel, useDeleteModel, useModelPulls, useModels } from '@/api/hooks'
-import type { HardwareInfo, LlmModel, ModelTier } from '@/api/types'
+import { useActivateModel, useDeleteModel, useModelPulls, useModels, useSetForceGpu } from '@/api/hooks'
+import type { HardwareInfo, LlmModel, LoadedModel, ModelTier } from '@/api/types'
 import { MODEL_TIERS } from '@/api/types'
 import { ModelCard } from '@/components/ModelCard'
 import { ErrorNotice, Section, SkeletonRows } from '@/components/states'
@@ -53,11 +53,33 @@ function Hardware({ hw }: { hw: HardwareInfo }) {
   )
 }
 
+/** Modelos cargados ahora en Ollama con el % real en GPU (`/api/ps`: size_vram / size). */
+function Loaded({ loaded, models }: { loaded: LoadedModel[]; models: LlmModel[] }) {
+  if (loaded.length === 0) {
+    return <p className="small muted">Ningún modelo cargado en memoria ahora mismo (Ollama lo carga con la primera petición).</p>
+  }
+  return (
+    <ul className="stack small" style={{ gap: '0.25rem', margin: 0, paddingLeft: '1.1rem' }} aria-label="Modelos cargados">
+      {loaded.map((l) => {
+        const pct = Math.round(l.gpuShare * 100)
+        const name = models.find((m) => m.id === l.id)?.name ?? l.id
+        return (
+          <li key={l.id}>
+            <strong>{name}</strong>: <span className="num">{pct} % en GPU</span> ({gb(l.sizeVram / 2 ** 30)} en VRAM de {gb(l.size / 2 ** 30)})
+            {pct < 100 ? <span className="down"> — el resto va en CPU, más lento. «Forzar todas las capas en GPU» (en la tarjeta del modelo) lo evita si cabe.</span> : null}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 export default function ModelsPage() {
   useTitle('Modelos de IA')
   const q = useModels()
   const activate = useActivateModel()
   const del = useDeleteModel()
+  const forceGpu = useSetForceGpu()
   const { pulls, start, cancel, dismiss } = useModelPulls()
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -75,6 +97,13 @@ export default function ModelsPage() {
     },
     [del],
   )
+  const onForceGpu = useCallback(
+    (id: string, force: boolean) => {
+      setActionError(null)
+      forceGpu.mutate({ id, force }, { onError: (e) => setActionError(errorText(e)) })
+    },
+    [forceGpu],
+  )
   const onPull = useCallback((id: string) => void start(id), [start])
 
   const groups = useMemo(() => {
@@ -86,7 +115,7 @@ export default function ModelsPage() {
     return [...MODEL_TIERS, 'other' as const].filter((t) => by.has(t)).map((t) => ({ tier: t, models: by.get(t)! }))
   }, [q.data])
 
-  const busy = activate.isPending || del.isPending
+  const busy = activate.isPending || del.isPending || forceGpu.isPending
 
   return (
     <div className="page">
@@ -117,6 +146,9 @@ export default function ModelsPage() {
           <Section title="Hardware detectado" hint="Información, no una recomendación" id="hw">
             <Hardware hw={q.data.hardware} />
           </Section>
+          <Section title="Cargado en memoria" hint="Cuánto del modelo está de verdad en la tarjeta" id="loaded">
+            <Loaded loaded={q.data.loaded} models={q.data.models} />
+          </Section>
           {groups.map(({ tier, models }) => (
             <Section key={tier} title={TIER_INFO[tier].title} hint={TIER_INFO[tier].text} id={`tier-${tier}`}>
               <div className="model-grid">
@@ -132,6 +164,8 @@ export default function ModelsPage() {
                     onDismiss={dismiss}
                     onActivate={onActivate}
                     onDelete={onDelete}
+                    onForceGpu={onForceGpu}
+                    loaded={q.data.loaded.find((l) => l.id === m.id)}
                   />
                 ))}
               </div>

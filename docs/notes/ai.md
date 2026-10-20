@@ -325,3 +325,28 @@ por token que qwen2.5:7b) y cuesta 2,1–2,5× el tiempo; el veredicto coincide 
   cayendo cuando el dato es otro.
 - Límites: sin medir con el modelo real (no se lanzó Ollama); la sección es nueva para el LLM y puede cambiar cómo cita cifras. Las filas
   repiten algunos números del plan (más tokens, no más datos). `analysis::levels` pasa a `pub(crate)` para que `derived` use el plan.
+
+## «Cabe justo», overhead medido y `num_gpu` por modelo (2026-10-20)
+
+Motivación: `docs/notes/model-eval.md` (19-oct-2026): con el escritorio usando ~1 GB de VRAM, `qwen3:8b` y `qwen3.5:9b` quedan
+al 89 % y 81 % en GPU aunque el catálogo dijera que caben, y forzar todas las capas (`options.num_gpu`) sube la generación un ~37–40 %.
+
+- **Catálogo (`catalog.rs`)**: `MEASURED_OVERHEAD_GIB` sustituye el overhead de 0,6 GiB por el medido SOLO para `qwen2.5:7b` (0,05),
+  `qwen3:8b` (0,0), `qwen3.5:4b` (0,65) y `qwen3.5:9b` (0,1); el resto sigue con 0,6 (no se extrapola). Recomendadas con 16384 + q8_0:
+  4,9 / 6,1 / 4,0 / 6,5 GiB (antes 5,4 / 6,7 / 4,0 / 7,0), medidas 4,85 / 6,02 / 3,99 / 6,42. Condiciones y fecha en la doc del módulo.
+  Nota: la tabla de `model-eval.md` comparaba contra una medida con reparto parcial (5,80 y 6,04); con el modelo entero la
+  sobreestimación era de 0,55–0,68 GiB (no 0,5–0,9) en tres modelos y 0,0 en `qwen3.5:4b`.
+- **Aviso «cabe justo» (`frontend/src/lib/modelFit.ts`, `TIGHT_MARGIN_GB`)**: `recomendada > VRAM_total − 2,1 GB` (por GPU).
+  Calibración: 0,9 GB de escritorio + ~1,2 GB de holgura que Ollama exige sobre lo que ocupa el modelo. La propuesta anterior
+  («VRAM − 1,2 GiB», umbral ≈ 6,0) estaba mal derivada: 1,2 es solo la holgura de Ollama, sin el escritorio. Con 2,1 en 8 GB el umbral
+  es 5,9 y marca `qwen3:8b` (6,1) y `qwen3.5:9b` (6,5) y no `qwen2.5:7b` (4,9) ni `qwen3.5:4b` (4,0). Es una calibración de 4 modelos
+  en una tarjeta; solo informa.
+- **`num_gpu`**: `LLM_NUM_GPU` (global; vacío = Ollama decide) y ajuste por modelo `PUT /api/models/{id}/gpu` (clave `llm.force_gpu.<id>`
+  en `settings`; prevalece sobre el global). `ModelCaps.num_gpu` lo lleva a `base_params` (análisis y chat). Por defecto nada cambia.
+- **Recuperación**: `OllamaClient::chat_stream` reintenta sin forzar si, con `num_gpu` puesto, Ollama falla por memoria ANTES de
+  enviar nada (`is_gpu_memory_error`: «out of memory», «cudaMalloc», «unable to allocate», «requires more system memory»…; no se pudo
+  capturar el texto literal de 0.40.x sin provocar el fallo en la GPU, así que se reconoce por fragmentos y los tests usan un Ollama
+  simulado). Se recuerda 30 min (`gpuFallback` en `GET /models`), no se fuerza durante ese tiempo y el análisis lo anota en
+  `qualityNotes`. Un fallo a mitad de generación no se reintenta.
+- **Ajustes → Modelos**: bloque «Cargado en memoria» con el % real en GPU (`/api/ps`, `size_vram/size`) y casilla «Forzar todas las
+  capas en GPU» en cada modelo instalado.

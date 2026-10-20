@@ -89,6 +89,7 @@ export const httpApi: Api = {
   setActiveModel: (id) => request('/models/active', { method: 'PUT', body: { id } }),
   pullModel: (id, signal) => streamPullEvents(`/models/${encodeURIComponent(id)}/pull`, signal),
   deleteModel: (id) => request(`/models/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  setModelForceGpu: (id, force) => request(`/models/${encodeURIComponent(id)}/gpu`, { method: 'PUT', body: { force } }),
 
   performance: (signal) => request('/learning/performance', { signal }),
   learningWeights: (signal) => request('/learning/weights', { signal }),

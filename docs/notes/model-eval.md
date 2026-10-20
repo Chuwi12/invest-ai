@@ -471,8 +471,8 @@ Predicción del catálogo (`catalog_pred.rs`, mismas fórmulas que `modelFit`), 
 | qwen3.5:9b | 7,0 | 3,3 | 5,40–6,04 | 6,04 | sí (justo) / **depende de la sesión (83 % o 100 %)** |
 
 - La KV se predice bien: `qwen3:8b` 36 capas × 8 cabezas × 256 × 2 B × 16384 × 0,53125 = 1224 MiB; el journal de Ollama da `K (q8_0): 612 MiB, V (q8_0): 612 MiB, 36 layers`. En f16 predecía 7,7 GiB para qwen3:8b (12 % en CPU en la medición anterior), coherente con lo observado.
-- La «recomendada» sobreestima el uso real en 0,5–0,9 GiB para qwen2.5:7b, qwen3:8b y qwen3.5:9b (lado seguro) y acierta en qwen3.5:4b (3,99 medido frente a 4,0; ahí `size` de Ollama, 3,2, subestima lo que muestra nvidia-smi).
-- **Posible predicción errónea**: para `qwen3:8b` y `qwen3.5:9b` la app dice que caben enteros en 8 GiB, y el 16-oct no fue así. Ollama decide con su propia estimación (el journal del 19-oct registra `predicted="7.1 GiB"` justo antes de cargar `qwen3:8b` con `num_ctx` 16384 y `available="7.0 GiB"`, frente a los 6,7 GiB del catálogo), no con la del catálogo. Propuesta (solo números, sin implementarla): mantener «recomendada» como está y marcar «cabe justo / puede ir parcialmente en CPU» cuando `recomendada > VRAM_total − 1,2 GiB` (con 8188 MiB de VRAM y ~0,8 GiB de escritorio: umbral ≈ 6,0 GiB) → `qwen3:8b` (6,7) y `qwen3.5:9b` (7,0) quedarían como «justo», `qwen2.5:7b` y `qwen3.5:4b` como «cabe». Evidencia: 2 modelos × 2 sesiones; es una regla de una máquina.
+- La «recomendada» sobreestima el uso real para qwen2.5:7b, qwen3:8b y qwen3.5:9b (lado seguro) y acierta en qwen3.5:4b. **Corrección (20-oct):** la columna «VRAM real» de esta tabla usa las medidas del 16-oct, que en qwen3:8b y qwen3.5:9b eran con reparto parcial (5,80 y 6,04 GiB); con el modelo entero en GPU (19-oct) ocupan 6,02 y 6,42 GiB, así que la sobreestimación real es de 0,55 / 0,68 / 0,58 GiB (qwen2.5:7b, qwen3:8b, qwen3.5:9b) y 0,0 en qwen3.5:4b. Original: «0,5–0,9 GiB» (3,99 medido frente a 4,0; ahí `size` de Ollama, 3,2, subestima lo que muestra nvidia-smi).
+- **Posible predicción errónea**: para `qwen3:8b` y `qwen3.5:9b` la app dice que caben enteros en 8 GiB, y el 16-oct no fue así. Ollama decide con su propia estimación (el journal del 19-oct registra `predicted="7.1 GiB"` justo antes de cargar `qwen3:8b` con `num_ctx` 16384 y `available="7.0 GiB"`, frente a los 6,7 GiB del catálogo), no con la del catálogo. Propuesta (solo números, sin implementarla): marcar «cabe justo / puede ir parcialmente en CPU» cuando `recomendada > VRAM_total − margen`. **Corrección (20-oct):** el margen de 1,2 GiB propuesto aquí no sumaba el escritorio (la aritmética «8 − 1,2 ≈ 6,0» era errónea); la calibración correcta es ~0,9 GiB de escritorio + ~1,2 GiB de holgura de Ollama = 2,1 GiB (umbral ≈ 5,9 GiB en 8 GB), y se aplicó junto con las recomendadas corregidas del catálogo (ver `ai.md`, «Cabe justo»). Evidencia: 4 modelos × 2 escenarios; es una regla de una máquina.
 
 ### «Think» en la familia qwen3 / qwen3.5
 
@@ -528,3 +528,7 @@ Notas y limitaciones de esta prueba: n = 3 velocidades por celda y 2 `standard` 
 ### Pendiente
 
 - `deep` (1 repetición por activo) no se midió.
+
+### Implementado (20-oct-2026)
+
+Las propuestas de arriba están en el código: overhead medido solo para estos cuatro modelos, aviso «cabe justo» y `num_gpu` (global y por modelo, con vuelta al reparto automático si falta memoria). Detalle, constantes y cifras corregidas en `ai.md`.

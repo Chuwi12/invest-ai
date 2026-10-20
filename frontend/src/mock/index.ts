@@ -19,7 +19,7 @@ import { getDb, nextId, saveDb } from './db'
 import { entryFor, genCandles, genFundamentals, genIndicators, genQuote } from './market'
 import { mockIpoBaseRate, mockIpoCalendar, mockIpoPerformance, mockIpoProspectus, mockIpoRiskProfile } from './ipo'
 import { mockCalibrated, mockPerformance, mockRollback, mockWatchlist, mockWeights } from './learning'
-import { activeModelId, installedModelIds, mockDelete, mockModels, mockPull, mockSetActive } from './models'
+import { activeModelId, installedModelIds, mockDelete, mockModels, mockPull, mockSetActive, mockSetForceGpu } from './models'
 import { sleep } from './rng'
 import { mockAssetSocial, mockSocialStatus } from './social'
 import { MockSocket } from './socket'
@@ -377,6 +377,11 @@ export const mockApi: Api = {
   async deleteModel(id) {
     await lag(undefined, 150)
     mockDelete(id)
+  },
+
+  async setModelForceGpu(id, force) {
+    await lag(undefined, 120)
+    return mockSetForceGpu(id, force)
   },
 
   async performance(signal) {

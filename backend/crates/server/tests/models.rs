@@ -12,13 +12,14 @@ async fn lists_models_with_hardware_in_the_contract_shape() {
     let app = TestApp::new().await;
     let (status, body) = app.get("/api/models").await;
     assert_eq!(status, StatusCode::OK);
-    assert_keys(&body, &["active", "ollamaReachable", "models", "hardware"]);
+    assert_keys(&body, &["active", "ollamaReachable", "models", "hardware", "loaded", "numGpu"]);
+    assert_keys(&body["loaded"][0], &["id", "size", "sizeVram", "gpuShare"]);
     assert_keys(&body["hardware"], &["cpuModel", "cpuThreads", "ramTotalGb", "ramAvailableGb", "gpus", "diskFreeGb"]);
     assert_keys(&body["hardware"]["gpus"][0], &["name", "vendor", "vramTotalGb", "vramFreeGb"]);
     let m = &body["models"][1];
     assert_keys(
         m,
-        &["id", "name", "family", "parameters", "activeParameters", "quantization", "contextWindow", "tier", "supportsTools", "reasoning", "description", "requirements", "curated", "installed", "active"],
+        &["id", "name", "family", "parameters", "activeParameters", "quantization", "contextWindow", "tier", "supportsTools", "reasoning", "description", "requirements", "curated", "installed", "active", "forceGpu", "gpuFallback"],
     );
     assert_keys(&m["requirements"], &["minVramGb", "recommendedVramGb", "minRamGb", "diskGb", "cpuOnlyOk"]);
     assert_eq!(m["tier"], "balanced");
@@ -84,4 +85,22 @@ async fn settings_are_persisted_in_sqlite() {
     store.set("llm.active_model", "qwen3:8b").await.unwrap();
     store.set("llm.active_model", "qwen3:14b").await.unwrap();
     assert_eq!(store.get("llm.active_model").await.unwrap().as_deref(), Some("qwen3:14b"));
+}
+
+#[tokio::test]
+async fn force_gpu_can_be_toggled_per_model_and_defaults_to_off() {
+    let app = TestApp::new().await;
+    let (_, b) = app.get("/api/models").await;
+    assert!(b["models"].as_array().unwrap().iter().all(|m| m["forceGpu"] == false), "por defecto decide Ollama");
+    assert!(b["loaded"][0]["gpuShare"].as_f64().unwrap() < 1.0);
+    let (s, b) = app.send(Method::PUT, "/api/models/qwen2.5%3A7b/gpu", Some(json!({"force": true}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let q = b["models"].as_array().unwrap().iter().find(|m| m["id"] == "qwen2.5:7b").unwrap();
+    assert_eq!(q["forceGpu"], true);
+    assert_eq!(b["models"].as_array().unwrap().iter().filter(|m| m["forceGpu"] == true).count(), 1);
+    assert_eq!(b["loaded"][0]["gpuShare"], 1.0);
+    let (_, b) = app.send(Method::PUT, "/api/models/qwen2.5%3A7b/gpu", Some(json!({"force": false}))).await;
+    assert!(b["models"].as_array().unwrap().iter().all(|m| m["forceGpu"] == false));
+    let (s, _) = app.send(Method::PUT, "/api/models/qwen2.5%3A7b/gpu", Some(json!({"nope": 1}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }

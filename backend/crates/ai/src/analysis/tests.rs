@@ -478,7 +478,7 @@ async fn parallel_stages_overlap_when_configured() {
 
 #[test]
 fn default_depth_follows_the_model_size() {
-    let caps = |tier, params| ModelCaps { id: "x".into(), tools: true, thinking: false, params_b: params, active_params_b: None, tier, context_length: None };
+    let caps = |tier, params| ModelCaps { id: "x".into(), tools: true, thinking: false, params_b: params, active_params_b: None, tier, context_length: None, num_gpu: None };
     assert_eq!(default_depth(&caps(Some(ModelTier::Light), None)), AnalysisDepth::Quick);
     assert_eq!(default_depth(&caps(Some(ModelTier::Balanced), None)), AnalysisDepth::Standard);
     assert_eq!(default_depth(&caps(Some(ModelTier::Heavy), None)), AnalysisDepth::Deep);
@@ -964,4 +964,44 @@ mod social_on {
         assert!(a.data_warnings.iter().any(|w| w.contains("redes sociales")), "{:?}", a.data_warnings);
         assert!(!user_of(&e.mock.chat_requests()[4]).contains("social_sentiment"));
     }
+}
+
+#[tokio::test]
+async fn forced_gpu_is_sent_to_every_call_and_an_out_of_memory_failure_degrades_with_a_note() {
+    let f = facts();
+    let e = env().await;
+    domain::ModelService::set_force_gpu(&*e.engine.models, "qwen2.5:7b", true).await.unwrap();
+    // La primera etapa choca con la memoria al cargar con todas las capas en GPU: la app reintenta sin forzar.
+    e.mock.push_chat_failure(500, "llama runner process has terminated: cudaMalloc failed: out of memory");
+    e.mock.push_chat(stage("mixed", vec![finding("Hecho")]));
+    e.mock.push_chat(stage("mixed", vec![finding("Hecho")]));
+    e.mock.push_chat(judge(&f, false));
+    let a = e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Quick)).await.expect("el análisis no se rompe");
+    let reqs = e.mock.chat_requests();
+    let with_gpu = reqs.iter().filter(|r| r["options"].get("num_gpu").is_some()).count();
+    assert!(reqs[0]["options"]["num_gpu"] == 999, "la primera petición fuerza la GPU");
+    assert!(with_gpu >= 1 && with_gpu < reqs.len(), "tras el fallo ya no se fuerza: {with_gpu} de {}", reqs.len());
+    assert!(
+        a.quality_notes.as_ref().is_some_and(|n| n.iter().any(|x| x.contains("todas las capas") && x.contains("reparto automático"))),
+        "{:?}",
+        a.quality_notes
+    );
+    // El siguiente análisis no repite el aviso ni vuelve a forzar mientras dure el plazo.
+    e.mock.push_chat(stage("mixed", vec![finding("Hecho")]));
+    e.mock.push_chat(stage("mixed", vec![finding("Hecho")]));
+    e.mock.push_chat(judge(&f, false));
+    let b = e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Quick)).await.unwrap();
+    assert!(!b.quality_notes.unwrap_or_default().iter().any(|x| x.contains("reparto automático")));
+    assert!(e.mock.chat_requests().iter().skip(reqs.len()).all(|r| r["options"].get("num_gpu").is_none()));
+}
+
+#[tokio::test]
+async fn without_the_setting_no_num_gpu_is_ever_sent() {
+    let f = facts();
+    let e = env().await;
+    e.mock.push_chat(stage("mixed", vec![finding("Hecho")]));
+    e.mock.push_chat(stage("mixed", vec![finding("Hecho")]));
+    e.mock.push_chat(judge(&f, false));
+    e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Quick)).await.unwrap();
+    assert!(e.mock.chat_requests().iter().all(|r| r["options"].get("num_gpu").is_none()));
 }

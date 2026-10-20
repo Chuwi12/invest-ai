@@ -14,7 +14,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use domain::{
-    DomainError, GpuInfo, HardwareInfo, LlmModel, ModelRequirements, ModelService, ModelTier, ModelsResponse,
+    DomainError, GpuInfo, HardwareInfo, LlmModel, LoadedModel, ModelRequirements, ModelService, ModelTier, ModelsResponse,
     PullEvent,
 };
 use futures::{Stream, StreamExt, stream::{self, BoxStream}};
@@ -33,6 +33,17 @@ pub struct SetActive {
 
 pub async fn set_active(State(state): State<AppState>, AppJson(body): AppJson<SetActive>) -> ApiResult<Json<ModelsResponse>> {
     state.models.set_active(&body.id).await?;
+    Ok(Json(state.models.list().await))
+}
+
+#[derive(Deserialize)]
+pub struct ForceGpu {
+    pub force: bool,
+}
+
+/// `PUT /models/{id}/gpu` `{force}`: activa o quita «forzar todas las capas en GPU» para ese modelo.
+pub async fn set_force_gpu(State(state): State<AppState>, Path(id): Path<String>, AppJson(body): AppJson<ForceGpu>) -> ApiResult<Json<ModelsResponse>> {
+    state.models.set_force_gpu(&id, body.force).await?;
     Ok(Json(state.models.list().await))
 }
 
@@ -70,6 +81,7 @@ struct FakeModels {
     active: String,
     installed: Vec<String>,
     pulling: Vec<String>,
+    force_gpu: Vec<String>,
 }
 
 impl Default for FakeModelService {
@@ -79,6 +91,7 @@ impl Default for FakeModelService {
                 active: "qwen2.5:7b".into(),
                 installed: vec!["qwen2.5:7b".into(), "mi-modelo:3b".into()],
                 pulling: vec![],
+                force_gpu: vec![],
             }),
         }
     }
@@ -107,6 +120,8 @@ fn fake_model(id: &str, name: &str, tier: Option<ModelTier>, params: &str, vram:
         curated,
         installed: false,
         active: false,
+        force_gpu: false,
+        gpu_fallback: None,
     }
 }
 
@@ -124,7 +139,15 @@ impl ModelService for FakeModelService {
         for m in &mut models {
             m.installed = st.installed.contains(&m.id);
             m.active = m.id == st.active;
+            m.force_gpu = st.force_gpu.contains(&m.id);
         }
+        // Simulado: el modelo activo está cargado; sin forzar queda al 89 % en GPU (el caso que se ve en una tarjeta de 8 GB).
+        let loaded = vec![LoadedModel {
+            id: st.active.clone(),
+            size: 6_732_182_977,
+            size_vram: if st.force_gpu.contains(&st.active) { 6_732_182_977 } else { 6_004_639_006 },
+            gpu_share: if st.force_gpu.contains(&st.active) { 1.0 } else { 0.892 },
+        }];
         ModelsResponse {
             active: st.active.clone(),
             ollama_reachable: true,
@@ -137,6 +160,8 @@ impl ModelService for FakeModelService {
                 gpus: vec![GpuInfo { name: "GPU simulada".into(), vendor: "NVIDIA".into(), vram_total_gb: 8.0, vram_free_gb: Some(6.5) }],
                 disk_free_gb: Some(400.0),
             },
+            loaded,
+            num_gpu: None,
         }
     }
 
@@ -146,6 +171,19 @@ impl ModelService for FakeModelService {
             return Err(DomainError::InvalidInput(format!("el modelo «{id}» no existe o no está instalado")));
         }
         st.active = id.into();
+        Ok(())
+    }
+
+    async fn set_force_gpu(&self, id: &str, force: bool) -> domain::Result<()> {
+        let id = id.trim();
+        if id.is_empty() || id.len() > 200 {
+            return Err(DomainError::InvalidInput("id de modelo no válido".into()));
+        }
+        let mut st = self.state.lock().unwrap();
+        st.force_gpu.retain(|m| m != id);
+        if force {
+            st.force_gpu.push(id.into());
+        }
         Ok(())
     }
 

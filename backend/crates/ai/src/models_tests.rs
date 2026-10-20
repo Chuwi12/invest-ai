@@ -4,7 +4,7 @@ use futures::StreamExt;
 use serde_json::json;
 
 use super::*;
-use crate::testutil::{MemSettings, MockOllama};
+use crate::testutil::{MemSettings, MockOllama, reply};
 
 fn manager(m: &MockOllama, store: Arc<MemSettings>) -> ModelManager {
     let cfg = AiConfig { base_url: m.url.clone(), model: "qwen2.5:7b".into(), ..AiConfig::default() };
@@ -106,4 +106,72 @@ async fn caps_come_from_show_and_fall_back_to_catalog() {
     let c = dead.caps("desconocido:13b").await;
     assert!(!c.tools);
     assert_eq!(c.params_b, Some(13.0));
+}
+
+#[tokio::test]
+async fn force_gpu_is_opt_in_per_model_and_overrides_the_global_setting() {
+    let m = MockOllama::start().await;
+    let store = Arc::new(MemSettings::default());
+    let mgr = manager(&m, store.clone());
+    // Por defecto decide Ollama.
+    assert_eq!(mgr.num_gpu_for("qwen3:8b").await, None);
+    assert_eq!(mgr.caps("qwen3:8b").await.num_gpu, None);
+    assert!(!mgr.list().await.models.iter().any(|x| x.force_gpu));
+    // Ajuste por modelo: solo ese modelo.
+    mgr.set_force_gpu("qwen3:8b", true).await.unwrap();
+    assert_eq!(mgr.num_gpu_for("qwen3:8b").await, Some(crate::config::ALL_GPU_LAYERS));
+    assert_eq!(mgr.caps("qwen3:8b").await.num_gpu, Some(999));
+    assert_eq!(mgr.num_gpu_for("qwen2.5:7b").await, None);
+    let r = mgr.list().await;
+    assert!(r.models.iter().find(|x| x.id == "qwen3:8b").unwrap().force_gpu);
+    assert!(!r.models.iter().find(|x| x.id == "qwen2.5:7b").unwrap().force_gpu);
+    mgr.set_force_gpu("qwen3:8b", false).await.unwrap();
+    assert_eq!(mgr.num_gpu_for("qwen3:8b").await, None);
+    assert!(mgr.set_force_gpu("  ", true).await.is_err());
+    // LLM_NUM_GPU global (sin ajuste por modelo).
+    let cfg = AiConfig { base_url: m.url.clone(), num_gpu: Some(20), ..AiConfig::default() };
+    let g = ModelManager::new(OllamaClient::new(&m.url, Duration::from_secs(5)).unwrap(), cfg, store);
+    assert_eq!(g.num_gpu_for("qwen3:8b").await, Some(20));
+    assert_eq!(g.list().await.num_gpu, Some(20));
+}
+
+#[tokio::test]
+async fn a_memory_failure_with_forced_gpu_is_reported_and_stops_forcing_until_the_user_changes_it() {
+    let m = MockOllama::start().await;
+    let mgr = manager(&m, Arc::new(MemSettings::default()));
+    mgr.set_force_gpu("qwen2.5:7b", true).await.unwrap();
+    m.push_chat_failure(500, "cudaMalloc failed: out of memory");
+    m.push_chat(reply("ok"));
+    let caps = mgr.caps("qwen2.5:7b").await;
+    assert_eq!(caps.num_gpu, Some(999));
+    let out = mgr.client().chat(crate::ollama::ChatParams { model: "qwen2.5:7b".into(), num_gpu: caps.num_gpu, ..Default::default() }).await.unwrap();
+    assert_eq!(out.content, "ok");
+    // Tras el fallo: el modelo sigue marcado como forzado por el usuario, pero ya no se fuerza y se muestra el motivo.
+    assert_eq!(mgr.num_gpu_for("qwen2.5:7b").await, None);
+    let r = mgr.list().await;
+    let q = r.models.iter().find(|x| x.id == "qwen2.5:7b").unwrap();
+    assert!(q.force_gpu);
+    assert!(q.gpu_fallback.as_deref().is_some_and(|s| s.contains("out of memory")));
+    // Volver a guardar el ajuste lo reintenta.
+    mgr.set_force_gpu("qwen2.5:7b", true).await.unwrap();
+    assert_eq!(mgr.num_gpu_for("qwen2.5:7b").await, Some(999));
+    assert!(mgr.list().await.models.iter().find(|x| x.id == "qwen2.5:7b").unwrap().gpu_fallback.is_none());
+}
+
+#[tokio::test]
+async fn lists_loaded_models_with_the_real_gpu_share() {
+    let m = MockOllama::start().await;
+    *m.state.ps.lock().unwrap() = json!({"models": [
+        {"name": "qwen3:8b", "size": 6732182977u64, "size_vram": 6004639006u64},
+        {"name": "qwen2.5:7b", "size": 5032304966u64, "size_vram": 5032304966u64}
+    ]});
+    let mgr = manager(&m, Arc::new(MemSettings::default()));
+    let r = mgr.list().await;
+    assert_eq!(r.loaded.len(), 2);
+    let q3 = r.loaded.iter().find(|l| l.id == "qwen3:8b").unwrap();
+    assert!((q3.gpu_share - 0.892).abs() < 0.001, "{}", q3.gpu_share);
+    assert_eq!(r.loaded.iter().find(|l| l.id == "qwen2.5:7b").unwrap().gpu_share, 1.0);
+    // Sin /api/ps utilizable no se rompe el listado.
+    let off = ModelManager::new(OllamaClient::new("http://127.0.0.1:9", Duration::from_secs(1)).unwrap(), AiConfig::default(), Arc::new(MemSettings::default()));
+    assert!(off.list().await.loaded.is_empty());
 }

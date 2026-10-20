@@ -37,6 +37,7 @@ const state = {
   installed: new Set(rows.filter((r) => r[12]).map((r) => r[0])),
   // Un modelo instalado que no está en el catálogo curado.
   extra: [{ id: 'mi-modelo:latest', name: 'mi-modelo:latest' }],
+  forceGpu: new Set<string>(),
 }
 
 function toModel(r: Row): LlmModel {
@@ -47,6 +48,7 @@ function toModel(r: Row): LlmModel {
     id: r[0], name: r[1], family: r[2], parameters: r[3], activeParameters: r[4], quantization: r[5],
     contextWindow: r[6], tier: r[7], supportsTools: r[8], reasoning: r[9], description: r[10],
     requirements: req, curated: true, installed: state.installed.has(r[0]), active: state.active === r[0],
+    forceGpu: state.forceGpu.has(r[0]), gpuFallback: null,
   }
 }
 
@@ -57,13 +59,30 @@ export function mockModels(): ModelsResponse {
       id: e.id, name: e.name, family: 'Desconocida', parameters: '?', activeParameters: null, quantization: '?',
       contextWindow: 0, tier: null, supportsTools: false, reasoning: false, description: 'Modelo local fuera del catálogo.',
       requirements: null, curated: false, installed: true, active: state.active === e.id,
+      forceGpu: state.forceGpu.has(e.id), gpuFallback: null,
     }))
   return {
     active: state.active,
     ollamaReachable: true,
     models: [...rows.map(toModel), ...extras],
     hardware: MOCK_HARDWARE,
+    // Simulado: el activo está cargado; sin forzar queda al 89 % en la GPU (lo que se ve en una tarjeta de 8 GB).
+    loaded: [
+      {
+        id: state.active,
+        size: 6_732_182_977,
+        sizeVram: state.forceGpu.has(state.active) ? 6_732_182_977 : 6_004_639_006,
+        gpuShare: state.forceGpu.has(state.active) ? 1 : 0.892,
+      },
+    ],
+    numGpu: null,
   }
+}
+
+export function mockSetForceGpu(id: string, force: boolean): ModelsResponse {
+  if (force) state.forceGpu.add(id)
+  else state.forceGpu.delete(id)
+  return mockModels()
 }
 
 export function installedModelIds(): string[] {

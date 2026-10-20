@@ -19,6 +19,17 @@
 //!                       ~50 GB/s de RAM da ≥ 5 tok/s. En un MoE solo cuentan los expertos activos)
 //! ```
 //!
+//! ## Overhead medido (solo 4 modelos)
+//!
+//! El `overhead` de 0.6 GiB es una constante prudente. Medido con nvidia-smi (VRAM del modelo ya cargado
+//! entero en GPU, restando la línea base sin modelo; `num_ctx` 16384, caché KV q8_0, Ollama 0.40.4/0.40.6,
+//! RTX 4070 Laptop 8 GB, 16 y 19-oct-2026, `docs/notes/model-eval.md`) el overhead real fue
+//! qwen2.5:7b 0.02, qwen3:8b −0.04, qwen3.5:9b 0.05 y qwen3.5:4b 0.63 GiB: la constante sobreestimaba
+//! 0.55–0.68 GiB en tres de ellos y acertaba en el cuarto. Para esos CUATRO modelos se usa el valor medido
+//! (redondeado hacia arriba a 0.05, ver `MEASURED_OVERHEAD_GIB`); el resto sigue con 0.6: no se extrapola
+//! (el overhead depende de la arquitectura y no se midió en otras). El mismo valor se aplica a cualquier
+//! `num_ctx` y tipo de caché KV: se asume que el overhead no depende de ellos (solo medido a 16384/q8_0).
+//!
 //! Es una estimación: no contempla KV cuantizada (`OLLAMA_KV_CACHE_TYPE`), flash-attention ni
 //! lotes grandes. Los modelos con atención por ventana o recurrente (gemma3/4, gpt-oss, qwen3.5/3.6/3.8,
 //! nemotron-h) cuentan solo las capas globales a `ctx` completo y las de ventana a `min(ctx, ventana)`;
@@ -36,6 +47,13 @@ use crate::ollama::ShowInfo;
 
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 const OVERHEAD_GIB: f64 = 0.6;
+/// Overhead (GiB) MEDIDO para modelos concretos (ver la documentación del módulo). Solo estos cuatro.
+const MEASURED_OVERHEAD_GIB: &[(&str, f64)] = &[("qwen2.5:7b", 0.05), ("qwen3:8b", 0.0), ("qwen3.5:4b", 0.65), ("qwen3.5:9b", 0.1)];
+
+/// Overhead de un modelo del catálogo: el medido si existe, si no la constante prudente.
+pub fn overhead_gib(id: &str) -> f64 {
+    MEASURED_OVERHEAD_GIB.iter().find(|(m, _)| *m == id).map_or(OVERHEAD_GIB, |(_, o)| *o)
+}
 const RAM_OVERHEAD_GIB: f64 = 1.5;
 const CPU_ONLY_MAX_ACTIVE_GIB: f64 = 6.0;
 
@@ -109,13 +127,17 @@ fn round1(x: f64) -> f32 {
 /// Aplica la fórmula del módulo. `active_fraction` ∈ (0, 1] (1 = denso).
 /// `kv_factor`: tamaño de la caché KV frente a f16 (`AiConfig::kv_cache_factor`).
 pub fn requirements(disk_bytes: u64, kv: &KvProfile, active_fraction: f64, num_ctx: u32, kv_factor: f64) -> ModelRequirements {
+    requirements_with_overhead(disk_bytes, kv, active_fraction, num_ctx, kv_factor, OVERHEAD_GIB)
+}
+
+fn requirements_with_overhead(disk_bytes: u64, kv: &KvProfile, active_fraction: f64, num_ctx: u32, kv_factor: f64, overhead: f64) -> ModelRequirements {
     let weights = disk_bytes as f64 / GIB;
     let ctx = f64::from(num_ctx);
     let swa_ctx = kv.sliding_window.map_or(ctx, |w| ctx.min(f64::from(w)));
     let kv_gib = kv_factor * (kv.kv_bytes_per_token_full as f64 * ctx + kv.kv_bytes_per_token_swa as f64 * swa_ctx) / GIB;
     ModelRequirements {
-        min_vram_gb: round1(0.4 * weights + kv_gib + OVERHEAD_GIB),
-        recommended_vram_gb: round1(weights + kv_gib + OVERHEAD_GIB),
+        min_vram_gb: round1(0.4 * weights + kv_gib + overhead),
+        recommended_vram_gb: round1(weights + kv_gib + overhead),
         min_ram_gb: round1(weights + kv_gib + RAM_OVERHEAD_GIB),
         disk_gb: round1(weights),
         cpu_only_ok: weights * active_fraction.clamp(0.0, 1.0) <= CPU_ONLY_MAX_ACTIVE_GIB,
@@ -130,7 +152,7 @@ pub fn active_fraction(total: &str, active: Option<&str>) -> f64 {
 }
 
 pub fn entry_requirements(e: &CatalogEntry, num_ctx: u32, kv_factor: f64) -> ModelRequirements {
-    requirements(e.disk_bytes, &e.arch, active_fraction(&e.parameters, e.active_parameters.as_deref()), num_ctx, kv_factor)
+    requirements_with_overhead(e.disk_bytes, &e.arch, active_fraction(&e.parameters, e.active_parameters.as_deref()), num_ctx, kv_factor, overhead_gib(&e.id))
 }
 
 /// Perfil de KV de un modelo no curado a partir de `/api/show` (atención global en todas las
@@ -275,9 +297,32 @@ mod tests {
             assert!(long8.recommended_vram_gb < long16.recommended_vram_gb && long8.disk_gb == long16.disk_gb, "{id}");
             // El KV de 16k no puede ser mayor que los pesos en ninguno de estos modelos (sí lo sería sin tratar
             // las capas recurrentes/de ventana): detecta un perfil que cuente todas las capas como globales.
-            let kv_gib = f64::from(f16.recommended_vram_gb - f16.disk_gb) - OVERHEAD_GIB;
+            let kv_gib = f64::from(f16.recommended_vram_gb - f16.disk_gb) - overhead_gib(id);
             assert!(kv_gib < f64::from(f16.disk_gb), "{id}: KV de 16k = {kv_gib:.2} GiB, desproporcionado");
         }
+    }
+
+    #[test]
+    fn measured_overhead_applies_only_to_the_four_measured_models() {
+        // Medido (nvidia-smi, modelo entero en GPU, 16384 + q8_0): 4.85, 6.02, 3.99 y 6.42 GiB.
+        let q8 = crate::config::kv_cache_factor("q8_0");
+        let measured: [(&str, f32, f64); 4] = [("qwen2.5:7b", 4.85, 0.05), ("qwen3:8b", 6.02, 0.0), ("qwen3.5:4b", 3.99, 0.65), ("qwen3.5:9b", 6.42, 0.1)];
+        for (id, gib, over) in measured {
+            assert_eq!(overhead_gib(id), over, "{id}");
+            let r = vram(id, 16_384, q8);
+            // Lo recomendado no queda por debajo de lo medido y la sobreestimación es de redondeo (< 0,2 GiB), no de 0,6.
+            assert!(r.recommended_vram_gb >= gib - 0.05 && r.recommended_vram_gb - gib < 0.2, "{id}: {} frente a {gib} medidos", r.recommended_vram_gb);
+        }
+        // Resto del catálogo: sigue la constante prudente (sin extrapolar).
+        for m in catalog().iter().filter(|m| !measured.iter().any(|(id, _, _)| *id == m.id)) {
+            assert_eq!(overhead_gib(&m.id), OVERHEAD_GIB, "{}", m.id);
+        }
+        let kv = KvProfile { sliding_window: None, kv_bytes_per_token_full: 147_456, kv_bytes_per_token_swa: 0 };
+        let generic = requirements(5_225_388_164, &kv, 1.0, 16_384, q8);
+        assert_eq!(generic.recommended_vram_gb, 6.7, "la fórmula genérica no cambia");
+        assert_eq!(vram("qwen3:8b", 16_384, q8).recommended_vram_gb, 6.1);
+        // El mínimo baja lo mismo que la recomendada (mismo overhead).
+        assert!(vram("qwen3:8b", 16_384, q8).min_vram_gb < generic.min_vram_gb);
     }
 
     #[test]

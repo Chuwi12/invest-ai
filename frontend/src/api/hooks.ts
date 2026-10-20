@@ -555,6 +555,14 @@ export function useActivateModel() {
   })
 }
 
+export function useSetForceGpu() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, force }: { id: string; force: boolean }) => api.setModelForceGpu(id, force),
+    onSuccess: (data) => refreshModelState(qc, data),
+  })
+}
+
 export function useDeleteModel() {
   const qc = useQueryClient()
   return useMutation({

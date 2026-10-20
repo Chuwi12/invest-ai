@@ -11,7 +11,7 @@ use std::{
 
 use async_trait::async_trait;
 use domain::{
-    DomainError, LlmModel, ModelRequirements, ModelService, ModelTier, ModelsResponse, PullEvent, Result,
+    DomainError, LlmModel, LoadedModel, ModelRequirements, ModelService, ModelTier, ModelsResponse, PullEvent, Result,
     SettingsStore,
 };
 use futures::{StreamExt, stream::BoxStream};
@@ -19,13 +19,15 @@ use tokio::sync::{OnceCell, RwLock};
 
 use crate::{
     catalog::{self, CatalogEntry},
-    config::AiConfig,
+    config::{ALL_GPU_LAYERS, AiConfig},
     hardware::HardwareProbe,
     ollama::{OllamaClient, ShowInfo, TagModel},
 };
 
 /// Clave en la tabla `settings`.
 pub const ACTIVE_MODEL_KEY: &str = "llm.active_model";
+/// Prefijo de la clave por modelo de «forzar todas las capas en GPU» (`llm.force_gpu.<id>` = `1`).
+pub const FORCE_GPU_KEY_PREFIX: &str = "llm.force_gpu.";
 const SHOW_TTL: Duration = Duration::from_secs(120);
 
 /// Lo que el pipeline necesita saber del modelo activo.
@@ -39,6 +41,8 @@ pub struct ModelCaps {
     pub active_params_b: Option<f64>,
     pub tier: Option<ModelTier>,
     pub context_length: Option<u32>,
+    /// Capas que se piden en GPU (`options.num_gpu`): `None` = decide Ollama (por defecto).
+    pub num_gpu: Option<i32>,
 }
 
 impl ModelCaps {
@@ -129,7 +133,33 @@ impl ModelManager {
                 .and_then(|s| s.arch_u64("context_length"))
                 .map(|c| c.min(u64::from(u32::MAX)) as u32)
                 .or(cat.map(|c| c.context_window)),
+            num_gpu: self.num_gpu_for(id).await,
         }
+    }
+
+    /// ¿Tiene el usuario activado «forzar todas las capas en GPU» para este modelo?
+    pub async fn force_gpu(&self, id: &str) -> bool {
+        match self.settings.get(&format!("{FORCE_GPU_KEY_PREFIX}{id}")).await {
+            Ok(Some(v)) => v.trim() == "1",
+            Ok(None) => false,
+            Err(e) => {
+                tracing::warn!(error = %e, "no se pudo leer el ajuste de GPU del modelo");
+                false
+            }
+        }
+    }
+
+    /// `num_gpu` efectivo para un modelo: nada si forzar la GPU falló por memoria hace poco (reparto
+    /// automático), todas las capas si el usuario lo fuerza en ese modelo, `LLM_NUM_GPU` si está definido,
+    /// y si no `None` (decide Ollama, como antes).
+    pub async fn num_gpu_for(&self, id: &str) -> Option<i32> {
+        if self.client.gpu_fallback(id).is_some() {
+            return None;
+        }
+        if self.force_gpu(id).await {
+            return Some(ALL_GPU_LAYERS);
+        }
+        self.cfg.num_gpu
     }
 
     pub fn client(&self) -> &OllamaClient {
@@ -157,6 +187,8 @@ impl ModelManager {
             curated: true,
             installed,
             active: entry.id == active,
+            force_gpu: false,
+            gpu_fallback: None,
         }
     }
 
@@ -184,6 +216,8 @@ impl ModelManager {
             curated: false,
             installed: true,
             active: tag.name == active,
+            force_gpu: false,
+            gpu_fallback: None,
         }
     }
 }
@@ -201,7 +235,7 @@ fn params_from_name(id: &str) -> Option<f64> {
 impl ModelService for ModelManager {
     async fn list(&self) -> ModelsResponse {
         let active = self.active().await;
-        let (tags, hardware) = tokio::join!(self.client.tags(), self.hardware.get());
+        let (tags, hardware, running) = tokio::join!(self.client.tags(), self.hardware.get(), self.client.ps());
         let (reachable, installed) = match tags {
             Ok(t) => (true, t),
             Err(e) => {
@@ -219,7 +253,21 @@ impl ModelService for ModelManager {
         let extra: Vec<&TagModel> = installed.iter().filter(|t| catalog::find(&t.name).is_none()).collect();
         let built = futures::future::join_all(extra.iter().map(|t| self.build_uncurated(t, &active))).await;
         models.extend(built);
-        ModelsResponse { active, ollama_reachable: reachable, models, hardware }
+        for m in &mut models {
+            m.force_gpu = self.force_gpu(&m.id).await;
+            m.gpu_fallback = self.client.gpu_fallback(&m.id);
+        }
+        let loaded = running
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| LoadedModel {
+                gpu_share: if r.size > 0 { (r.size_vram as f64 / r.size as f64).clamp(0.0, 1.0) as f32 } else { 0.0 },
+                id: r.name,
+                size: r.size,
+                size_vram: r.size_vram,
+            })
+            .collect();
+        ModelsResponse { active, ollama_reachable: reachable, models, hardware, loaded, num_gpu: self.cfg.num_gpu }
     }
 
     async fn set_active(&self, id: &str) -> Result<()> {
@@ -266,6 +314,18 @@ impl ModelService for ModelManager {
             }
         };
         Ok(Box::pin(stream))
+    }
+
+    async fn set_force_gpu(&self, id: &str, force: bool) -> Result<()> {
+        let id = id.trim();
+        if id.is_empty() || id.len() > 200 {
+            return Err(DomainError::InvalidInput("id de modelo no válido".into()));
+        }
+        self.settings.set(&format!("{FORCE_GPU_KEY_PREFIX}{id}"), if force { "1" } else { "0" }).await?;
+        // Un cambio explícito del usuario borra el fallo anterior: se vuelve a intentar.
+        self.client.clear_gpu_fallback(id);
+        tracing::info!(model = id, force, "ajuste de GPU del modelo cambiado");
+        Ok(())
     }
 
     async fn delete(&self, id: &str) -> Result<()> {

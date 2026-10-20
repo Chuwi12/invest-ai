@@ -102,6 +102,8 @@ export interface Api {
   /** SSE: itera los `PullEvent` hasta `done`/`error`. Abortable. */
   pullModel(id: string, signal?: AbortSignal): AsyncGenerator<PullEvent>
   deleteModel(id: string): Promise<void>
+  /** Activa o quita «forzar todas las capas en GPU» para un modelo (por defecto decide Ollama). Devuelve la lista actualizada. */
+  setModelForceGpu(id: string, force: boolean): Promise<ModelsResponse>
 
   // Rendimiento medido (crate `learning`) y lista de seguimiento.
   performance(signal?: AbortSignal): Promise<PerformanceReport>

@@ -217,6 +217,7 @@ impl AnalysisEngine {
             num_predict: max_tokens.map(|m| if caps.thinking && thinking_on { m.saturating_mul(4) } else { m }),
             keep_alive: Some(self.cfg.keep_alive.clone()),
             think: self.think_param(caps),
+            num_gpu: caps.num_gpu,
             ..ChatParams::default()
         }
     }
@@ -592,6 +593,13 @@ impl AnalysisEngine {
         }
 
         // --- Avisos y metadatos ---
+        if self.client.take_gpu_fallback_notice(&caps.id).is_some() {
+            quality_notes.push(tr!(
+                lang,
+                "Se pidió cargar todas las capas del modelo en la GPU y Ollama no tenía memoria suficiente: se usó el reparto automático (más lento). El ajuste se vuelve a probar en 30 minutos o al cambiarlo en Modelos.",
+                "All of the model's layers were requested on the GPU but Ollama did not have enough memory: automatic placement was used (slower). The setting is retried after 30 minutes or when changed in Models."
+            ));
+        }
         let mut notes: Vec<String> = Vec::new();
         let citation_note = v.citation_note();
         for w in v.warnings.iter().chain(&stage_notes).chain(&built.trimmed).chain(&quality_notes).chain(citation_note.iter()) {

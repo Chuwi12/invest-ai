@@ -28,6 +28,10 @@ pub struct MockState {
     pub tags: Mutex<Value>,
     pub show: Mutex<Value>,
     pub pull_lines: Mutex<Vec<String>>,
+    /// Fallos que `/api/chat` devuelve ANTES de consumir un guion: (estado HTTP, cuerpo JSON). Se consumen en orden.
+    pub chat_failures: Mutex<VecDeque<(u16, Value)>>,
+    /// Respuesta de `/api/ps` (modelos cargados).
+    pub ps: Mutex<Value>,
     pub deleted: Mutex<Vec<String>>,
     /// Retardo entre líneas de la respuesta de chat (para probar cancelación y timeouts).
     pub line_delay: Mutex<Duration>,
@@ -75,6 +79,7 @@ impl MockOllama {
             {"name": "qwen2.5:7b", "size": 4683087332u64,
              "details": {"family": "qwen2", "parameter_size": "7.6B", "quantization_level": "Q4_K_M"}}
         ]});
+        *state.ps.lock().unwrap() = json!({"models": []});
         *state.show.lock().unwrap() = json!({
             "capabilities": ["completion", "tools"],
             "details": {"family": "qwen2", "parameter_size": "7.6B", "quantization_level": "Q4_K_M"},
@@ -86,7 +91,7 @@ impl MockOllama {
             .route("/api/chat", post(chat))
             .route("/api/tags", get(|State(s): State<Arc<MockState>>| async move { Json(s.tags.lock().unwrap().clone()) }))
             .route("/api/show", post(|State(s): State<Arc<MockState>>| async move { Json(s.show.lock().unwrap().clone()) }))
-            .route("/api/ps", get(|| async { Json(json!({"models": []})) }))
+            .route("/api/ps", get(|State(s): State<Arc<MockState>>| async move { Json(s.ps.lock().unwrap().clone()) }))
             .route("/api/pull", post(pull))
             .route("/api/delete", delete(del))
             .with_state(state.clone());
@@ -100,6 +105,11 @@ impl MockOllama {
         self.state.chats.lock().unwrap().push_back(lines);
     }
 
+    /// El próximo `/api/chat` responde con este fallo HTTP (p. ej. 500 de Ollama por falta de memoria).
+    pub fn push_chat_failure(&self, code: u16, error: &str) {
+        self.state.chat_failures.lock().unwrap().push_back((code, json!({"error": error})));
+    }
+
     pub fn chat_requests(&self) -> Vec<Value> {
         self.state.chat_requests.lock().unwrap().clone()
     }
@@ -107,6 +117,9 @@ impl MockOllama {
 
 async fn chat(State(s): State<Arc<MockState>>, Json(body): Json<Value>) -> Response {
     s.chat_requests.lock().unwrap().push(body);
+    if let Some((code, err)) = s.chat_failures.lock().unwrap().pop_front() {
+        return (StatusCode::from_u16(code).unwrap(), Json(err)).into_response();
+    }
     let Some(lines) = s.chats.lock().unwrap().pop_front() else {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "sin guion para esta petición"}))).into_response();
     };

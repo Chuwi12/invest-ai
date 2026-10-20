@@ -141,6 +141,42 @@ cerrado/pre/post y no hay cambios). Con `FINNHUB_API_KEY` las acciones/ETF de EE
 | GET  | `/assets/{id}/analyses` | `Analysis[]`: histórico de análisis del activo (máx. 20, más reciente primero) |
 | GET  | `/assets/{id}/snapshot` | `AssetSnapshot`: el contexto exacto que ve el LLM (transparencia) |
 
+## Modelos de IA (`/api/models`)
+
+| Método | Ruta | Respuesta / efecto |
+|---|---|---|
+| GET | `/models` | `ModelsResponse` (abajo) |
+| PUT | `/models/active` | Body `{ id }`. Cambia el modelo activo; 400 `invalid_input` si no existe o no está instalado. Devuelve `ModelsResponse` |
+| PUT | `/models/{id}/gpu` | Body `{ force: boolean }`. Activa o quita «forzar todas las capas en GPU» para ese modelo (persistente; por defecto apagado = decide Ollama). Devuelve `ModelsResponse`. 400 si el body no es válido |
+| POST | `/models/{id}/pull` | SSE de `PullEvent` (`progress` / `done` / `error`); solo modelos del catálogo |
+| DELETE | `/models/{id}` | 204; 404 si no está instalado; 400 si es el activo |
+
+```ts
+interface ModelsResponse {
+  active: string
+  ollamaReachable: boolean
+  models: LlmModel[]            // catálogo curado + instalados fuera de él
+  hardware: HardwareInfo
+  loaded: LoadedModel[]         // modelos cargados ahora en Ollama (/api/ps); [] si ninguno o Ollama no responde
+  numGpu: number | null         // LLM_NUM_GPU del servidor; null = decide Ollama
+}
+interface LlmModel {
+  id: string; name: string; family: string; parameters: string; activeParameters: string | null
+  quantization: string; contextWindow: number; tier: 'light'|'balanced'|'heavy'|'max'|null
+  supportsTools: boolean; reasoning: boolean; description: string
+  requirements: { minVramGb: number; recommendedVramGb: number; minRamGb: number; diskGb: number; cpuOnlyOk: boolean } | null
+  curated: boolean; installed: boolean; active: boolean
+  forceGpu: boolean             // ajuste del usuario (por defecto false)
+  gpuFallback: string | null    // motivo de Ollama si forzar la GPU falló por memoria en los últimos 30 min
+}
+interface LoadedModel { id: string; size: number; sizeVram: number; gpuShare: number }  // gpuShare = sizeVram / size (0..1)
+```
+
+`num_gpu`: con `forceGpu` (o `LLM_NUM_GPU`) las peticiones al modelo llevan `options.num_gpu`. Si Ollama responde con un fallo de
+memoria al cargarlo (HTTP 500 «out of memory», «unable to allocate…», «requires more system memory…»), la petición se repite sin
+forzar y el análisis añade una nota en `qualityNotes`; durante 30 minutos no se vuelve a forzar ese modelo (`gpuFallback` lleva el
+motivo) o hasta que se guarde de nuevo el ajuste con `PUT /models/{id}/gpu`.
+
 ## Rendimiento medido y lista de seguimiento
 
 Resultados reales de los análisis (crate `learning`, ver `docs/notes/learning.md`) y los análisis diarios automáticos que los alimentan.

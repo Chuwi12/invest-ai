@@ -9,7 +9,11 @@
 //! total; las largas (chat, pull) solo tienen «tiempo máximo sin recibir bytes» (`read_timeout`),
 //! porque una respuesta de varios minutos es normal pero un servidor mudo no.
 
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use domain::{DomainError, PullEvent};
 use futures::{Stream, StreamExt, stream::BoxStream};
@@ -23,10 +27,26 @@ const SHORT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Una línea NDJSON de Ollama nunca debería acercarse a esto; protege la memoria.
 const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 
+/// Cuánto dura la desconfianza hacia «forzar GPU» de un modelo tras un fallo de memoria: durante este
+/// tiempo se pide el reparto automático sin volver a intentarlo (cada intento fallido cuesta una carga).
+pub const GPU_FALLBACK_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// Un intento de cargar un modelo con `num_gpu` forzado que falló por falta de memoria.
+#[derive(Debug, Clone)]
+struct GpuFallback {
+    at: Instant,
+    /// Mensaje de Ollama (acortado).
+    reason: String,
+    /// ¿Ya se avisó en algún análisis?
+    notified: bool,
+}
+
 #[derive(Clone)]
 pub struct OllamaClient {
     http: Client,
     base: String,
+    /// Modelos cuyo `num_gpu` forzado falló por memoria (compartido entre clones del cliente).
+    gpu_fallbacks: Arc<Mutex<HashMap<String, GpuFallback>>>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -94,6 +114,9 @@ pub struct ChatParams {
     pub num_predict: Option<u32>,
     pub keep_alive: Option<String>,
     pub seed: Option<i64>,
+    /// Capas en GPU (`options.num_gpu`). `None` = lo decide Ollama. Si se fuerza y la carga falla por
+    /// memoria, `OllamaClient::chat_stream` reintenta sin forzar (ver `gpu_fallback`).
+    pub num_gpu: Option<i32>,
 }
 
 impl ChatParams {
@@ -110,6 +133,9 @@ impl ChatParams {
         }
         if let Some(v) = self.seed {
             options.insert("seed".into(), json!(v));
+        }
+        if let Some(v) = self.num_gpu {
+            options.insert("num_gpu".into(), json!(v));
         }
         let mut body = json!({
             "model": self.model,
@@ -242,7 +268,7 @@ impl OllamaClient {
             .pool_idle_timeout(Duration::from_secs(60))
             .build()
             .map_err(|e| DomainError::Internal(format!("cliente HTTP de Ollama: {e}")))?;
-        Ok(Self { http, base: base_url.trim_end_matches('/').to_string() })
+        Ok(Self { http, base: base_url.trim_end_matches('/').to_string(), gpu_fallbacks: Arc::default() })
     }
 
     pub fn base_url(&self) -> &str {
@@ -258,6 +284,69 @@ impl OllamaClient {
     /// Stream de fragmentos. Las etiquetas `<think>…</think>` en `content` se separan en
     /// `Thinking`. Soltar el stream cancela la generación en Ollama.
     pub fn chat_stream(&self, params: ChatParams) -> BoxStream<'static, Result<ChatChunk, DomainError>> {
+        if params.num_gpu.is_none() {
+            return self.chat_stream_once(params);
+        }
+        // `num_gpu` forzado: si la carga falla por falta de memoria ANTES de recibir nada, se reintenta
+        // sin forzar (el reparto automático de Ollama siempre cabe) y se recuerda para avisar.
+        let this = self.clone();
+        let stream = async_stream::try_stream! {
+            let mut forced = this.chat_stream_once(params.clone());
+            let mut yielded = false;
+            let mut retry = false;
+            while let Some(item) = forced.next().await {
+                match item {
+                    Ok(chunk) => {
+                        yielded = true;
+                        yield chunk;
+                    }
+                    Err(e) if !yielded && is_gpu_memory_error(&e) => {
+                        this.note_gpu_fallback(&params.model, &e);
+                        retry = true;
+                        break;
+                    }
+                    Err(e) => Err(e)?,
+                }
+            }
+            if retry {
+                let mut plain = this.chat_stream_once(ChatParams { num_gpu: None, ..params });
+                while let Some(item) = plain.next().await {
+                    yield item?;
+                }
+            }
+        };
+        Box::pin(stream)
+    }
+
+    fn note_gpu_fallback(&self, model: &str, e: &DomainError) {
+        let reason: String = e.to_string().chars().take(300).collect();
+        tracing::warn!(model, error = %reason, "num_gpu forzado sin memoria suficiente: se reintenta con el reparto automático");
+        self.gpu_fallbacks.lock().unwrap().insert(model.to_string(), GpuFallback { at: Instant::now(), reason, notified: false });
+    }
+
+    /// Motivo del último fallo de memoria al forzar GPU en este modelo, si fue hace menos de `GPU_FALLBACK_TTL`.
+    pub fn gpu_fallback(&self, model: &str) -> Option<String> {
+        let map = self.gpu_fallbacks.lock().unwrap();
+        map.get(model).filter(|f| f.at.elapsed() < GPU_FALLBACK_TTL).map(|f| f.reason.clone())
+    }
+
+    /// Como `gpu_fallback`, pero solo la primera vez tras cada fallo (para avisar una vez en un análisis).
+    pub fn take_gpu_fallback_notice(&self, model: &str) -> Option<String> {
+        let mut map = self.gpu_fallbacks.lock().unwrap();
+        let f = map.get_mut(model)?;
+        if f.at.elapsed() >= GPU_FALLBACK_TTL || f.notified {
+            return None;
+        }
+        f.notified = true;
+        Some(f.reason.clone())
+    }
+
+    /// Olvida el fallo (p. ej. cuando el usuario cambia el ajuste de GPU del modelo).
+    pub fn clear_gpu_fallback(&self, model: &str) {
+        self.gpu_fallbacks.lock().unwrap().remove(model);
+    }
+
+    fn chat_stream_once(&self, params: ChatParams) -> BoxStream<'static, Result<ChatChunk, DomainError>> {
         let this = self.clone();
         let stream = async_stream::try_stream! {
             let resp = this
@@ -438,6 +527,32 @@ impl OllamaClient {
 // ---------------------------------------------------------------------------------------------
 // Utilidades
 // ---------------------------------------------------------------------------------------------
+
+/// ¿Es un fallo de memoria de la GPU/del reparto al cargar el modelo? Ollama 0.40.x lo devuelve como HTTP 500
+/// `{"error": "..."}` (o como línea `error` del stream) con textos de llama.cpp/CUDA que varían entre versiones:
+/// «cudaMalloc failed: out of memory», «unable to allocate CUDA0 buffer», «model requires more system memory
+/// (X GiB) than is available (Y GiB)», «memory layout cannot be allocated». No se pudo capturar uno real en el
+/// equipo de desarrollo (no hubo ningún fallo), así que se reconocen por fragmentos y sin distinguir mayúsculas.
+pub fn is_gpu_memory_error(e: &DomainError) -> bool {
+    let DomainError::Upstream { message, .. } = e else { return false };
+    let m = message.to_ascii_lowercase();
+    [
+        "out of memory",
+        "cudamalloc",
+        "cuda error",
+        "unable to allocate",
+        "failed to allocate",
+        "not enough memory",
+        "insufficient memory",
+        "memory layout cannot be allocated",
+        "requires more system memory",
+        "than is available",
+        "alloc_failed",
+        "oom",
+    ]
+    .iter()
+    .any(|p| if *p == "oom" { m.split(|c: char| !c.is_ascii_alphanumeric()).any(|w| w == "oom") } else { m.contains(p) })
+}
 
 fn upstream(message: String) -> DomainError {
     DomainError::Upstream { provider: "ollama".into(), message }

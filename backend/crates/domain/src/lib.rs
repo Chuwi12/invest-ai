@@ -1125,6 +1125,27 @@ pub struct LlmModel {
     pub curated: bool,
     pub installed: bool,
     pub active: bool,
+    /// Ajuste del usuario: pedir a Ollama TODAS las capas en GPU (`options.num_gpu`) para este modelo.
+    /// `false` = lo decide Ollama (por defecto).
+    #[serde(default)]
+    pub force_gpu: bool,
+    /// Si forzar la GPU falló por falta de memoria en los últimos 30 min: motivo de Ollama. La app ya
+    /// recurre al reparto automático para este modelo hasta que pase el plazo o se cambie el ajuste.
+    #[serde(default)]
+    pub gpu_fallback: Option<String>,
+}
+
+/// Modelo cargado en memoria en Ollama (`/api/ps`). `size_vram / size` = fracción realmente en la GPU.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedModel {
+    pub id: String,
+    /// Bytes que ocupa cargado (pesos + caché KV + buffers), según Ollama.
+    pub size: u64,
+    /// Bytes de ese total que están en VRAM.
+    pub size_vram: u64,
+    /// `size_vram / size` en 0..=1 (1 = entero en GPU).
+    pub gpu_share: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1154,6 +1175,12 @@ pub struct ModelsResponse {
     pub ollama_reachable: bool,
     pub models: Vec<LlmModel>,
     pub hardware: HardwareInfo,
+    /// Modelos cargados ahora mismo en Ollama, con el % real en GPU. Vacío si no hay ninguno o Ollama no responde.
+    #[serde(default)]
+    pub loaded: Vec<LoadedModel>,
+    /// `LLM_NUM_GPU` (capas en GPU para todos los modelos); `null` = lo decide Ollama.
+    #[serde(default)]
+    pub num_gpu: Option<i32>,
 }
 
 /// Evento del SSE de `POST /models/{id}/pull`.
@@ -1176,6 +1203,9 @@ pub trait ModelService: Send + Sync + 'static {
     async fn pull(&self, id: &str) -> Result<BoxStream<'static, PullEvent>>;
     /// Borra un modelo instalado. `InvalidInput` si es el activo.
     async fn delete(&self, id: &str) -> Result<()>;
+    /// Activa o desactiva «forzar todas las capas en GPU» para un modelo (persistente). `InvalidInput`
+    /// si el id no es válido. Por defecto está desactivado (decide Ollama).
+    async fn set_force_gpu(&self, id: &str, force: bool) -> Result<()>;
 }
 
 /// Almacén clave-valor de ajustes persistentes (tabla `settings` de SQLite en `server`).

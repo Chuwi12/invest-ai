@@ -104,6 +104,7 @@ fn api(state: AppState) -> Router {
         .route("/watchlist", get(watchlist::status))
         .route("/models", get(models::list))
         .route("/models/active", put(models::set_active))
+        .route("/models/{id}/gpu", put(models::set_force_gpu))
         .route("/models/{id}", axum::routing::delete(models::delete))
         .layer(middleware::from_fn(rest_timeout))
         .layer(CompressionLayer::new());

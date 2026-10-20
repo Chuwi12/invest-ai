@@ -714,6 +714,18 @@ export interface LlmModel {
   curated: boolean
   installed: boolean
   active: boolean
+  /** Ajuste del usuario: pedir a Ollama todas las capas en GPU para este modelo (por defecto, no: decide Ollama). */
+  forceGpu: boolean
+  /** Motivo de Ollama si forzar la GPU falló por memoria en los últimos 30 min (la app ya usa el reparto automático). */
+  gpuFallback: string | null
+}
+
+/** Modelo cargado ahora en Ollama (`/api/ps`). `gpuShare` = size_vram / size (1 = entero en la GPU). */
+export interface LoadedModel {
+  id: string
+  size: number
+  sizeVram: number
+  gpuShare: number
 }
 
 export interface GpuInfo {
@@ -737,6 +749,10 @@ export interface ModelsResponse {
   ollamaReachable: boolean
   models: LlmModel[]
   hardware: HardwareInfo
+  /** Modelos cargados ahora mismo, con su % real en GPU. */
+  loaded: LoadedModel[]
+  /** `LLM_NUM_GPU` global del servidor; null = decide Ollama. */
+  numGpu: number | null
 }
 
 /** Evento del SSE de `POST /models/{id}/pull`. */
