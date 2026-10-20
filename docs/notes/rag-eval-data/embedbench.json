@@ -1,0 +1,116 @@
+[
+ {
+  "label": "GPU sin LLM",
+  "n": 240,
+  "batch": 16,
+  "cold_first_call_s": 2.32,
+  "chunks_per_s": 107.2,
+  "batch_lat_p50_s": 0.147,
+  "batch_lat_max_s": 0.195,
+  "query_ms_p50": 5.5,
+  "query_ms_max": 5.8,
+  "ps_after": [
+   [
+    "embeddinggemma:300m-qat-q8_0",
+    383,
+    383
+   ]
+  ],
+  "vram_mib_after": 639,
+  "before": [
+   [],
+   79
+  ]
+ },
+ {
+  "label": "CPU sin LLM",
+  "n": 240,
+  "batch": 16,
+  "cold_first_call_s": 1.02,
+  "chunks_per_s": 3.8,
+  "batch_lat_p50_s": 3.958,
+  "batch_lat_max_s": 7.885,
+  "query_ms_p50": 32.4,
+  "query_ms_max": 33.4,
+  "ps_after": [
+   [
+    "embeddinggemma:300m-qat-q8_0",
+    0,
+    390
+   ]
+  ],
+  "vram_mib_after": 79,
+  "before": [
+   [],
+   79
+  ]
+ },
+ {
+  "label": "GPU con LLM cargado",
+  "n": 240,
+  "batch": 16,
+  "cold_first_call_s": 0.79,
+  "chunks_per_s": 104.0,
+  "batch_lat_p50_s": 0.153,
+  "batch_lat_max_s": 0.183,
+  "query_ms_p50": 6.1,
+  "query_ms_max": 6.3,
+  "ps_after": [
+   [
+    "qwen2.5:7b",
+    4954,
+    4954
+   ],
+   [
+    "embeddinggemma:300m-qat-q8_0",
+    383,
+    383
+   ]
+  ],
+  "vram_mib_after": 5754,
+  "before": [
+   [
+    [
+     "qwen2.5:7b",
+     4954,
+     4954
+    ]
+   ],
+   5197
+  ]
+ },
+ {
+  "label": "CPU con LLM cargado",
+  "n": 240,
+  "batch": 16,
+  "cold_first_call_s": 1.18,
+  "chunks_per_s": 3.7,
+  "batch_lat_p50_s": 4.56,
+  "batch_lat_max_s": 7.302,
+  "query_ms_p50": 22.7,
+  "query_ms_max": 32.7,
+  "ps_after": [
+   [
+    "qwen2.5:7b",
+    4954,
+    4954
+   ],
+   [
+    "embeddinggemma:300m-qat-q8_0",
+    0,
+    390
+   ]
+  ],
+  "vram_mib_after": 5197,
+  "before": [
+   [
+    [
+     "qwen2.5:7b",
+     4954,
+     4954
+    ]
+   ],
+   5197
+  ]
+ }
+]
