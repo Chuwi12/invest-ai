@@ -66,7 +66,10 @@ struct RawOutcome {
     factors: Option<String>,
 }
 
-/// Filas resueltas con la regla vigente, de un horizonte, en orden cronológico.
+/// Filas resueltas con la regla vigente, de un horizonte, en orden cronológico. Incluye, con su marca
+/// (`fallback_for`), las que no se pudieron recalcular y conservan las cifras de la versión anterior: sin
+/// ellas, el activo deslistado cuya pérdida ya estaba medida desaparecería de las métricas. Solo esas:
+/// cualquier otra fila de una versión anterior queda fuera.
 pub async fn resolved_rows(
     db: &SqlitePool,
     horizon_weeks: u32,
@@ -75,7 +78,7 @@ pub async fn resolved_rows(
         "SELECT analysis_id, horizon_weeks, asset_id, asset_class, verdict, confidence, model, generated_at,
                 bench_kind, excess_return, hit, factors
            FROM analysis_outcomes
-          WHERE status = 'resolved' AND rule_version = ?1 AND horizon_weeks = ?2
+          WHERE status = 'resolved' AND (rule_version = ?1 OR fallback_for = ?1) AND horizon_weeks = ?2
           ORDER BY generated_at, analysis_id",
     )
     .bind(rules::RULE_VERSION)

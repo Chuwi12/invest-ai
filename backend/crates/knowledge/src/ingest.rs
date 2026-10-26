@@ -78,11 +78,7 @@ pub fn spawn_news_worker(kb: Arc<KnowledgeBase>, shutdown: CancellationToken) ->
                         tracing::debug!(added = rep.added, duplicates = rep.duplicates, failed = rep.failed, "noticias archivadas");
                     }
                     // Completa lo que quedó sin vector (embedder caído antes), a ritmo moderado.
-                    if let Ok(stats) = kb.stats().await
-                        && stats.pending > 0
-                    {
-                        let _ = kb.embed_pending(64).await;
-                    }
+                    let _ = kb.embed_pending(64).await;
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
             }

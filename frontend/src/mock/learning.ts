@@ -95,6 +95,7 @@ function horizon(h: LearningHorizon, total: number): HorizonReport {
     horizonWeeks: h,
     analysesTotal: total,
     resolved,
+    fallbackRows: 0,
     resolvedIndependent: independent,
     pending: Math.max(0, matured - resolved),
     notMatured: Math.min(total, 20 * (7 * h + 1)),
@@ -130,13 +131,13 @@ function mature(): WeightVersion[] {
   const now = Date.now()
   return [
     {
-      version: 2, kind: 'learned', status: 'active', multipliers: [0.9, 1.6, 0.7, 1.1, 1, 0.8, 1.2], factorNames: FACTORS,
+      version: 2, ruleVersion: 2, kind: 'learned', status: 'active', multipliers: [0.9, 1.6, 0.7, 1.1, 1, 0.8, 1.2], factorNames: FACTORS,
       createdAtMs: now - 38 * DAY, horizonWeeks: 4, trainedToMs: now - 120 * DAY, validatedFromMs: now - 118 * DAY, validatedToMs: now - 64 * DAY,
       nTrain: 212, nVal: 96, metrics: { decision: 'adopt', deltaIc: 0.041, pValue: 0.012, icCandidate: 0.067, icIncumbent: 0.026 },
       parentVersion: 1, note: 'adoptada tras validación posterior',
     },
     {
-      version: 1, kind: 'learned', status: 'retired', multipliers: [1, 1.3, 0.9, 1, 1, 1, 1], factorNames: FACTORS,
+      version: 1, ruleVersion: 2, kind: 'learned', status: 'retired', multipliers: [1, 1.3, 0.9, 1, 1, 1, 1], factorNames: FACTORS,
       createdAtMs: now - 190 * DAY, horizonWeeks: 4, trainedToMs: now - 260 * DAY, validatedFromMs: now - 258 * DAY, validatedToMs: now - 200 * DAY,
       nTrain: 158, nVal: 84, metrics: { decision: 'adopt', deltaIc: 0.033, pValue: 0.021, icCandidate: 0.049, icIncumbent: 0.016 },
       parentVersion: null, note: null,
@@ -179,6 +180,7 @@ export function mockRollback(version: number | null): WeightVersion {
   for (const v of vs) v.status = 'retired'
   const next: WeightVersion = {
     version: Math.max(0, ...vs.map((v) => v.version)) + 1,
+    ruleVersion: 2,
     kind: 'rollback',
     status: 'active',
     multipliers: target ? [...target.multipliers] : FACTORS.map(() => 1),

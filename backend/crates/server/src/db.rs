@@ -42,22 +42,10 @@ pub async fn connect(database_url: &str) -> anyhow::Result<SqlitePool> {
     Ok(pool)
 }
 
-/// Base en memoria compartida entre las conexiones del pool (para tests).
+/// Base para tests: un fichero temporal en WAL, como en producción (se borra al soltar el pool). Ver
+/// `knowledge::testutil::temp_wal_pool` para por qué no `sqlite::memory:`.
 pub async fn connect_memory() -> anyhow::Result<SqlitePool> {
-    // `sqlite::memory:` le da a cada pool una base con nombre propio (`file:sqlx-in-memory-N`) y
-    // caché compartida: todas sus conexiones ven la misma base y los tests no se pisan entre sí.
-    // `SqliteConnectOptions::new().in_memory(true)` NO sirve: cada conexión abre una base vacía.
-    // Sin conexiones abiertas la base se destruye, así que el pool no debe cerrar las inactivas.
-    let opts = SqliteConnectOptions::from_str("sqlite::memory:")?
-        .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5));
-    let pool = SqlitePoolOptions::new()
-        .max_connections(4)
-        .min_connections(1)
-        .idle_timeout(None)
-        .max_lifetime(None)
-        .connect_with(opts)
-        .await?;
+    let pool = knowledge::testutil::temp_wal_pool().await?;
     migrate(&pool).await?;
     Ok(pool)
 }

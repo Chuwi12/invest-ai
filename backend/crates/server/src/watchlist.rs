@@ -11,7 +11,11 @@
 //!   (fuera de ella se ajusta con aviso). Si el servidor arranca con la ventana abierta y la hora
 //!   preferida ya pasó, hace la pasada de inmediato (`trigger = recovery`; se anota la hora real junto a
 //!   la prevista). Si llega la apertura sin haberla hecho, esa pasada se PIERDE: se registra como
-//!   `missed` y no se analiza con el mercado abierto. Una pasada en curso se corta a la apertura.
+//!   `missed` y no se analiza con el mercado abierto. Una pasada en curso se corta a la apertura. Cada
+//!   vuelta del bucle (y el arranque) cierra así TODAS las ventanas ya terminadas con activos pendientes
+//!   desde la última pasada real, hasta [`window::MAX_CLOSED`]: el PC puede haber estado apagado días.
+//!   Qué cuenta para una ventana lo decide la hora de inicio del resultado, no `local_date`
+//!   ([`repo::window_results`]).
 //! - **Ejecución** ([`run_round`]): los activos de uno en uno (una sola GPU) por el mismo camino que
 //!   la API (`routes::analysis::run_to_completion`: single-flight, límite de generaciones, guardado
 //!   en BD con `origin = 'watchlist'`). Cada intento y cada fallo queda en `watchlist_results`.
@@ -40,10 +44,10 @@ use tokio::sync::watch;
 pub mod window;
 
 pub use window::next_due;
-use window::{Phase, Window, phase_at, preferred_instant};
+use window::{Phase, Window, closed_windows, phase_at, preferred_instant};
 
 use crate::{
-    repo::watchlist::{self as repo, DayState, NewResult},
+    repo::watchlist::{self as repo, DayState, NewResult, ResultRow},
     routes::analysis::run_to_completion,
     state::AppState,
 };
@@ -443,16 +447,17 @@ pub async fn run_scheduler(state: AppState, cfg: Arc<WatchlistConfig>, clock: Ar
             return;
         }
         let now = clock.now();
-        let w = match phase_at(now) {
-            Phase::MarketOpen { ended, next } => {
-                // La apertura cerró la ventana de `ended`: lo que no se hizo se pierde, y queda registrado.
-                if let Err(e) = record_missed(&state, &cfg, clock.as_ref(), &ended).await {
-                    tracing::error!(error = %e, "lista de seguimiento: no se pudo registrar la pasada perdida; se reintenta en 5 min");
-                    if !wait_until(&state, clock.as_ref(), now + DB_RETRY).await {
-                        return;
-                    }
-                    continue;
-                }
+        let phase = phase_at(now);
+        // Lo que no se hizo en las ventanas ya cerradas se pierde, y queda registrado.
+        if let Err(e) = close_missed(&state, &cfg, clock.as_ref(), &phase).await {
+            tracing::error!(error = %e, "lista de seguimiento: no se pudo registrar la pasada perdida; se reintenta en 5 min");
+            if !wait_until(&state, clock.as_ref(), now + DB_RETRY).await {
+                return;
+            }
+            continue;
+        }
+        let w = match phase {
+            Phase::MarketOpen { next, .. } => {
                 if !wait_until(&state, clock.as_ref(), next.start).await {
                     return;
                 }
@@ -460,8 +465,7 @@ pub async fn run_scheduler(state: AppState, cfg: Arc<WatchlistConfig>, clock: Ar
             }
             Phase::Window(w) => w,
         };
-        let date = w.day.to_string();
-        let pending = match pending_assets(&state, &cfg, &date).await {
+        let pending = match pending_assets(&state, &cfg, &w).await {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!(error = %e, "lista de seguimiento: no se pudo leer el registro; se reintenta en 5 min");
@@ -508,7 +512,7 @@ pub async fn run_scheduler(state: AppState, cfg: Arc<WatchlistConfig>, clock: Ar
                     let _ = repo::mark_interrupted(&state.db, clock.now().timestamp_millis()).await;
                 }
             }
-            let left = pending_assets(&state, &cfg, &date).await.map(|p| p.len()).unwrap_or(0);
+            let left = pending_assets(&state, &cfg, &w).await.map(|p| p.len()).unwrap_or(0);
             if left == 0 {
                 break;
             }
@@ -526,6 +530,9 @@ pub async fn run_scheduler(state: AppState, cfg: Arc<WatchlistConfig>, clock: Ar
             tracing::warn!(left, espera = ?cfg.retry.round_cooldown, "lista de seguimiento: quedan activos por analizar; otra ronda más tarde");
             if !wait_until(&state, clock.as_ref(), resume).await {
                 return;
+            }
+            if clock.now() >= w.end {
+                break; // el equipo despertó con la ventana cerrada: no hay ronda; lo pendiente es `missed` (arriba)
             }
             round += 1;
             trigger = "retry";
@@ -545,17 +552,28 @@ fn warn_time_adjusted(cfg: &WatchlistConfig, clock: &dyn Clock, w: &Window, used
     );
 }
 
+/// Cierra como `missed` cada ventana ya terminada con activos pendientes, de la más antigua a la más
+/// reciente (ver [`closed_windows`]). Idempotente: una ventana sin pendientes no escribe nada.
+async fn close_missed(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Clock, phase: &Phase) -> Result<(), crate::error::ApiError> {
+    let since = repo::last_pass_started(&state.db).await?.map(crate::db::dt_from_ms);
+    for w in closed_windows(phase, since) {
+        record_missed(state, cfg, clock, &w).await?;
+    }
+    Ok(())
+}
+
 /// La ventana de `w` se cerró (llegó la apertura): los activos que siguen sin análisis válido ese día de
 /// bolsa se dan por PERDIDOS. Se registra una pasada `missed` con un resultado `skipped` (permanente, así
 /// que no vuelven a estar pendientes ni se vuelve a registrar) por activo, con el último error si lo hubo.
 /// Es idempotente: sin activos pendientes no hace nada.
 async fn record_missed(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Clock, w: &Window) -> Result<(), crate::error::ApiError> {
     let date = w.day.to_string();
-    let pending = pending_assets(state, cfg, &date).await?;
+    let rows = repo::window_results(&state.db, w).await?;
+    let pending = pending_in(cfg, &rows);
     if pending.is_empty() {
         return Ok(());
     }
-    let last_errors = last_errors(&state.db, &date).await?;
+    let last = last_per_asset(&rows);
     let now = clock.now().timestamp_millis();
     let depth = serde_json::to_value(cfg.depth).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
     let run_id = repo::start_run(
@@ -578,7 +596,7 @@ async fn record_missed(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Cloc
             "pasada del día de bolsa {} perdida: el mercado de EE. UU. abrió ({} UTC, {} locales) sin que este activo tuviera un análisis con el cierre; no se analiza con el mercado abierto",
             w.day, w.end.format("%Y-%m-%d %H:%M"), opened.format("%Y-%m-%d %H:%M"),
         );
-        if let Some(prev) = last_errors.get(&id.to_string()) {
+        if let Some(prev) = last.get(id.to_string().as_str()).and_then(|r| r.error.as_deref()) {
             msg.push_str(&format!(". Último intento: {prev}"));
         }
         repo::add_result(
@@ -596,57 +614,41 @@ async fn record_missed(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Cloc
     Ok(())
 }
 
-/// Último error registrado de cada activo ese día de bolsa (para el motivo de una pasada perdida).
-async fn last_errors(db: &sqlx::SqlitePool, date: &str) -> Result<std::collections::HashMap<String, String>, crate::error::ApiError> {
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT asset_id, error FROM watchlist_results r
-          WHERE local_date = ?1 AND error IS NOT NULL
-            AND id = (SELECT MAX(id) FROM watchlist_results WHERE local_date = ?1 AND asset_id = r.asset_id)",
-    )
-    .bind(date)
-    .fetch_all(db)
-    .await?;
-    Ok(rows.into_iter().filter_map(|(a, e)| e.map(|e| (a, e))).collect())
+/// El último resultado de cada activo (`rows` va por orden de inserción).
+fn last_per_asset(rows: &[ResultRow]) -> std::collections::HashMap<&str, &ResultRow> {
+    rows.iter().map(|r| (r.asset_id.as_str(), r)).collect()
 }
 
-/// Activos de la lista que ese día aún necesitan un análisis válido.
+/// Activos de la lista que en la ventana `w` aún necesitan un análisis válido.
+async fn pending_assets(state: &AppState, cfg: &WatchlistConfig, w: &Window) -> Result<Vec<AssetId>, crate::error::ApiError> {
+    Ok(pending_in(cfg, &repo::window_results(&state.db, w).await?))
+}
+
+/// Pendientes según los resultados de la ventana (ver [`repo::window_results`]).
 ///
 /// Reinterpreta los fallos antiguos: antes de distinguir «modelo no encontrado» de «activo no
 /// encontrado», una avería de Ollama dejaba `transient = 0` (permanente) en `watchlist_results`. Si el
-/// ÚLTIMO resultado de un activo ese día es uno de ésos (`failed`, permanente y con el texto del error
-/// de un modelo ausente), el activo vuelve a estar pendiente. No se modifica ninguna fila: es una
+/// ÚLTIMO resultado de un activo en la ventana es uno de ésos (`failed`, permanente y con el texto del
+/// error de un modelo ausente), el activo vuelve a estar pendiente. No se modifica ninguna fila: es una
 /// lectura, así que es idempotente y el histórico queda tal cual. Un `NotFound` de verdad del activo
 /// («activo desconocido», «sin cotización»…) no coincide y sigue siendo permanente.
-async fn pending_assets(state: &AppState, cfg: &WatchlistConfig, date: &str) -> Result<Vec<AssetId>, crate::error::ApiError> {
-    let states = repo::day_states(&state.db, date).await?;
-    let revived = legacy_model_failures(&state.db, date).await?;
-    Ok(cfg
-        .assets
+fn pending_in(cfg: &WatchlistConfig, rows: &[ResultRow]) -> Vec<AssetId> {
+    let states = repo::day_states(rows);
+    let last = last_per_asset(rows);
+    cfg.assets
         .iter()
         .filter(|a| {
             let id = a.to_string();
             match states.get(&id).copied() {
                 None | Some(DayState::Pending) => true,
-                Some(DayState::GaveUp) => revived.contains(&id),
+                Some(DayState::GaveUp) => last
+                    .get(id.as_str())
+                    .is_some_and(|r| r.status == "failed" && !r.transient && r.error.as_deref().is_some_and(is_model_missing)),
                 Some(DayState::Done) => false,
             }
         })
         .cloned()
-        .collect())
-}
-
-/// Activos cuyo último resultado del día es un fallo guardado como permanente pero causado por la
-/// ausencia del modelo (ver [`pending_assets`]).
-async fn legacy_model_failures(db: &sqlx::SqlitePool, date: &str) -> Result<std::collections::HashSet<String>, crate::error::ApiError> {
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT asset_id, error FROM watchlist_results r
-          WHERE local_date = ?1 AND status = 'failed' AND transient = 0
-            AND id = (SELECT MAX(id) FROM watchlist_results WHERE local_date = ?1 AND asset_id = r.asset_id)",
-    )
-    .bind(date)
-    .fetch_all(db)
-    .await?;
-    Ok(rows.into_iter().filter(|(_, e)| e.as_deref().is_some_and(is_model_missing)).map(|(a, _)| a).collect())
+        .collect()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -773,7 +775,7 @@ pub async fn run_round(
     power: (&str, i64),
 ) -> Result<RoundEnd, crate::error::ApiError> {
     let date = w.day.to_string();
-    let pending = pending_assets(state, cfg, &date).await?;
+    let pending = pending_assets(state, cfg, w).await?;
     let depth = serde_json::to_value(cfg.depth).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
     let run_id =
         repo::start_run(

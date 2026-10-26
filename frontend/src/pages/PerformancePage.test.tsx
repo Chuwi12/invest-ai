@@ -25,7 +25,7 @@ describe('PerformancePage', () => {
     await screen.findByText(/Todavía no hay análisis que medir/)
     expect(screen.getByRole('heading', { name: 'Rendimiento' })).toBeInTheDocument()
     // Lista de seguimiento: próxima pasada y ningún intento todavía.
-    await screen.findByText(/Cada día a las 23:00/)
+    expect(await screen.findByText(/Cada día de bolsa tras el cierre de EE\. UU\. · preferida 23:00/)).toBeInTheDocument()
     expect(screen.getByText(/Todavía no se ha hecho ninguna pasada/)).toBeInTheDocument()
     // Tarjetas con ceros, tabla y gráfico con «sin datos», pesos por defecto.
     expect(await screen.findByLabelText('Horizonte de 4 semanas')).toHaveTextContent('Sin análisis todavía')
@@ -94,6 +94,65 @@ describe('PerformancePage', () => {
     const row = await screen.findByRole('row', { name: /SOL/ })
     expect(row).toHaveTextContent('Falló')
     expect(row).toHaveTextContent('Binance no responde')
+  })
+
+  it('una pasada perdida tiene su texto y no se cuenta como fallos', async () => {
+    setApi({
+      ...mockApi,
+      watchlist: async () => {
+        const w = await mockApi.watchlist()
+        return { ...w, lastRun: w.lastRun && { ...w.lastRun, status: 'missed', ok: 0, failed: 20 } }
+      },
+    })
+    renderApp(<App />, '/performance')
+    expect(await screen.findByText(/perdida: llegó la apertura sin completar la pasada \(equipo apagado o Ollama sin responder\)/)).toBeInTheDocument()
+    expect(screen.queryByText(/con fallo/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/0 correctos/)).not.toBeInTheDocument()
+  })
+
+  it('una pasada abortada avisa de que también puede cerrarse la ventana', async () => {
+    setApi({
+      ...mockApi,
+      watchlist: async () => {
+        const w = await mockApi.watchlist()
+        return { ...w, lastRun: w.lastRun && { ...w.lastRun, status: 'aborted' } }
+      },
+    })
+    renderApp(<App />, '/performance')
+    expect(await screen.findByText(/abortada \(Ollama o el mercado no respondían, o se cerró la ventana\)/)).toBeInTheDocument()
+  })
+
+  it('un activo cuya ventana se perdió dice «Ventana perdida» con el motivo, no «No intentado»', async () => {
+    const error = 'llegó la apertura sin completar la pasada'
+    setApi({
+      ...mockApi,
+      watchlist: async () => {
+        const w = await mockApi.watchlist()
+        return { ...w, assets: w.assets.map((a) => (a.last && a.id === 'crypto:SOL' ? { ...a, last: { ...a.last, status: 'skipped', errorCode: 'missed', error, transient: false, attempts: 0 } } : a)) }
+      },
+    })
+    renderApp(<App />, '/performance')
+    await userEvent.click(await screen.findByText(/Estado por activo/))
+    const row = await screen.findByRole('row', { name: /SOL/ })
+    expect(row).toHaveTextContent('Ventana perdida')
+    expect(row).toHaveTextContent(error)
+    expect(row).not.toHaveTextContent('No intentado')
+    expect(row).not.toHaveTextContent('se abortó')
+  })
+
+  it('un activo no intentado por una pasada abortada sigue diciendo «No intentado»', async () => {
+    setApi({
+      ...mockApi,
+      watchlist: async () => {
+        const w = await mockApi.watchlist()
+        return { ...w, assets: w.assets.map((a) => (a.last && a.id === 'crypto:SOL' ? { ...a, last: { ...a.last, status: 'skipped', errorCode: null, error: null, transient: false, attempts: 0 } } : a)) }
+      },
+    })
+    renderApp(<App />, '/performance')
+    await userEvent.click(await screen.findByText(/Estado por activo/))
+    const row = await screen.findByRole('row', { name: /SOL/ })
+    expect(row).toHaveTextContent('No intentado')
+    expect(row).toHaveTextContent('se abortó o se cerró la ventana')
   })
 
   it('la lista desactivada se avisa', async () => {

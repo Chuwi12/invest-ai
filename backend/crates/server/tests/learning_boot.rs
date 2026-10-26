@@ -27,7 +27,8 @@ async fn a_broken_weights_table_never_stops_startup_and_defaults_are_used() {
 
     // Una versión válida sí se instala.
     sqlx::query("DELETE FROM scoring_weights").execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO scoring_weights (version, kind, status, multipliers, created_at) VALUES (2, 'learned', 'active', '[1.5,1,1,1,1,1,1]', 0)")
+    sqlx::query("INSERT INTO scoring_weights (version, kind, status, multipliers, created_at, rule_version) VALUES (2, 'learned', 'active', '[1.5,1,1,1,1,1,1]', 0, ?1)")
+        .bind(learning::rules::RULE_VERSION) // de otra regla se retiraría (ver weights::retire_stale)
         .execute(&pool)
         .await
         .unwrap();

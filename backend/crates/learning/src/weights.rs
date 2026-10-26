@@ -17,6 +17,7 @@ use sqlx::SqlitePool;
 
 use crate::{
     LearningError,
+    rules::RULE_VERSION,
     stats::{self, cluster_bootstrap, n_clusters, solve, spearman},
     store::{self, FACTOR_NAMES, Factors, N_FACTORS},
 };
@@ -716,6 +717,9 @@ pub struct WeightVersion {
     pub metrics: serde_json::Value,
     pub parent_version: Option<i64>,
     pub note: Option<String>,
+    /// Regla de resultados (`rules::RULE_VERSION`) con la que se ajustaron. Una versión de otra regla no
+    /// puede seguir activa: `activate` la retira.
+    pub rule_version: i64,
 }
 
 type VersionTuple = (
@@ -733,11 +737,12 @@ type VersionTuple = (
     String,
     Option<i64>,
     Option<String>,
+    i64,
 );
 
 const VERSION_COLS: &str =
     "version, kind, status, multipliers, created_at, horizon_weeks, trained_to, validated_from,
-     validated_to, n_train, n_val, metrics, parent_version, note";
+     validated_to, n_train, n_val, metrics, parent_version, note, rule_version";
 
 fn to_version(t: VersionTuple) -> Option<WeightVersion> {
     let m: Vec<f64> = serde_json::from_str(&t.3).ok()?;
@@ -757,6 +762,7 @@ fn to_version(t: VersionTuple) -> Option<WeightVersion> {
         metrics: serde_json::from_str(&t.11).unwrap_or(serde_json::Value::Null),
         parent_version: t.12,
         note: t.13,
+        rule_version: t.14,
     })
 }
 
@@ -778,9 +784,41 @@ pub async fn list_versions(db: &SqlitePool) -> Result<Vec<WeightVersion>, Learni
     Ok(rows.into_iter().filter_map(to_version).collect())
 }
 
-/// Instala en `ai::scoring` los multiplicadores de la versión activa (o los por defecto si no hay).
-/// Llamar al arrancar la app y tras cada adopción o vuelta atrás.
+/// Una versión de pesos ajustada con otra regla de resultados no puede seguir activa en silencio: sus
+/// multiplicadores salen de cifras medidas con otra definición de la entrada. Se retira (`retired`, nunca
+/// se borra: vuelven los pesos por defecto) con una nota y una entrada `deactivate` en `learning_runs`, que es
+/// el registro de decisiones del aprendizaje. `rollback` o la puerta pueden dar luego una versión nueva.
+async fn retire_stale(db: &SqlitePool, now_ms: i64) -> Result<(), LearningError> {
+    let mut tx = db.begin().await?;
+    let stale: Vec<(i64, i64)> = sqlx::query_as(
+        "UPDATE scoring_weights
+            SET status = 'retired',
+                note = COALESCE(note || ' | ', '') || 'desactivada: ajustada con la regla v' || rule_version || ', vigente v' || ?1
+          WHERE status = 'active' AND rule_version <> ?1
+          RETURNING version, rule_version",
+    )
+    .bind(RULE_VERSION)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (version, fitted) in stale {
+        let reason = format!(
+            "pesos de la versión {version} desactivados: ajustados con la regla v{fitted}, vigente v{RULE_VERSION}; rigen los de por defecto"
+        );
+        sqlx::query("INSERT INTO learning_runs (ran_at, horizon_weeks, decision, reason, n_rows, version, metrics) VALUES (?1, 0, 'deactivate', ?2, 0, ?3, '{}')")
+            .bind(now_ms)
+            .bind(reason)
+            .bind(version)
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(tx.commit().await?)
+}
+
+/// Instala en `ai::scoring` los multiplicadores de la versión activa (o los por defecto si no hay), tras
+/// retirar la que se ajustó con otra regla de resultados. Llamar al arrancar la app y tras cada adopción o
+/// vuelta atrás.
 pub async fn activate(db: &SqlitePool) -> Result<Option<WeightVersion>, LearningError> {
+    retire_stale(db, Utc::now().timestamp_millis()).await?;
     let v = active_version(db).await?;
     ai::scoring::set_learned_multipliers(v.as_ref().map(|v| v.multipliers));
     Ok(v)
@@ -816,8 +854,8 @@ async fn insert_active(db: &SqlitePool, v: NewVersion<'_>) -> Result<i64, Learni
             .await?;
     sqlx::query(
         "INSERT INTO scoring_weights (version, kind, status, multipliers, created_at, horizon_weeks, trained_to,
-             validated_from, validated_to, n_train, n_val, metrics, parent_version, note)
-         VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             validated_from, validated_to, n_train, n_val, metrics, parent_version, note, rule_version)
+         VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )
     .bind(next)
     .bind(kind)
@@ -832,6 +870,7 @@ async fn insert_active(db: &SqlitePool, v: NewVersion<'_>) -> Result<i64, Learni
     .bind(rep.map_or_else(|| "{}".to_string(), |r| serde_json::to_string(r).unwrap_or_default()))
     .bind(parent)
     .bind(note)
+    .bind(RULE_VERSION)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -839,7 +878,8 @@ async fn insert_active(db: &SqlitePool, v: NewVersion<'_>) -> Result<i64, Learni
 }
 
 /// Vuelve atrás: crea una versión nueva (nunca se borra historia) con los multiplicadores de
-/// `to_version`, o los por defecto si es `None`, y la activa.
+/// `to_version`, o los por defecto si es `None`, y la activa. Es una decisión explícita: la versión nueva
+/// lleva la regla vigente, aunque los multiplicadores vengan de una versión ajustada con otra.
 pub async fn rollback(
     db: &SqlitePool,
     to_version: Option<i64>,
@@ -907,7 +947,10 @@ pub async fn run_weights_cycle(
         })
         .filter(|r| r.factors.iter().filter(|f| f.is_some()).count() >= 2)
         .collect();
-    let active = active_version(db).await?;
+    // El incumbente de la puerta nunca es de otra regla: se retira (con la hora simulada) y `activate`
+    // desinstala sus multiplicadores de `ai::scoring`.
+    retire_stale(db, now.timestamp_millis()).await?;
+    let active = activate(db).await?;
     let (last_rows,): (i64,) = sqlx::query_as(
         "SELECT COALESCE(MAX(n_rows), 0) FROM learning_runs WHERE horizon_weeks = ?1 AND decision IN ('adopt', 'keep', 'decay')",
     )

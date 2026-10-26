@@ -35,4 +35,42 @@ pub enum KnowledgeError {
     Internal(String),
 }
 
+impl KnowledgeError {
+    /// ¿Se arregla solo reintentando más tarde? BUSY y LOCKED de SQLite (también sus códigos extendidos) y el pool agotado.
+    /// Corrupción, módulo FTS5 ausente o tabla borrada no.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Db(sqlx::Error::PoolTimedOut) => true,
+            Self::Db(sqlx::Error::Database(d)) => d.code().is_some_and(|c| transient_code(&c)),
+            Self::Embed(e) => e.is_transient(),
+            _ => false,
+        }
+    }
+}
+
+/// `SQLITE_BUSY` (5) y `SQLITE_LOCKED` (6); el código extendido lleva el primario en el byte bajo
+/// (262 = LOCKED_SHAREDCACHE, 517 = BUSY_SNAPSHOT). 267 = CORRUPT_VTAB no es transitorio.
+fn transient_code(code: &str) -> bool {
+    code.parse::<i32>().is_ok_and(|c| matches!(c & 0xff, 5 | 6))
+}
+
 pub type Result<T, E = KnowledgeError> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn busy_and_locked_are_transient_and_corruption_is_not() {
+        for c in ["5", "6", "261", "262", "517", "773"] {
+            assert!(transient_code(c), "{c}");
+        }
+        for c in ["1", "11", "267", "779", "", "x"] {
+            assert!(!transient_code(c), "{c}");
+        }
+        assert!(KnowledgeError::Db(sqlx::Error::PoolTimedOut).is_transient());
+        assert!(!KnowledgeError::Db(sqlx::Error::RowNotFound).is_transient());
+        assert!(KnowledgeError::Embed(EmbedError::Unavailable("x".into())).is_transient());
+        assert!(!KnowledgeError::Invalid("x".into()).is_transient());
+    }
+}

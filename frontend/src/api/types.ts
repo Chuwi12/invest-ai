@@ -831,6 +831,8 @@ export interface HorizonReport {
   horizonWeeks: LearningHorizon
   analysesTotal: number
   resolved: number
+  /** De los `resolved`, filas con la entrada de la regla anterior (activo sin histórico para recalcular). */
+  fallbackRows: number
   resolvedIndependent: number
   pending: number
   notMatured: number
@@ -843,6 +845,8 @@ export interface HorizonReport {
 
 export interface WeightVersion {
   version: number
+  /** Regla de resultados con la que se ajustó. */
+  ruleVersion: number
   kind: 'learned' | 'rollback' | 'decay' | 'manual'
   status: 'active' | 'retired'
   multipliers: number[]
@@ -927,7 +931,7 @@ export interface WatchlistAsset {
 export interface WatchlistStatus {
   enabled: boolean
   defaultList: boolean
-  /** Hora local de la pasada diaria, `HH:MM`. */
+  /** Hora local PREFERIDA (`HH:MM`) dentro de la ventana de cada día de bolsa (cierre de EE. UU. + 30 min → apertura siguiente). */
   time: string
   depth: AnalysisDepth
   nextRun: string | null

@@ -144,6 +144,32 @@ pub fn phase_at(t: DateTime<Utc>) -> Phase {
     }
 }
 
+/// Tope de ventanas cerradas que se revisan hacia atrás (días de bolsa): un equipo apagado semanas no
+/// rellena un pasado más lejano.
+pub const MAX_CLOSED: usize = 10;
+
+/// Ventanas ya cerradas que pueden tener activos sin analizar, de la más antigua a la más reciente: las
+/// que acabaron después de `since` (el arranque de la última pasada real), hasta [`MAX_CLOSED`]. La que
+/// acaba de cerrarse a la apertura de hoy se incluye siempre; sin `since` (BD sin pasadas) no se mira más atrás.
+pub fn closed_windows(phase: &Phase, since: Option<DateTime<Utc>>) -> Vec<Window> {
+    let (mut out, mut day) = match phase {
+        Phase::MarketOpen { ended, .. } => (vec![ended.clone()], ended.day),
+        Phase::Window(w) => (Vec::new(), w.day),
+    };
+    if let Some(since) = since {
+        while out.len() < MAX_CLOSED {
+            day = prev_trading_day(day);
+            let w = window_of(day);
+            if w.end <= since {
+                break;
+            }
+            out.push(w);
+        }
+    }
+    out.reverse();
+    out
+}
+
 /// Instante preferido de la pasada dentro de `w`, dada la hora local `time` (`WATCHLIST_TIME`): la
 /// primera vez que el reloj local marca esa hora a partir de `start + CLOSE_MARGIN`. Si cae fuera de la
 /// ventana (en plena sesión), se ajusta a `start + CLOSE_MARGIN` y se devuelve `true` para que quien
@@ -294,6 +320,30 @@ mod tests {
         // Y cierra a las 21:00 de Madrid: a las 21:10 ya se puede.
         assert!(matches!(phase_at(utc(2026, 10, 28, 19, 59)), Phase::MarketOpen { .. }));
         assert_eq!(phase_at(utc(2026, 10, 28, 20, 10)), Phase::Window(window_of(d(2026, 10, 28))));
+    }
+
+    #[test]
+    fn ventanas_cerradas_desde_la_ultima_actividad_con_tope() {
+        let days = |ws: Vec<Window>| ws.iter().map(|w| w.day).collect::<Vec<_>>();
+        // Sábado 17-oct: ventana vigente la del viernes 16.
+        let sat = phase_at(utc(2026, 10, 17, 12, 0));
+        // Sin actividad registrada no se rellena el pasado.
+        assert!(closed_windows(&sat, None).is_empty());
+        // La pasada del lunes 12 a las 21:00 UTC: quedan por cerrar el martes 13, el miércoles 14 y el jueves 15
+        // (la del lunes, ya hecha, también se devuelve: la ventana donde cae la actividad se revisa).
+        let since = utc(2026, 10, 12, 21, 0);
+        assert_eq!(days(closed_windows(&sat, Some(since))), [d(2026, 10, 12), d(2026, 10, 13), d(2026, 10, 14), d(2026, 10, 15)]);
+        // Actividad dentro de la ventana vigente: nada anterior queda por cerrar.
+        assert!(closed_windows(&sat, Some(utc(2026, 10, 17, 11, 0))).is_empty());
+        // Con la bolsa abierta, la que acaba de cerrarse va siempre (aunque la actividad sea de hoy o falte).
+        let open = phase_at(utc(2026, 10, 15, 15, 0));
+        assert_eq!(days(closed_windows(&open, None)), [d(2026, 10, 14)]);
+        assert_eq!(days(closed_windows(&open, Some(utc(2026, 10, 15, 14, 0)))), [d(2026, 10, 14)]);
+        // Tope: 10 ventanas, las más recientes.
+        let old = closed_windows(&sat, Some(utc(2026, 9, 1, 0, 0)));
+        assert_eq!(old.len(), MAX_CLOSED);
+        assert_eq!((old[0].day, old[MAX_CLOSED - 1].day), (d(2026, 10, 2), d(2026, 10, 15)));
+        assert_eq!(closed_windows(&open, Some(utc(2026, 9, 1, 0, 0))).len(), MAX_CLOSED);
     }
 
     #[test]

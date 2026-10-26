@@ -183,7 +183,7 @@ Resultados reales de los análisis (crate `learning`, ver `docs/notes/learning.m
 
 | Método | Ruta | Respuesta |
 |--------|------|-----------|
-| GET  | `/learning/performance` | `PerformanceReport` (camelCase; tal cual lo devuelve `learning::performance_report` con el modelo activo) |
+| GET  | `/learning/performance` | `PerformanceReport` (camelCase; tal cual lo devuelve `learning::performance_report` con el modelo activo). Tras subir la versión de la regla, las filas sin histórico para recalcular conservan las cifras anteriores y cuentan (`fallbackRows`, y un `caveat`) |
 | GET  | `/learning/weights` | `{ active: WeightVersion \| null, versions: WeightVersion[] }` (más reciente primero) |
 | POST | `/learning/weights/rollback` | Cuerpo `{ "version": 3 }` o `{ "version": null }` (pesos por defecto). Crea una versión nueva `rollback` y la activa; devuelve `WeightVersion`. 404 `not_found` si la versión no existe. Método no seguro: pasa por el guard de `Origin` |
 | GET  | `/learning/calibrated-confidence?confidence=0.7&horizon=4&model=qwen3:8b` | `{ raw, calibrated \| null, horizonWeeks, n, minRequired, reason }`. `calibrated` solo existe con calibración aplicable (>= 200 análisis independientes y mejora fuera de muestra); `horizon` en {1, 4, 12} (por defecto 4). `model` (opcional) es el modelo con cuyo historial se calibra: el que hizo el análisis, porque la confianza de otro modelo significa otra cosa; sin él, el modelo activo; vacío = 400 |
@@ -195,6 +195,7 @@ type PerformanceReport = {
   horizons: {                       // 3 elementos: 1, 4 y 12 semanas
     horizonWeeks: 1 | 4 | 12
     analysesTotal: number; resolved: number; resolvedIndependent: number
+    fallbackRows: number                        // de los `resolved`, filas que usan la entrada de la regla anterior (activo sin histórico para recalcular)
     pending: number; notMatured: number; skipped: number
     baseRateOutperform: number | null           // tasa base de superar al índice
     overall: VerdictStats; byVerdict: VerdictStats[]   // verdict "all" en overall
@@ -210,7 +211,8 @@ type VerdictStats = { verdict: string; n: number; hits: number; hitRate: number 
 type WeightVersion = { version: number; kind: "learned" | "rollback" | "decay" | "manual"; status: "active" | "retired"
   multipliers: number[]; factorNames: string[]; createdAtMs: number; horizonWeeks: number | null
   trainedToMs: number | null; validatedFromMs: number | null; validatedToMs: number | null
-  nTrain: number | null; nVal: number | null; metrics: object; parentVersion: number | null; note: string | null }
+  nTrain: number | null; nVal: number | null; metrics: object; parentVersion: number | null; note: string | null
+  ruleVersion: number }                         // regla de resultados con la que se ajustó; una activa de otra regla se retira al arrancar o en el ciclo
 
 type WatchlistStatus = {
   enabled: boolean; defaultList: boolean      // defaultList: la lista a priori (WATCHLIST vacío)
@@ -224,13 +226,16 @@ type WatchlistStatus = {
 }
 type WatchlistRun = { id: number; localDate: string; scheduledFor: string; startedAt: string; finishedAt: string | null
   trigger: "schedule" | "recovery" | "retry"  // recovery: el servidor arrancó tarde; startedAt dice cuándo fue de verdad
-  status: "running" | "completed" | "aborted" | "interrupted" | "missed"; depth: string; model: string | null
+  status: "running" | "completed" | "aborted" | "interrupted" | "missed"   // missed: la ventana de localDate se cerró con activos sin analizar (startedAt = cuándo se registró, tras la apertura)
+  depth: string; model: string | null
   planned: number; power: "ac" | "battery" | "unknown"; powerWaitSecs: number; ok: number; failed: number }
 type WatchlistResult = { id: number; runId: number; localDate: string; assetId: AssetId
-  status: "ok" | "failed" | "skipped"         // skipped: no se intentó porque la pasada se abortó
+  status: "ok" | "failed" | "skipped"         // skipped: no se intentó porque la pasada se abortó, o se perdió si errorCode = "missed"
   transient: boolean; attempts: number; analysisId: string | null; verdict: string | null
   errorCode: string | null; error: string | null; startedAt: string; finishedAt: string }
 ```
+
+Un resultado cuenta para la ventana del día de bolsa D (`[cierre de EE. UU. de D, apertura siguiente)`; la pasada empieza como pronto 30 min después del cierre) si EMPEZÓ dentro de ella, no por su `localDate`: las filas anteriores a la migración 0008 llevan el día local de ejecución. Las `missed` son la excepción (se registran después de la apertura y se reconocen por `localDate = D` y `errorCode = "missed"`). Se registra una pasada `missed` por cada ventana ya cerrada con activos pendientes, desde la última pasada real hasta la vigente y como mucho las 10 últimas ventanas (un equipo apagado varios días deja una por ventana); en una BD sin pasadas no se rellena el pasado.
 
 Con `INVEST_AI_FAKE=1` la lista de seguimiento queda desactivada (`enabled: false`).
 

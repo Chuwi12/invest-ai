@@ -1,3 +1,6 @@
+-- NO EDITAR una vez desplegada: sqlx guarda el checksum de cada migración aplicada y, si el fichero cambia,
+-- el servidor no arranca. Cualquier ajuste va en una migración nueva.
+--
 -- La pasada diaria pasa a tener una VENTANA (entre el cierre de EE. UU. del día de bolsa D y la apertura
 -- siguiente, ver docs/notes/learning.md): si llega la apertura sin haberla hecho, la pasada de D se
 -- pierde y se registra con estado 'missed'. `local_date` pasa a ser ese día de bolsa D (antes, el día
@@ -7,6 +10,8 @@
 -- filas con sus ids). Se copia primero a tablas nuevas y se borra el hijo (`watchlist_results`) ANTES
 -- que el padre: con las claves ajenas activas, el DROP del padre borraría en cascada los resultados.
 -- Al renombrar, SQLite reescribe la referencia de la tabla nueva de resultados a `watchlist_runs`.
+-- El contador de AUTOINCREMENT (`sqlite_sequence`) puede ser mayor que `max(id)` si se borraron filas: se
+-- traslada de la tabla antigua a la nueva (el DROP borraría el de la antigua), para no reutilizar ids.
 
 CREATE TABLE watchlist_runs_new (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,6 +62,11 @@ INSERT INTO watchlist_results_new
     (id, run_id, local_date, asset_id, status, transient, attempts, analysis_id, verdict, error_code, error, started_at, finished_at)
 SELECT id, run_id, local_date, asset_id, status, transient, attempts, analysis_id, verdict, error_code, error, started_at, finished_at
   FROM watchlist_results;
+
+-- Sin fila en `sqlite_sequence` (tabla que nunca tuvo filas) no hay nada que trasladar.
+DELETE FROM sqlite_sequence WHERE name IN ('watchlist_runs_new', 'watchlist_results_new');
+INSERT INTO sqlite_sequence (name, seq)
+SELECT name || '_new', seq FROM sqlite_sequence WHERE name IN ('watchlist_runs', 'watchlist_results');
 
 DROP TABLE watchlist_results;
 DROP TABLE watchlist_runs;

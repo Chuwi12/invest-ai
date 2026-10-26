@@ -83,8 +83,9 @@ funciona sin Ollama. Código: `lexical.rs` (saneado y RRF), `store.rs` (tabla y 
   tanto la parte léxica devuelve resultados parciales (la vectorial no cambia). Al abrir se borran huérfanos de una sesión que cayó a mitad.
 - **Coherencia**: altas y bajas son **explícitas dentro de la misma transacción** (ingesta, reemplazo, `delete_by_key`, `purge`), **no con
   triggers**: un trigger sobre `chunks` seguiría en la BD aunque FTS5 dejara de existir y haría fallar cada alta o baja de fragmentos.
-  Si una escritura FTS5 falla durante la ingesta, el documento NO se pierde: se desactiva la parte léxica hasta reiniciar y el próximo
-  arranque la repara (`backfill`).
+  Si una escritura FTS5 falla durante la ingesta, el documento NO se pierde. Si el error es permanente (corrupción, módulo ausente, tabla
+  borrada) se desactiva la parte léxica hasta reiniciar; si es transitorio (`SQLITE_BUSY`/`LOCKED`, `KnowledgeError::is_transient`) solo se
+  avisa y FTS sigue activa. En ambos casos el próximo arranque repara lo que quedó sin indexar (`backfill`).
 - **Consulta**: `lexical::fts_query` pone **cada término entre comillas dobles** (una cadena entre comillas es siempre una frase literal:
   `AND/OR/NOT/NEAR`, `*`, `^`, `col:`, `-`, `(` pierden su significado), elimina comillas internas y caracteres de control, descarta
   términos sin alfanuméricos y palabras vacías es/en, deduplica, y limita a 300 caracteres y 16 términos; se unen con `OR` (BM25 ordena
@@ -258,6 +259,23 @@ simulado no recupera y la híbrida pone primero; «Item 1A» (cabecera de secci�
 BM25 respetando filtros de activo y tipo; FTS5 inutilizable al abrir (tabla normal con el mismo nombre) y roto a mitad de sesión (`DROP TABLE`):
 degrada a vectores sin perder el documento; borrado, actualización y purga mantienen la tabla coherente; relleno de un archivo creado con
 `RAG_HYBRID=0`; `RAG_HYBRID=0` = comportamiento anterior. Los golden de `ai` con el RAG apagado no dependen de esto y siguen pasando.
+
+### Fallo intermitente de los tests de FTS y errores transitorios (26-oct-2026)
+- **Causa**: `testutil::memory_pool` y `server::db::connect_memory` abrían `sqlite::memory:` (caché compartida, 4 conexiones). Con caché
+  compartida, SQLite devuelve `SQLITE_LOCKED_SHAREDCACHE` (262) en vez de esperar y sqlx-sqlite 0.8.6 solo espera en `step`, no en `prepare`:
+  el relleno léxico que lanza `open` (`fts_count`/`total_chunks` fuera de la puerta de escritura) chocaba con el test («vtable constructor
+  failed: chunks_fts») y, a veces, SQLite devolvía 267 (`CORRUPT_VTAB`), que apagaba FTS. Producción nunca usó caché compartida (fichero en WAL).
+- **Arreglo**: los tests abren como producción (`testutil::temp_wal_pool`: fichero temporal en WAL, `busy_timeout` 5 s, 4 conexiones; se
+  borra al soltar el pool). Se descartó una sola conexión: serializa todo y podría bloquear el código que use el pool dentro de una
+  transacción (con 8 conexiones en producción no pasa); no se probó. `open` ya no lanza el relleno si no hay nada que rellenar (lo normal) y
+  `KnowledgeBase::wait_backfill` espera al que sí se lanzó: los tests no dependen de tiempos.
+- `stats()` propaga el error de `fts_count` (antes `unwrap_or(0)`); `GET /api/knowledge/stats` ya lo convertía en 500 y no cambia su forma.
+  `spawn_news_worker` dejó de depender de `stats()`: llama directamente a `embed_pending` (que sale enseguida si no hay pendientes).
+- `OllamaEmbedder`: `Response::json` de reqwest 0.12 marca como `decode` TODO fallo (también el corte o el timeout al leer el cuerpo), así que
+  `is_body()` nunca es cierto ahí. Solo un JSON mal formado (causa `serde_json::Error`) es `Bad` (pausa de 300 s); el resto es `Unavailable` (30 s).
+- Medición (hybrid y archive, 4 instancias en paralelo, `timeout 60`): antes 2 fallos en 2 000 ejecuciones del test afectado (`hybrid.rs:182`,
+  `lexical_indexed = 0`); después 0 en 6 000 (3 000 del binario `hybrid` entero, 1 000 de `archive`, 2 000 del test afectado) y 0 cuelgues.
+  El cuelgue de ~10 min visto una vez no se reprodujo ni antes ni después: su causa no está confirmada.
 
 ## Pendiente / límites
 - **Medido con Ollama real**: velocidad, VRAM y calidad con/sin RAG (ver «Medición real»). **Sigue sin medirse**: calidad de recuperación es↔en

@@ -108,9 +108,33 @@ Ahora `./invest-ai install` hace una **copia inmutable** en `~/.local/share/inve
 - **Actualizar**: `git pull` (o los cambios que sean), luego `./invest-ai install` (compila lo que haga falta, copia la versión nueva y reescribe
   las unidades; `--no-build` instala lo ya compilado y falla si falta) y `systemctl --user restart invest-ai.service`. `install` no reinicia
   nada: el servicio en marcha sigue con la versión anterior hasta que se reinicie (avisa). Conserva las 3 versiones más recientes más la que
-  usaba la unidad hasta entonces. Volver atrás: reinstalar el código anterior o apuntar las unidades a una carpeta que siga en `releases/`.
+  usaba la unidad hasta entonces y la que ejecuta el proceso en marcha (`systemctl --user show -p MainPID` + `/proc/<pid>/exe`; sin esto, 4 `install`
+  seguidos sin reiniciar borraban el `STATIC_DIR` del servidor y la UI daba 404). Volver atrás: reinstalar el código anterior o apuntar las unidades a una carpeta que siga en `releases/`; entre migraciones hay que restaurar también la copia de `data/` hecha antes de instalar (sqlx no arranca un binario sobre una BD con una migración que no conoce: `VersionMissing`).
 - `./invest-ai status` muestra la versión instalada y avisa si el árbol de trabajo tiene otra build. `uninstall` borra también las versiones.
-- Una instalación hecha antes de este cambio apunta todavía al árbol de trabajo (`status` lo avisa): basta con repetir `./invest-ai install`.
+- Una instalación hecha antes de este cambio apunta todavía al árbol de trabajo (`status` lo avisa): basta con repetir `./invest-ai install`. Si la
+  unidad apunta a `releases/<id>` y esa carpeta no existe (borrada a mano), `status` dice «la versión instalada <id> no existe: repite ./invest-ai
+  install» (antes lo confundía con una instalación antigua y `systemctl start` fallaba en `ExecStartPre` sin pista).
+
+#### Endurecimiento de `install`, la poda y `pull` (revisiones B-1, B-2, B-3, #6, #7, #8)
+- **La poda no se fía de los nombres (B-1)**: las listas de `find` van separadas por NUL (`-printf '%T@ %p\0'`, `sort -z`, `read -d ''`); un directorio
+  `a\nb` ya no produce la ruta `releases/a`. Solo se tocan hijos directos de `releases/`, que no sean enlaces y cuyo nombre sea el de una versión
+  (`^[0-9a-f]{12}$`, el formato de `release_id`) o de un temporal (`.tmp-XXXXXX`); lo demás se ignora (no se cuenta ni se borra). El único `chmod -R`
+  de la poda está en `drop_release`, detrás de esa validación (`chmod` sigue los enlaces de la línea de órdenes: así se cambiaban permisos de un árbol
+  ajeno, y con `..\nx` los de todo `invest-ai/`). Consecuencia: una carpeta con otro nombre dentro de `releases/` se queda donde está.
+- **`DATA_DIR` no puede abrir `ReadWritePaths` de más (B-2)**: `prepare_files` (y con él `install`, `run`, `dev` y `selftest`) aborta antes de su `mkdir`/`chmod 700` si
+  `realpath -m $DATA_DIR` es `/` o `$HOME`, es igual o ancestro del proyecto, de `releases/` o del directorio de unidades, o está dentro de `releases/`.
+  Un `DATABASE_URL` hacia `~/.local/share/invest-ai/` daba escritura sobre las versiones instaladas y permitía reescribir el binario del servicio.
+- **`LLM_MODEL` se valida en `pull_model` (B-3)**, único punto por el que llega a `ollama pull` (lo usan `pull`, `_prestart` con `AUTO_PULL_MODEL=1` y el
+  `run`/`dev` interactivos). Regex ASCII estricta con `LC_ALL=C` (con `es_ES.UTF-8`, `[A-Za-z]` aceptaba `á`) y la orden es `ollama pull -- "$modelo"`
+  (cobra respeta `--`; probado sin red con `OLLAMA_HOST` a un puerto muerto). Sigue admitiendo `host/ns/modelo` (p. ej. `hf.co/...`): se cierra la
+  inyección de opciones (`--insecure`), no la elección de registro. Efecto secundario: `pull` con un nombre no válido ya no falla antes de consultar
+  a Ollama; si Ollama no responde, el error que se ve es ese.
+- **`.tmp-*` (#7)**: `snapshot_release` instala un `trap ... EXIT` que borra el temporal si algo falla a mitad de la copia (`${tmp@Q}` se expande al
+  instalar el trap: la `local` ya no existe cuando se ejecuta), y la poda borra los `.tmp-*` de más de 1 h (un `kill -9` no ejecuta el trap).
+- Pruebas nuevas en `packaging/test-invest-ai.sh` (87 comprobaciones; contra el script anterior fallan 38): nombres con salto de línea, `..` y enlaces
+  (la víctima mantiene permisos y contenido), versión en marcha simulada con un `sleep` copiado como binario de la versión y `systemctl show` simulado,
+  `install` que falla a mitad (un `install` falso en el PATH), temporales viejos/recientes/hostiles, diez `DATABASE_URL` peligrosos (más uno hermano
+  válido), `LLM_MODEL=--insecure`/`-x`/con tilde (con `LC_ALL=es_ES.utf8` si existe) sin llegar a `ollama`, y `status` con la versión ausente.
 - Pruebas: `packaging/test-invest-ai.sh` (proyecto y `XDG_*` temporales, `systemctl`/`ollama` simulados, Ollama falso por HTTP; ~7 s, sale con 1 si algo
   falla) cubre `_prestart` (avisa/sigue/no descarga/`AUTO_PULL_MODEL`), `pull`, `install` (inmutable, idempotente, actualiza, poda, `--no-build`), la
   independencia del árbol de trabajo, las unidades (`systemd-analyze --user verify`) y `uninstall`. `INVEST_AI_PRESTART_WAIT=<s>` acorta la espera a Ollama

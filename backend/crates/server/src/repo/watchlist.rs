@@ -6,7 +6,7 @@ use domain::AssetId;
 use serde::{Serialize, Serializer};
 use sqlx::SqlitePool;
 
-use crate::error::ApiResult;
+use crate::{error::ApiResult, watchlist::window::Window};
 
 /// Las columnas guardan ms UTC; la API las entrega como fecha ISO-8601 (como el resto del contrato).
 fn ser_ms<S: Serializer>(ms: &i64, s: S) -> Result<S::Ok, S::Error> {
@@ -83,6 +83,9 @@ pub struct NewResult<'a> {
 
 const RUN_COLS: &str =
     "id, local_date, scheduled_for, started_at, finished_at, trigger, status, depth, model, planned, power, power_wait_secs, ok, failed";
+
+const RESULT_COLS: &str =
+    "id, run_id, local_date, asset_id, status, transient, attempts, analysis_id, verdict, error_code, error, started_at, finished_at";
 
 pub struct NewRun<'a> {
     pub local_date: &'a str,
@@ -174,36 +177,59 @@ pub async fn add_result(db: &SqlitePool, r: NewResult<'_>) -> ApiResult<()> {
     Ok(())
 }
 
-/// Estado de cada activo en un día local, según sus resultados más recientes.
+/// Estado de cada activo en una ventana, según sus resultados más recientes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DayState {
-    /// Ya tiene un análisis válido ese día.
+    /// Ya tiene un análisis válido en la ventana.
     Done,
-    /// Falló de forma permanente (activo inexistente…): no se reintenta ese día.
+    /// Falló de forma permanente (activo inexistente…) o se dio por perdido: no se reintenta.
     GaveUp,
     /// Sin intento, o el último fue un fallo transitorio / no se intentó (pasada abortada).
     Pending,
 }
 
-pub async fn day_states(db: &SqlitePool, local_date: &str) -> ApiResult<HashMap<String, DayState>> {
-    let rows: Vec<(String, String, bool)> = sqlx::query_as(
-        "SELECT asset_id, status, transient FROM watchlist_results WHERE local_date = ?1 ORDER BY id",
-    )
-    .bind(local_date)
+/// Resultados que cuentan para la ventana `w` del día de bolsa D, por orden de inserción.
+///
+/// `local_date` no basta: las filas anteriores a la 0008 llevan el día LOCAL de ejecución, que no es el
+/// de bolsa (una pasada hecha con el mercado abierto, o el domingo con el cierre del viernes). Cuenta lo
+/// que EMPEZÓ dentro de `[start, end)`. Las pérdidas (`missed`) son la excepción: se anotan DESPUÉS de
+/// la apertura, incluso dentro de una ventana posterior (equipo apagado), así que se reconocen por su
+/// `local_date` y nunca cuentan por hora; así el registro es idempotente y no ensucia la ventana en curso.
+pub async fn window_results(db: &SqlitePool, w: &Window) -> ApiResult<Vec<ResultRow>> {
+    Ok(sqlx::query_as(&format!(
+        "SELECT {RESULT_COLS} FROM watchlist_results
+          WHERE (error_code IS NOT 'missed' AND started_at >= ?2 AND started_at < ?3)
+             OR (error_code = 'missed' AND local_date = ?1)
+          ORDER BY id"
+    ))
+    .bind(w.day.to_string())
+    .bind(w.start.timestamp_millis())
+    .bind(w.end.timestamp_millis())
     .fetch_all(db)
-    .await?;
+    .await?)
+}
+
+pub fn day_states(rows: &[ResultRow]) -> HashMap<String, DayState> {
     let mut out: HashMap<String, DayState> = HashMap::new();
-    for (asset, status, transient) in rows {
-        let prev = out.get(&asset).copied();
-        let next = match (status.as_str(), transient) {
+    for r in rows {
+        let prev = out.get(&r.asset_id).copied();
+        let next = match (r.status.as_str(), r.transient) {
             ("ok", _) => DayState::Done,
             _ if prev == Some(DayState::Done) => DayState::Done,
             (_, false) => DayState::GaveUp,
             _ => DayState::Pending,
         };
-        out.insert(asset, next);
+        out.insert(r.asset_id.clone(), next);
     }
-    Ok(out)
+    out
+}
+
+/// Cuándo empezó la última pasada real (no `missed`): hasta ahí hay que mirar atrás en busca de ventanas
+/// que se cerraron sin quedar registradas (equipo apagado).
+pub async fn last_pass_started(db: &SqlitePool) -> ApiResult<Option<i64>> {
+    Ok(sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(started_at) FROM watchlist_runs WHERE status <> 'missed'")
+        .fetch_one(db)
+        .await?)
 }
 
 pub async fn last_run(db: &SqlitePool) -> ApiResult<Option<RunRow>> {
@@ -227,12 +253,10 @@ pub async fn recent_runs(db: &SqlitePool, limit: i64) -> ApiResult<Vec<RunRow>> 
 
 /// El último resultado de cada activo (de cualquier pasada).
 pub async fn last_result_per_asset(db: &SqlitePool) -> ApiResult<Vec<ResultRow>> {
-    Ok(sqlx::query_as(
-        "SELECT id, run_id, local_date, asset_id, status, transient, attempts, analysis_id, verdict,
-                error_code, error, started_at, finished_at
-           FROM watchlist_results r
-          WHERE id = (SELECT MAX(id) FROM watchlist_results WHERE asset_id = r.asset_id)",
-    )
+    Ok(sqlx::query_as(&format!(
+        "SELECT {RESULT_COLS} FROM watchlist_results r
+          WHERE id = (SELECT MAX(id) FROM watchlist_results WHERE asset_id = r.asset_id)"
+    ))
     .fetch_all(db)
     .await?)
 }
@@ -248,11 +272,7 @@ pub async fn last_ok_per_asset(db: &SqlitePool) -> ApiResult<HashMap<String, i64
 }
 
 pub async fn results_of_run(db: &SqlitePool, run_id: i64) -> ApiResult<Vec<ResultRow>> {
-    Ok(sqlx::query_as(
-        "SELECT id, run_id, local_date, asset_id, status, transient, attempts, analysis_id, verdict,
-                error_code, error, started_at, finished_at
-           FROM watchlist_results WHERE run_id = ?1 ORDER BY id",
-    )
+    Ok(sqlx::query_as(&format!("SELECT {RESULT_COLS} FROM watchlist_results WHERE run_id = ?1 ORDER BY id"))
     .bind(run_id)
     .fetch_all(db)
     .await?)

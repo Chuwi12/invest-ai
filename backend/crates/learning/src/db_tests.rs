@@ -95,6 +95,7 @@ async fn db() -> SqlitePool {
     for sql in [
         include_str!("../../server/migrations/0001_init.sql"),
         include_str!("../../server/migrations/0005_learning.sql"),
+        include_str!("../../server/migrations/0009_learning_prev.sql"),
     ] {
         sqlx::raw_sql(sql).execute(&pool).await.unwrap();
     }
@@ -378,9 +379,13 @@ async fn deleting_an_analysis_keeps_its_outcome() {
     assert_eq!(n, 2);
 }
 
+/// `ai::scoring` guarda los multiplicadores en estado global del proceso: los tests que lo tocan no corren a la vez.
+static WEIGHTS_GLOBAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn weights_are_versioned_adopted_activated_and_reversible() {
     use crate::{stats::Rng, store::N_FACTORS};
+    let _global = WEIGHTS_GLOBAL.lock().await;
     let pool = db().await;
     // 1500 resultados sintéticos (momentum predice con corr 0,2), 4 semanas.
     let mut r = Rng::new(42);
@@ -428,6 +433,7 @@ async fn weights_are_versioned_adopted_activated_and_reversible() {
         (v, "learned", "active")
     );
     assert!(active.multipliers[1] > 1.3 && active.n_val.unwrap() >= 80);
+    assert_eq!(active.rule_version, RULE_VERSION, "la versión registra con qué regla se ajustó");
     assert_eq!(ai::scoring::learned_multipliers(), Some(active.multipliers));
     // Sin filas nuevas, el siguiente ciclo no vuelve a evaluar (espera datos).
     let again = run_cycle(&pool, &m, now(), &cfg).await.unwrap();
@@ -826,4 +832,336 @@ async fn a_rule_version_bump_also_recomputes_rows_of_deleted_analyses() {
     // «Evitar» con el activo subiendo frente a un SPY plano: fallo.
     assert_eq!(hit, 0);
     assert_eq!(entry_of(&pool, "gone", 1).await.0, day_no(2026, 9, 14));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Subida de versión sin perder cifras: archivo, vía de reserva, reintentos y pesos
+// ---------------------------------------------------------------------------------------------
+
+/// (status, rule_version, fallback_for, excess_return, attempts, note) de una fila.
+type OutcomeState = (String, i64, Option<i64>, Option<f64>, i64, Option<String>);
+
+async fn outcome_state(pool: &SqlitePool, id: &str, horizon: i64) -> OutcomeState {
+    sqlx::query_as(
+        "SELECT status, rule_version, fallback_for, excess_return, attempts, note FROM analysis_outcomes
+          WHERE analysis_id = ?1 AND horizon_weeks = ?2",
+    )
+    .bind(id)
+    .bind(horizon)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn count(pool: &SqlitePool, sql: &str) -> i64 {
+    sqlx::query_as::<_, (i64,)>(sql).fetch_one(pool).await.unwrap().0
+}
+
+fn tuesday() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 9, 15, 7, 15, 0).unwrap()
+}
+
+#[tokio::test]
+async fn a_successful_recalculation_archives_the_previous_figures_and_is_idempotent() {
+    let pool = db().await;
+    let (m, _) = market_2026();
+    let a = analysis("old", "stock:AAPL", Verdict::Buy, 0.7, tuesday());
+    insert(&pool, &a).await;
+    insert_old_outcome(&pool, &a, 1, "resolved", RULE_VERSION - 1).await;
+
+    let r = resolve_pending(&pool, &m, now(), &ResolveConfig::default())
+        .await
+        .unwrap();
+    // 1 semana: la fila reabierta; 4 semanas: fila nueva (sin cifras previas, nada que archivar).
+    assert_eq!((r.reopened, r.resolved, r.fallback, r.skipped), (1, 2, 0, 0), "{r:?}");
+
+    // La fila ya tiene las cifras nuevas, sin marca de reserva...
+    let (status, version, fallback, excess, _, note) = outcome_state(&pool, "old", 1).await;
+    assert_eq!((status.as_str(), version, fallback, note), ("resolved", RULE_VERSION, None, None));
+    assert!((excess.unwrap() - 0.5).abs() > 1e-6);
+    // ...y las anteriores están archivadas tal cual.
+    let archived: Vec<(i64, i64, i64, f64, f64, i64, String)> = sqlx::query_as(
+        "SELECT rule_version, superseded_by, horizon_weeks, entry_price, excess_return, hit, factors
+           FROM analysis_outcomes_archive WHERE analysis_id = 'old'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        archived,
+        vec![(RULE_VERSION - 1, RULE_VERSION, 1, 7.0, 0.5, 1, "[1.0,2.0,3.0,null,5.0,null,7.0]".to_string())]
+    );
+
+    // Idempotente: otra pasada no reabre, no pide nada y no duplica el archivo.
+    let calls = m.calls().len();
+    let again = resolve_pending(&pool, &m, now(), &ResolveConfig::default())
+        .await
+        .unwrap();
+    assert_eq!((again.reopened, again.pending_pairs, again.fallback), (0, 0, 0));
+    assert_eq!(m.calls().len(), calls);
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM analysis_outcomes_archive").await, 1);
+}
+
+#[tokio::test]
+async fn a_permanent_not_found_keeps_the_old_figures_and_the_row_still_counts_with_a_flag() {
+    let pool = db().await;
+    let m = Stub::new(); // sin histórico de nada: NotFound
+    let a = analysis("gone", "stock:AAPL", Verdict::Buy, 0.7, tuesday());
+    insert(&pool, &a).await;
+    for h in [1, 4] {
+        insert_old_outcome(&pool, &a, h, "resolved", RULE_VERSION - 1).await;
+    }
+
+    let r = resolve_pending(&pool, &m, now(), &ResolveConfig::default())
+        .await
+        .unwrap();
+    assert_eq!((r.reopened, r.fallback, r.resolved, r.skipped, r.retry), (2, 2, 0, 0, 0), "{r:?}");
+    let (status, version, fallback, excess, _, note) = outcome_state(&pool, "gone", 1).await;
+    assert_eq!(
+        (status.as_str(), version, fallback, excess),
+        ("resolved", RULE_VERSION - 1, Some(RULE_VERSION), Some(0.5)),
+        "las cifras y su versión no cambian: solo se marca la vía de reserva"
+    );
+    let note = note.unwrap();
+    assert!(note.contains("regla anterior") && note.contains("sin histórico para recalcular"), "{note}");
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM analysis_outcomes_archive").await, 0);
+
+    // Las métricas la cuentan y el informe dice cuántas filas usan la vía de reserva.
+    let rows = crate::store::resolved_rows(&pool, 1).await.unwrap();
+    assert_eq!((rows.len(), rows[0].excess, rows[0].hit), (1, 0.5, true));
+    let rep = performance_report(&pool, now(), None, &Default::default())
+        .await
+        .unwrap();
+    let h1 = rep.horizons.iter().find(|h| h.horizon_weeks == 1).unwrap();
+    assert_eq!((h1.resolved, h1.fallback_rows, h1.skipped, h1.pending), (1, 1, 0, 0));
+    assert_eq!((h1.overall.n, h1.overall.hits), (1, 1));
+    assert!(rep.caveats.iter().any(|c| c.contains("regla anterior")), "{:?}", rep.caveats);
+
+    // Idempotente: no se vuelve a reabrir ni a pedir histórico.
+    let calls = m.calls().len();
+    let again = resolve_pending(&pool, &m, now(), &ResolveConfig::default())
+        .await
+        .unwrap();
+    assert_eq!((again.reopened, again.pending_pairs, again.fallback), (0, 0, 0));
+    assert_eq!(m.calls().len(), calls);
+    assert_eq!(outcome_state(&pool, "gone", 1).await.2, Some(RULE_VERSION));
+}
+
+#[tokio::test]
+async fn a_delisted_asset_whose_history_ends_early_falls_back_only_after_the_attempts_run_out() {
+    let pool = db().await;
+    let (m, from) = market_2026();
+    // El histórico del activo acaba el 15-sep: la entrada (cierre del lunes 14) existe, la salida (21-sep) no.
+    m.set(&"stock:AAPL".parse().unwrap(), Ok(weekday_series(from, 32)));
+    let a = analysis("delisted", "stock:AAPL", Verdict::Avoid, 0.7, tuesday());
+    insert_old_outcome(&pool, &a, 1, "resolved", RULE_VERSION - 1).await;
+    let cfg = ResolveConfig { horizons: vec![1], ..Default::default() };
+
+    for k in 0..cfg.max_attempts - 1 {
+        // Diez días entre pasadas: siempre pasada la espera de reintento (tope 7 días).
+        let r = resolve_pending(&pool, &m, now() + Duration::days(10 * k), &cfg)
+            .await
+            .unwrap();
+        assert_eq!((r.retry, r.fallback), (1, 0), "pasada {k}: {r:?}");
+        let (status, version, fallback, excess, attempts, _) = outcome_state(&pool, "delisted", 1).await;
+        assert_eq!((status.as_str(), version, fallback, excess, attempts), ("retry", RULE_VERSION - 1, None, Some(0.5), k + 1));
+        // Mientras reintenta no se mezcla con la versión vigente: queda fuera de las métricas.
+        assert!(crate::store::resolved_rows(&pool, 1).await.unwrap().is_empty());
+    }
+    let last = now() + Duration::days(10 * (cfg.max_attempts - 1));
+    let r = resolve_pending(&pool, &m, last, &cfg).await.unwrap();
+    assert_eq!((r.retry, r.fallback, r.skipped), (0, 1, 0), "{r:?}");
+    let (status, version, fallback, excess, _, note) = outcome_state(&pool, "delisted", 1).await;
+    assert_eq!((status.as_str(), version, fallback, excess), ("resolved", RULE_VERSION - 1, Some(RULE_VERSION), Some(0.5)));
+    assert!(note.unwrap().contains("sin datos tras"));
+    assert_eq!(crate::store::resolved_rows(&pool, 1).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn transient_errors_never_lose_the_old_figures_and_the_row_is_retried_later() {
+    let pool = db().await;
+    let (m, _) = market_2026();
+    let aapl: AssetId = "stock:AAPL".parse().unwrap();
+    let good = m.hist.lock().unwrap().get(&aapl).and_then(|r| r.as_ref().ok().cloned()).unwrap();
+    m.set(&aapl, Err(DomainError::Unavailable("proveedor caído".into())));
+    let a = analysis("flaky", "stock:AAPL", Verdict::Buy, 0.7, tuesday());
+    insert_old_outcome(&pool, &a, 1, "resolved", RULE_VERSION - 1).await;
+    let cfg = ResolveConfig { horizons: vec![1], ..Default::default() };
+
+    // Muchas más pasadas fallidas que `max_attempts`: nunca pasa a `skipped` ni a la vía de reserva.
+    for k in 0..cfg.max_attempts + 3 {
+        let r = resolve_pending(&pool, &m, now() + Duration::days(10 * k), &cfg)
+            .await
+            .unwrap();
+        assert_eq!((r.retry, r.fallback, r.skipped, r.resolved), (1, 0, 0, 0), "pasada {k}: {r:?}");
+        let (status, version, fallback, excess, attempts, _) = outcome_state(&pool, "flaky", 1).await;
+        assert_eq!((status.as_str(), version, fallback, excess, attempts), ("retry", RULE_VERSION - 1, None, Some(0.5), k + 1));
+    }
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM analysis_outcomes_archive").await, 0);
+
+    // El proveedor se recupera: se recalcula y las cifras anteriores pasan al archivo.
+    m.set(&aapl, Ok(good));
+    let later = now() + Duration::days(200);
+    let r = resolve_pending(&pool, &m, later, &cfg).await.unwrap();
+    assert_eq!((r.resolved, r.fallback, r.retry), (1, 0, 0), "{r:?}");
+    let (status, version, fallback, ..) = outcome_state(&pool, "flaky", 1).await;
+    assert_eq!((status.as_str(), version, fallback), ("resolved", RULE_VERSION, None));
+    let (archived_excess,): (f64,) = sqlx::query_as(
+        "SELECT excess_return FROM analysis_outcomes_archive WHERE analysis_id = 'flaky' AND rule_version = ?1",
+    )
+    .bind(RULE_VERSION - 1)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(archived_excess, 0.5);
+}
+
+#[tokio::test]
+async fn metrics_never_mix_versions_except_the_explicit_fallback() {
+    let pool = db().await;
+    let t = Utc.with_ymd_and_hms(2026, 10, 1, 7, 15, 0).unwrap(); // a 1 semana ya ha madurado; a 4, no
+    let mk = |id: &str, asset: &str| analysis(id, asset, Verdict::Buy, 0.7, t);
+    let (cur, fb, stale, old_fb) = (
+        mk("cur", "stock:AAPL"),
+        mk("fb", "stock:MSFT"),
+        mk("stale", "stock:NVDA"),
+        mk("old-fb", "stock:TSLA"),
+    );
+    for a in [&cur, &fb, &stale, &old_fb] {
+        insert(&pool, a).await;
+    }
+    insert_old_outcome(&pool, &cur, 1, "resolved", RULE_VERSION).await;
+    insert_old_outcome(&pool, &fb, 1, "resolved", RULE_VERSION - 1).await;
+    insert_old_outcome(&pool, &stale, 1, "resolved", RULE_VERSION - 1).await;
+    insert_old_outcome(&pool, &old_fb, 1, "resolved", RULE_VERSION - 1).await;
+    // `fb` está en la vía de reserva de la versión vigente; `old_fb` lo estuvo en la anterior.
+    for (id, v) in [("fb", RULE_VERSION), ("old-fb", RULE_VERSION - 1)] {
+        sqlx::query("UPDATE analysis_outcomes SET fallback_for = ?1 WHERE analysis_id = ?2")
+            .bind(v)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let ids = |rows: Vec<crate::store::OutcomeRow>| {
+        let mut v: Vec<String> = rows.into_iter().map(|r| r.analysis_id).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(ids(crate::store::resolved_rows(&pool, 1).await.unwrap()), ["cur", "fb"]);
+    let rep = performance_report(&pool, now(), None, &Default::default()).await.unwrap();
+    let h1 = rep.horizons.iter().find(|h| h.horizon_weeks == 1).unwrap();
+    // Cuentan la vigente y la reserva; las otras dos (versión anterior) cuentan como pendientes.
+    assert_eq!((h1.resolved, h1.fallback_rows, h1.pending, h1.overall.n), (2, 1, 2, 2));
+
+    // Una pasada sin histórico: `stale` y `old-fb` se reabren (la reserva de una versión anterior no vale
+    // para la vigente) y caen en la reserva; `cur` y `fb` no se tocan.
+    let m = Stub::new();
+    let r = resolve_pending(&pool, &m, now(), &ResolveConfig::default()).await.unwrap();
+    assert_eq!((r.reopened, r.fallback, r.resolved), (2, 2, 0), "{r:?}");
+    assert_eq!(outcome_state(&pool, "cur", 1).await.2, None);
+    for id in ["fb", "stale", "old-fb"] {
+        assert_eq!(outcome_state(&pool, id, 1).await.2, Some(RULE_VERSION), "{id}");
+    }
+    let rep = performance_report(&pool, now(), None, &Default::default()).await.unwrap();
+    let h1 = rep.horizons.iter().find(|h| h.horizon_weeks == 1).unwrap();
+    assert_eq!((h1.resolved, h1.fallback_rows, h1.pending), (4, 3, 0));
+}
+
+#[tokio::test]
+async fn weights_fitted_with_another_rule_version_are_deactivated_with_a_log_entry() {
+    let _global = WEIGHTS_GLOBAL.lock().await;
+    let pool = db().await;
+    let m = Stub::new();
+    let add = |version: i64, rule: i64| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query("INSERT INTO scoring_weights (version, kind, status, multipliers, created_at, rule_version) VALUES (?1, 'learned', 'active', '[1.5,1,1,1,1,1,1]', 0, ?2)")
+                .bind(version)
+                .bind(rule)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    };
+    let deactivations = || count(&pool, "SELECT COUNT(*) FROM learning_runs WHERE decision = 'deactivate'");
+
+    // Al arrancar (`activate`): la versión de otra regla se retira y rigen los pesos por defecto.
+    add(1, RULE_VERSION - 1).await;
+    ai::scoring::set_learned_multipliers(Some([1.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]));
+    assert!(weights::activate(&pool).await.unwrap().is_none());
+    assert_eq!(ai::scoring::learned_multipliers(), None);
+    let v = weights::list_versions(&pool).await.unwrap();
+    assert_eq!((v[0].version, v[0].status.as_str(), v[0].rule_version), (1, "retired", RULE_VERSION - 1));
+    assert!(v[0].note.as_deref().unwrap().contains("desactivada"), "{:?}", v[0].note);
+    let (decision, version, reason): (String, Option<i64>, String) =
+        sqlx::query_as("SELECT decision, version, reason FROM learning_runs").fetch_one(&pool).await.unwrap();
+    assert_eq!((decision.as_str(), version), ("deactivate", Some(1)));
+    assert!(reason.contains(&format!("v{}", RULE_VERSION - 1)) && reason.contains("por defecto"), "{reason}");
+    // Idempotente: otra activación no vuelve a anotar nada.
+    weights::activate(&pool).await.unwrap();
+    assert_eq!(deactivations().await, 1);
+
+    // En el ciclo periódico también (sin reiniciar): la puerta no parte de unos pesos de otra regla.
+    add(2, RULE_VERSION - 1).await;
+    ai::scoring::set_learned_multipliers(Some([1.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]));
+    run_cycle(&pool, &m, now(), &LearningConfig::default()).await.unwrap();
+    assert!(weights::active_version(&pool).await.unwrap().is_none());
+    assert_eq!(ai::scoring::learned_multipliers(), None);
+    assert_eq!(deactivations().await, 2);
+
+    // Una versión de la regla vigente se conserva y se instala.
+    add(3, RULE_VERSION).await;
+    assert_eq!(weights::activate(&pool).await.unwrap().map(|v| v.version), Some(3));
+    assert_eq!(ai::scoring::learned_multipliers(), Some([1.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]));
+    assert_eq!(deactivations().await, 2);
+    ai::scoring::set_learned_multipliers(None);
+}
+
+#[tokio::test]
+async fn migration_0009_applies_over_a_database_with_data_from_migrations_1_to_8() {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    for sql in [
+        include_str!("../../server/migrations/0001_init.sql"),
+        include_str!("../../server/migrations/0002_settings.sql"),
+        include_str!("../../server/migrations/0003_message_truncated.sql"),
+        include_str!("../../server/migrations/0004_knowledge.sql"),
+        include_str!("../../server/migrations/0005_learning.sql"),
+        include_str!("../../server/migrations/0006_watchlist.sql"),
+        include_str!("../../server/migrations/0007_social.sql"),
+        include_str!("../../server/migrations/0008_watchlist_missed.sql"),
+    ] {
+        sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+    }
+    // Datos de antes de la 0009: una fila de la regla anterior con cifras y unos pesos activos.
+    let a = analysis("pre", "stock:AAPL", Verdict::Buy, 0.7, tuesday());
+    insert_old_outcome(&pool, &a, 1, "resolved", RULE_VERSION - 1).await;
+    sqlx::query("INSERT INTO scoring_weights (version, kind, status, multipliers, created_at) VALUES (1, 'learned', 'active', '[1.5,1,1,1,1,1,1]', 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::raw_sql(include_str!("../../server/migrations/0009_learning_prev.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Los datos siguen y las columnas nuevas valen lo esperado.
+    assert_eq!(
+        outcome_state(&pool, "pre", 1).await,
+        ("resolved".into(), RULE_VERSION - 1, None, Some(0.5), 0, None)
+    );
+    assert_eq!(count(&pool, "SELECT rule_version FROM scoring_weights WHERE version = 1").await, 1); // escritas con RULE_VERSION 1 (antes de la 0008)
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM analysis_outcomes_archive").await, 0);
+
+    // Y la pasada funciona de punta a punta sobre esa base: recalcula y archiva la fila antigua.
+    let (m, _) = market_2026();
+    let r = resolve_pending(&pool, &m, now(), &ResolveConfig::default()).await.unwrap();
+    assert_eq!((r.reopened, r.resolved), (1, 2), "{r:?}");
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM analysis_outcomes_archive WHERE excess_return = 0.5").await, 1);
 }

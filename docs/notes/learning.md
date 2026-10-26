@@ -11,13 +11,14 @@ Estado: **implementado y probado con datos sintéticos; sin datos reales con los
 | 4. Lecciones RAG | (otro crate, `knowledge`) | — |
 
 Código: `backend/crates/learning` (`rules`, `resolve`, `calibration`, `weights`, `report`, `stats`, `store`). Migración
-**`0005_learning.sql`** (tablas `analysis_outcomes`, `scoring_weights`, `learning_runs`; la 0004 es del RAG).
+**`0005_learning.sql`** (tablas `analysis_outcomes`, `scoring_weights`, `learning_runs`; la 0004 es del RAG) y **`0009_learning_prev.sql`**
+(archivo de cifras, vía de reserva y `rule_version` de los pesos; ver «Versiones de la regla»).
 
 ## 1. Resultados: reglas A PRIORI (versión 2, `rules::RULE_VERSION`)
 
 Fijadas antes de ver ningún resultado. Cambiarlas exige subir `RULE_VERSION`, y **subirla re-etiqueta el histórico** con la regla
-nueva (ver «Versiones de la regla», abajo). Las estadísticas, la calibración y los pesos leen solo filas de la versión vigente:
-nunca se mezclan versiones.
+nueva (ver «Versiones de la regla», abajo) **sin perder las cifras anteriores**. Las estadísticas, la calibración y los pesos leen
+solo filas de la versión vigente, más las de la vía de reserva explícita (abajo): nunca se mezclan versiones por descuido.
 
 - **Horizontes**: 1, 4 y 12 semanas (7·h días) contadas desde el día de la **entrada** (no desde `generated_at`).
 - **Precios**: cierres diarios de `MarketData::history(…, D1)`. **Salida** = primer cierre con día ≥ entrada + 7·h días. La vela
@@ -87,21 +88,61 @@ nunca se mezclan versiones.
 | 1 | cierre de la sesión del día UTC de `generated_at`, o de la siguiente | diseño original, pensado para análisis hechos de día o tras el cierre |
 | 2 (23-oct-2026) | cierre de la última sesión ya abierta cuando el análisis vio los datos | la lista de seguimiento pasó a hacerse en una ventana (de madrugada o por la mañana de D+1): con la v1, un análisis que vio el cierre de D se medía desde el cierre de D+1. Se cambió sin ningún resultado resuelto en la BD, no por rendimiento |
 
-**Qué pasa al subir la versión** (`resolve::reopen_stale`, al principio de cada pasada de `resolve_pending`):
-- Las filas `resolved` y `skipped` de una versión anterior pasan a `retry` con la versión vigente, con las cifras de resultado
-  borradas, y se **recalculan** con el mismo tope de activos por pasada (lo que no cabe sigue en la siguiente). Las `retry` solo
-  cambian de versión. Se recalculan también las filas de análisis ya borrados (`analysis_outcomes` no tiene clave foránea): la fila
-  conserva lo necesario y, sin JSON que releer, se queda con los factores guardados y `generated_at` como instante de referencia.
-- Las cifras antiguas **no se conservan** (la fila es única por análisis y horizonte, y cambiar la clave exigiría una migración).
-  `ResolveReport.reopened` dice cuántas filas se reabrieron.
-- Nunca se mezclan: `store::resolved_rows` (estadísticas, calibración, pesos) y los contadores del panel filtran por
-  `rule_version = RULE_VERSION`. Mientras dura el recálculo la muestra es parcial pero homogénea, y lo que falta cuenta como
-  «pendiente» (antes de este cambio, las filas de una versión anterior no se recalculaban nunca, quedaban fuera de toda métrica y
-  hacían crecer `pending` para siempre).
+**Qué pasa al subir la versión** (`resolve::reopen_stale`, al principio de cada pasada de `resolve_pending`). Regla de oro: **las
+cifras de una versión anterior no se anulan hasta que la nueva se ha calculado bien, y nunca se pierden.**
+- Las filas `resolved` y `skipped` de una versión anterior pasan a `retry` (`note = 'recalculando con la regla vN'`, intentos a 0) y se
+  **recalculan** con el mismo tope de activos por pasada. Solo cambian `status`, `retry_after`, `attempts` y `note`: las cifras
+  (precios, rentabilidades, `hit`, factores) y la `rule_version` de la fila **siguen donde estaban**, así que si el proceso muere a medias
+  no se pierde nada. `ResolveReport.reopened` dice cuántas filas se reabrieron. Se recalculan también las filas de análisis ya
+  borrados (`analysis_outcomes` no tiene clave foránea): sin JSON que releer, la fila se queda con los factores guardados y
+  `generated_at` como instante de referencia.
+- **Recálculo correcto → archivo + sustitución en UNA transacción** (`resolve_pending`): `INSERT OR IGNORE INTO
+  analysis_outcomes_archive … SELECT` de la fila antigua y, en la misma transacción, el `UPSERT` de la nueva (`rule_version` vigente,
+  `fallback_for = NULL`). El archivo (`analysis_outcomes_archive`, clave `(analysis_id, horizon_weeks, rule_version)`) guarda las
+  cifras con su versión, la que las sustituyó (`superseded_by`) y cuándo (`archived_at`): la cadena v1 → v2 → v3 queda completa y
+  auditable con un `SELECT`.
+  *Por qué una tabla de archivo y no columnas `prev_*`*: las `prev_*` solo guardan una generación (en la v3 pisarían la v1), exigen
+  una docena de columnas en la tabla caliente y las métricas tendrían que elegir entre columnas; el archivo es un solo `INSERT … SELECT`,
+  guarda todas las generaciones y no toca ninguna consulta de métricas.
+- **Fallo transitorio** (red, límites, proveedor caído, benchmark no disponible): la fila sigue `retry` con sus cifras anteriores
+  intactas y se reintenta con el retroceso de siempre (6 h·2^n, tope 7 d). **A diferencia de una fila nueva, nunca agota los intentos**:
+  una caída larga del proveedor no la pasa a `skipped` ni a la reserva, porque no prueba que el histórico no exista. Mientras
+  reintenta no cuenta en las métricas (queda como «pendiente»: muestra parcial pero homogénea) y no pierde nada. No se tocan su
+  `rule_version` ni `resolved_at` (siguen siendo los de las cifras que conserva).
+- **Fallo PERMANENTE → vía de reserva** (`resolve::write_fallback`). Es permanente: `NotFound` del histórico del activo, activo sin
+  benchmark definido, o datos que no sirven (`NoData`: el histórico acaba antes de la fecha de salida, como un activo deslistado)
+  tras `max_attempts` intentos. Entonces la fila vuelve a `resolved` **con las cifras de la versión anterior** (su `rule_version` no
+  cambia, es la de esas cifras), `fallback_for = RULE_VERSION` y la nota «entrada de la regla anterior (vN), sin histórico para
+  recalcular: …». Una sola sentencia, atómica. Sin esto, un activo deslistado cuya pérdida estaba resuelta en la v1 desaparecería en
+  la v2 (`skipped`, fuera de las métricas): justo el sesgo de supervivencia que la migración 0005 quería evitar.
+  - Las métricas la **cuentan**: `store::resolved_rows` y los contadores del panel filtran `rule_version = vigente OR fallback_for =
+    vigente`. Con eso entran también en calibración y pesos (con la entrada de la regla anterior; es la contrapartida asumida frente a
+    perder los fallos).
+  - El informe lo dice: `HorizonReport.fallbackRows` (de los `resolved`, cuántos usan la reserva), un `caveat` con el total y
+    `ResolveReport.fallback` (filas que esta pasada ha dejado en la reserva).
+  - Es **definitiva para esa versión**: no se reintenta cada pasada (costaría una petición por activo y pasada). La siguiente subida
+    de `RULE_VERSION` la reabre (`fallback_for < vigente`) y vuelve a probar. Si Yahoo vuelve a servir un activo y se quiere recuperar
+    antes, hay que poner `status = 'retry'` y `fallback_for = NULL` a mano en esa fila.
+  - Una fila `skipped` de la versión anterior no tiene cifras que conservar: si no se puede calcular, vuelve a `skipped` con la versión
+    vigente, como antes.
+- Idempotente: lo reabierto ya es `retry`, y lo que está en la reserva para esta versión no se reabre (test
+  `a_permanent_not_found_keeps_the_old_figures…`, segunda pasada: 0 reabiertas, 0 peticiones).
+- Nunca se mezclan por descuido: una fila de versión anterior sin marca de reserva (p. ej. la que espera su recálculo) no entra en
+  ninguna métrica y cuenta como «pendiente» (antes de la v2, las filas de una versión anterior no se recalculaban nunca, quedaban fuera
+  de toda métrica y hacían crecer `pending` para siempre).
 - **Cuidado con el uso**: re-etiquetar el histórico permite, en teoría, ajustar la regla hasta que las cifras salgan bien. Por eso
-  cada versión se anota aquí con su motivo, y el motivo no puede ser el rendimiento. No se invalidan los pesos ya adoptados con filas
-  de la versión anterior: siguen vigentes hasta que la retención o la puerta los reevalúen con filas de la vigente (hoy no hay
-  ninguno). Si una subida cambiara mucho lo medido, conviene `weights::rollback(db, None, …)`.
+  cada versión se anota aquí con su motivo, y el motivo no puede ser el rendimiento.
+- **Pesos aprendidos y versión de la regla** (`weights::retire_stale`, desde `activate` y desde cada `run_weights_cycle`): cada versión
+  de `scoring_weights` guarda la `rule_version` con la que se ajustó (columna `rule_version`; la API la expone como `ruleVersion`). Una
+  versión **activa** de otra regla se retira (`status = 'retired'`, nota «desactivada: ajustada con la regla vN, vigente vM»; nunca se
+  borra) y rigen los pesos por defecto; queda una entrada `decision = 'deactivate'` en `learning_runs` (el registro de decisiones) con el
+  motivo. Pasa al arrancar (`activate`) y en el ciclo periódico, antes de que la puerta tome el incumbente; después, si hay datos, la
+  puerta puede adoptar una versión nueva con la regla vigente. Es idempotente (una sola entrada). `rollback` crea la versión con la
+  regla vigente: es una decisión explícita (queda su entrada `rollback`), no una adopción silenciosa. Las filas anteriores a la 0009 se
+  dan por ajustadas con la v1 (`DEFAULT 1`: las escribió un binario anterior a la 0008, con `RULE_VERSION` 1; la BD real no tiene ninguna), así que una activa se retira al arrancar.
+- **Pendiente conocido**: `run_weights_cycle` toma `last_eval_rows` del máximo de `learning_runs.n_rows` de todas las versiones, así que
+  tras una subida la puerta espera a superar el recuento de la regla antigua + `min_new_rows`. Retrasa, no corrompe; arreglarlo pide
+  guardar la `rule_version` también en `learning_runs`.
 
 ## 2. Calibración (`calibration`)
 
@@ -147,8 +188,9 @@ defecto (p > 0,25 o IC menor), se encogen hacia 1 (raíz cuadrada del multiplica
 defecto). Es lo que hace que un factor que dejó de funcionar pierda peso con el tiempo aunque ningún candidato nuevo «gane».
 
 **Versionado** (`scoring_weights`): nunca se borran filas; una sola activa (índice único parcial). Tipos `learned`,
-`rollback`, `decay`, `manual`. `weights::rollback(db, Some(v) | None, now)` crea una versión nueva con los multiplicadores de `v`
-(o los de por defecto) y la activa. `weights::activate(db)` instala la vigente en `ai::scoring` (llamar al arrancar y tras
+`rollback`, `decay`, `manual`, cada una con la `rule_version` con la que se ajustó (ver «Versiones de la regla»: una activa de otra
+regla se retira con una entrada `deactivate` en `learning_runs`). `weights::rollback(db, Some(v) | None, now)` crea una versión nueva con
+los multiplicadores de `v` (o los de por defecto) y la activa. `weights::activate(db)` instala la vigente en `ai::scoring` (llamar al arrancar y tras
 cada cambio; `run_cycle` ya lo hace tras adoptar). Cada versión guarda fechas de entrenamiento/validación, n y todas las
 métricas de la puerta (JSON).
 
@@ -164,7 +206,8 @@ Ningún otro fichero de `ai` cambia. Es estado global del proceso: es la única 
 (1/4/12) nº de análisis, resueltos, **resueltos independientes**, pendientes (maduros sin resultado), sin madurar, descartados;
 tasa base de superar al índice; aciertos y exceso medio por veredicto con IC (acierto: Wilson sobre la muestra independiente;
 exceso medio: bootstrap por bloques temporales, `null` con < 5 bloques); curva de fiabilidad y estado de la calibración;
-versión de pesos vigente e historial; y una lista de `caveats`.
+versión de pesos vigente e historial; y una lista de `caveats`. `resolved` incluye `fallbackRows`, las filas que usan la entrada de la regla
+anterior porque su activo ya no tiene histórico para recalcularlas (y hay un `caveat` con el total).
 
 ## 5. Pruebas sintéticas (sin red)
 
@@ -223,7 +266,7 @@ y la **apertura siguiente** (D+1, o el lunes si D es viernes). En ese intervalo 
 | `WATCHLIST_TIME` | Hora local **preferida** dentro de la ventana: la primera vez que el reloj la marca a partir del cierre + margen (23:00 → esa noche; 09:15 → la mañana siguiente, o el sábado si D es viernes). Si cae en plena sesión (p. ej. 16:00) se ajusta al cierre + margen **con un aviso** en el log. Un mismo valor puede valer una semana y otra no (21:30 de Madrid vale en las semanas desfasadas y no en las normales) |
 | Con la hora preferida ya pasada | Si el servidor arranca (o el equipo despierta) con la ventana abierta y la preferida ya pasó, hace la pasada **de inmediato** (`trigger = recovery`; se guardan la hora prevista, `scheduledFor`, y la real, `startedAt`). El PC encendido a las 09:00 de D+1 hace la pasada de D |
 | Fin de semana | La pasada del **viernes** vale hasta la apertura del **lunes** (sábado y domingo incluidos) |
-| Apertura sin pasada | Si llega la apertura de EE. UU. y a algún activo le falta su análisis, **esa pasada se pierde**: se registra una pasada con estado **`missed`** (un resultado `skipped` permanente por activo, con `error_code = missed` y el último error si lo hubo) y **no se analiza con el mercado abierto**. Es idempotente (un reinicio durante la sesión no la vuelve a registrar). Solo se registra la ventana más reciente: un día entero sin servidor no deja fila (queda constancia por su ausencia). Una pasada en curso se **corta a la apertura**: no se empieza ningún análisis más (queda `aborted`) y lo pendiente se registra como `missed` |
+| Apertura sin pasada | Si llega la apertura de EE. UU. y a algún activo le falta su análisis, **esa pasada se pierde**: se registra una pasada con estado **`missed`** (un resultado `skipped` permanente por activo, con `error_code = missed` y el último error si lo hubo) y **no se analiza con el mercado abierto**. Es idempotente (un reinicio durante la sesión no la vuelve a registrar). Al arrancar y en cada vuelta se registran todas las ventanas ya cerradas con pendientes desde la última pasada real (hasta 10 días de bolsa): un día entero sin servidor también deja su `missed`. Qué cuenta para una ventana lo decide la hora de inicio del resultado, no `local_date`. Una pasada en curso se **corta a la apertura**: no se empieza ningún análisis más (queda `aborted`) y lo pendiente se registra como `missed` |
 | `local_date` | En `watchlist_runs` y `watchlist_results` es el **día de bolsa D**, no el día de ejecución (una pasada hecha el jueves a las 09:00 con el cierre del miércoles lleva `2026-10-14`) |
 | Festivos de EE. UU. | **No hay calendario**: un festivo se trata como un día laborable más. La ventana de la víspera acaba a las 9:30 del festivo y la «pasada» del festivo analiza el último cierre real (se repite el mismo cierre). Las sesiones cortas (13:00) cierran antes de las 16:00, así que el margen es conservador. Un calendario de festivos es trabajo pendiente |
 | Cripto | Opera 24/7: su precio es **el del momento de la pasada** (puede ser horas después del cierre de la bolsa), no el de las 16:00 de Nueva York. Para cripto la entrada medida por `learning` (cierre diario UTC del día del análisis) ya era una aproximación |
@@ -296,8 +339,10 @@ menos sería ajustar ruido.
 - **Muestra efectiva ≪ n**: todos los análisis comparten régimen y fechas; se mitiga con una fila por activo/ventana y
   bootstrap por bloques, pero un solo año de mercado es un solo régimen.
 - **Selección propia**: los activos que el usuario decide analizar no son una muestra aleatoria del mercado.
-- **Supervivencia**: activos deslistados sin precio posterior acaban `skipped` y se contabilizan, pero no entran en las
-  métricas (sesgo optimista). El historial no depende de que sigan existiendo los análisis.
+- **Supervivencia**: un activo que nunca llegó a resolverse (sin precio posterior) acaba `skipped`, se contabiliza pero no entra en las
+  métricas (sesgo optimista). Un activo ya resuelto que deja de tener histórico tras una subida de versión **sí** entra: conserva las
+  cifras de la regla anterior (vía de reserva, con marca y recuento en el informe). El historial no depende de que sigan existiendo los
+  análisis.
 - **Deriva de la puntuación**: si cambian las tablas de umbrales de `scoring.rs` (p. ej. R-05), los componentes guardados
   vienen de otra versión de la fórmula y no se pueden recalcular (no se guarda el snapshot). Al cambiar la puntuación
   conviene subir la versión de reglas o empezar un historial nuevo.

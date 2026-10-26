@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, TimeZone, Utc};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use knowledge::{DocKind, EmbedError, EmbedKind, Embedder, FakeEmbedder, KnowledgeBase, KnowledgeConfig, NewDocument, SearchRequest, Section, testutil};
 
 fn now() -> DateTime<Utc> {
@@ -193,6 +194,42 @@ async fn delete_update_and_purge_keep_the_lexical_index_coherent() {
 }
 
 #[tokio::test]
+async fn stats_propagates_a_failing_fts_count() {
+    let kb = kb_with(KnowledgeConfig::default(), Arc::new(FakeEmbedder::default())).await;
+    assert!(kb.stats().await.is_ok());
+    sqlx::query("DROP TABLE chunks_fts").execute(kb_pool(&kb)).await.unwrap();
+    assert!(kb.lexical_enabled(), "sigue activa hasta que algo la use");
+    assert!(kb.stats().await.is_err(), "ya no devuelve lexical_indexed = 0 en silencio");
+}
+
+#[tokio::test]
+async fn busy_fts_does_not_switch_it_off_and_the_backfill_recovers() {
+    let dir = std::env::temp_dir().join(format!("knowledge-busy-{}", std::process::id()));
+    std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(&dir).unwrap();
+    // `busy_timeout` 0: un escritor ajeno da SQLITE_BUSY al instante en vez de esperar 5 s.
+    let opts = SqliteConnectOptions::new().filename(dir.join("k.db")).create_if_missing(true).journal_mode(SqliteJournalMode::Wal).busy_timeout(std::time::Duration::ZERO);
+    let pool = SqlitePoolOptions::new().max_connections(2).connect_with(opts).await.unwrap();
+    sqlx::raw_sql(knowledge::SCHEMA_SQL).execute(&pool).await.unwrap();
+    let kb = KnowledgeBase::open(pool.clone(), Arc::new(FakeEmbedder::default()), KnowledgeConfig::default()).await.unwrap();
+    kb.ingest(doc("n:1", DocKind::News, "Gold hits record high", &[(None, "Gold hits record high as the dollar weakens.")], &[], 0)).await.unwrap();
+    sqlx::query("DELETE FROM chunks_fts").execute(&pool).await.unwrap(); // deja un fragmento sin indexar
+
+    let mut blocker = pool.acquire().await.unwrap();
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *blocker).await.unwrap();
+    let err = kb.backfill_lexical().await.unwrap_err();
+    assert!(err.is_transient(), "BUSY real de SQLite: {err:?}");
+    assert!(kb.lexical_enabled(), "un error transitorio no apaga FTS");
+
+    sqlx::query("ROLLBACK").execute(&mut *blocker).await.unwrap();
+    drop(blocker);
+    assert_eq!(kb.backfill_lexical().await.unwrap(), 1);
+    let s = kb.stats().await.unwrap();
+    assert!(s.lexical && s.lexical_indexed == 1, "{s:?}");
+    drop((kb, pool));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
 async fn existing_chunks_are_backfilled_the_first_time() {
     let dir = std::env::temp_dir().join(format!("knowledge-hybrid-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -204,8 +241,8 @@ async fn existing_chunks_are_backfilled_the_first_time() {
         assert!(!kb.stats().await.unwrap().lexical);
     }
     let kb = KnowledgeBase::open(testutil::file_pool(&path).await, Arc::new(FakeEmbedder::default()), KnowledgeConfig::default()).await.unwrap();
-    // El relleno en segundo plano y esta llamada son idempotentes y se coordinan con la puerta de escritura.
-    kb.backfill_lexical().await.unwrap();
+    // `open` ha lanzado el relleno en segundo plano: se espera a que acabe en vez de dormir.
+    kb.wait_backfill().await;
     let s = kb.stats().await.unwrap();
     assert!(s.lexical && s.lexical_indexed == s.chunks && s.chunks >= 150, "{s:?}");
     assert_eq!(kb.search(&req("BRK.B", 3)).await.unwrap().hits[0].doc.doc_key, "n:brk");

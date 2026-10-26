@@ -101,6 +101,15 @@ impl OllamaEmbedConfig {
     }
 }
 
+/// `Response::json` etiqueta como `decode` TODO fallo: también el timeout o el corte al leer el cuerpo (en reqwest 0.12
+/// `bytes()` los envuelve así, de modo que `is_timeout()` solo lo ve por la cadena de causas y `is_body()` nunca es cierto).
+/// Solo un JSON mal formado (serde_json como causa) es una respuesta inválida; lo demás es transitorio.
+fn body_error(e: reqwest::Error) -> EmbedError {
+    let bad = std::error::Error::source(&e).is_some_and(|s| s.is::<serde_json::Error>());
+    let msg = e.without_url().to_string();
+    if bad { EmbedError::Bad(msg) } else { EmbedError::Unavailable(msg) }
+}
+
 pub struct OllamaEmbedder {
     cfg: OllamaEmbedConfig,
     http: reqwest::Client,
@@ -146,7 +155,7 @@ impl OllamaEmbedder {
             let msg = format!("HTTP {status}: {}", text.chars().take(200).collect::<String>());
             return Err(if status.is_server_error() { EmbedError::Unavailable(msg) } else { EmbedError::Bad(msg) });
         }
-        let parsed: EmbedResponse = resp.json().await.map_err(|e| EmbedError::Bad(e.without_url().to_string()))?;
+        let parsed: EmbedResponse = resp.json().await.map_err(body_error)?;
         if parsed.embeddings.len() != inputs.len() {
             return Err(EmbedError::Bad(format!("se pidieron {} vectores y llegaron {}", inputs.len(), parsed.embeddings.len())));
         }
@@ -255,7 +264,8 @@ mod tests {
             .route("/missing/api/embed", post(|| async { (StatusCode::NOT_FOUND, "model not found") }))
             .route("/boom/api/embed", post(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "x") }))
             .route("/short/api/embed", post(|| async { Json(json!({ "embeddings": [[1.0, 0.0]] })) }))
-            .route("/nan/api/embed", post(|| async { Json(json!({ "embeddings": [[0.0, 0.0]] })) }));
+            .route("/nan/api/embed", post(|| async { Json(json!({ "embeddings": [[0.0, 0.0]] })) }))
+            .route("/garbage/api/embed", post(|| async { "esto no es JSON" }));
         let url = serve(app).await;
         let go = |p: &str| {
             let e = OllamaEmbedder::new(OllamaEmbedConfig::new(&format!("{url}/{p}"), "m")).unwrap();
@@ -265,8 +275,35 @@ mod tests {
         assert!(matches!(go("boom").await, Err(EmbedError::Unavailable(_))));
         assert!(matches!(go("short").await, Err(EmbedError::Bad(_))));
         assert!(matches!(go("nan").await, Err(EmbedError::Bad(_))));
+        assert!(matches!(go("garbage").await, Err(EmbedError::Bad(_))), "un JSON inválido no se arregla reintentando");
         let down = OllamaEmbedder::new(OllamaEmbedConfig::new("http://127.0.0.1:1", "m")).unwrap();
         let err = down.embed(&["a".into()], EmbedKind::Document).await.unwrap_err();
         assert!(err.is_transient());
+    }
+
+    /// Servidor que promete 500 bytes de cuerpo, envía un trozo y luego corta (`stall = false`) o se queda callado.
+    async fn half_body(stall: bool) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            let _ = s.read(&mut [0u8; 4096]).await;
+            s.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 500\r\n\r\n{\"embeddings\":[[1.0,").await.unwrap();
+            if stall {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn a_cut_or_stalled_body_is_transient_not_bad() {
+        for stall in [false, true] {
+            let mut cfg = OllamaEmbedConfig::new(&half_body(stall).await, "m");
+            cfg.timeout = Duration::from_millis(300);
+            let err = OllamaEmbedder::new(cfg).unwrap().embed(&["a".into()], EmbedKind::Document).await.unwrap_err();
+            assert!(matches!(err, EmbedError::Unavailable(_)), "stall={stall}: {err:?}");
+        }
     }
 }

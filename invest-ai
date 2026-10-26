@@ -201,6 +201,7 @@ prepare_files() {
     warn ".env tenía permisos abiertos: ahora 600"
   fi
   load_settings
+  check_data_dir
   mkdir -p -- "$DATA_DIR"
   chmod 700 -- "$DATA_DIR"
   # El log del servidor no crece sin límite.
@@ -264,11 +265,19 @@ model_state() {
   return 0
 }
 
-# Descarga con `ollama pull` contra el Ollama de LLM_BASE_URL. Devuelve 1 si falla.
+# Nombre de modelo de Ollama: ASCII estricto (con LC_ALL=C; en es_ES.UTF-8 [A-Za-z] aceptaría «á») y sin «-» inicial.
+valid_model() { local LC_ALL=C; [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._/:-]*$ && ${#1} -le 200 ]]; }
+
+# Descarga con `ollama pull` contra el Ollama de LLM_BASE_URL. Devuelve 1 si falla. Es el ÚNICO punto que
+# valida el nombre (LLM_MODEL viene del entorno o de .env y ensure_model también llega aquí).
 pull_model() {
   local model=$1
+  if ! valid_model "$model"; then
+    warn "nombre de modelo no válido, no se descarga: $model"
+    return 1
+  fi
   info "Descargando el modelo $model en el Ollama de $LLM_BASE_URL"
-  if OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama pull "$model"; then
+  if OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama pull -- "$model"; then
     ok "modelo $model descargado"
     return 0
   fi
@@ -549,13 +558,15 @@ cmd_status() {
     printf 'servicio: instalado, activo=%s, autoarranque=%s\n' "$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)" "$(systemctl --user is-enabled "$SERVICE" 2>/dev/null || true)"
     local rel
     rel=$(installed_release || true)
-    if [[ -n $rel ]]; then
+    if [[ -z $rel ]]; then
+      printf '          %sla unidad ejecuta el árbol de trabajo (instalación antigua)%s: ./invest-ai install la pasa a una versión instalada\n' "$C_Y" "$C_0"
+    elif [[ ! -f $rel/VERSION ]]; then
+      printf '          %sla versión instalada %s no existe%s: repite ./invest-ai install (sin ella el servicio no arranca)\n' "$C_R" "$(basename -- "$rel")" "$C_0"
+    else
       printf '          versión instalada: %s (%s)\n' "$(basename -- "$rel")" "$(sed -n 's/^commit=//p' "$rel/VERSION" | head -n 1)"
       if [[ -x $BIN && -f $ROOT/frontend/dist/index.html && $(basename -- "$rel") != "$(release_id)" ]]; then
         printf '          %sel árbol de trabajo tiene otra build%s: ./invest-ai install la instala (y systemctl --user restart %s la aplica)\n' "$C_Y" "$C_0" "$SERVICE"
       fi
-    else
-      printf '          %sla unidad ejecuta el árbol de trabajo (instalación antigua)%s: ./invest-ai install la pasa a una versión instalada\n' "$C_Y" "$C_0"
     fi
   else
     printf 'servicio: no instalado (./invest-ai install)\n'
@@ -606,12 +617,12 @@ release_id() {
   } | sha256sum | cut -c1-12
 }
 
-# Carpeta de la versión a la que apunta la unidad instalada (vacío si apunta al árbol de trabajo).
+# Carpeta de la versión a la que apunta la unidad instalada (vacío si apunta al árbol de trabajo). La carpeta
+# puede no existir (borrada a mano): `status` lo distingue de una instalación antigua mirando su VERSION.
 installed_release() {
-  local exe dir
+  local exe
   exe=$(sed -n 's/^ExecStart=//p' "$UNIT_DIR/$SERVICE" 2>/dev/null | head -n 1 || true)
-  dir=${exe%/bin/invest-ai}
-  if [[ $exe == "$RELEASES_DIR"/*/bin/invest-ai && -f $dir/VERSION ]]; then printf '%s\n' "$dir"; fi
+  if [[ $exe == "$RELEASES_DIR"/*/bin/invest-ai ]]; then printf '%s\n' "${exe%/bin/invest-ai}"; fi
 }
 
 # Crea (o reutiliza, si el contenido es idéntico) releases/<id>/ y fija REL_*.
@@ -631,6 +642,8 @@ snapshot_release() {
   [[ ! -e $REL_DIR ]] || die "$REL_DIR existe pero está incompleto: bórralo (chmod -R u+w y rm -rf) y repite."
   mkdir -p -m 700 -- "$RELEASES_DIR"
   tmp=$(mktemp -d -- "$RELEASES_DIR/.tmp-XXXXXX")
+  # Si algo falla a mitad de la copia (set -e), no se deja el temporal. ${tmp@Q} se expande ya: la local no existe en el trap.
+  trap "rm -rf -- ${tmp@Q}" EXIT
   info "Instalando la versión $id en $REL_DIR"
   mkdir -p -- "$tmp/bin" "$tmp/frontend"
   install -m 755 -- "$BIN" "$tmp/bin/invest-ai"
@@ -647,24 +660,54 @@ snapshot_release() {
     printf 'instalada=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'proyecto=%s\n' "$ROOT"
   } >"$tmp/VERSION"
-  mv -T -- "$tmp" "$REL_DIR" || { rm -rf -- "${tmp:?}"; die "no se pudo crear $REL_DIR"; }
+  mv -T -- "$tmp" "$REL_DIR" || die "no se pudo crear $REL_DIR"
+  trap - EXIT
   chmod -R a-w -- "$REL_DIR" # inmutable
 }
 
-# Borra las versiones antiguas: se quedan la nueva, la que usaba la unidad hasta ahora y las 3 más recientes.
+# Nombres que `install` crea en releases/: la versión (12 hex de release_id) y el temporal de mktemp.
+# Clases explícitas: con un locale UTF-8, un rango como a-f puede aceptar letras con tilde.
+readonly REL_ID_RE='^[0123456789abcdef]{12}$' REL_TMP_RE='^\.tmp-[0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz]{6}$'
+
+# Borra una carpeta de releases/. Es el único sitio que hace chmod -R ahí, y solo sobre un hijo directo, sin
+# enlace y con nombre de versión o de temporal: chmod sigue los enlaces de la línea de órdenes.
+drop_release() { # drop_release RUTA
+  local d=$1 name=${1##*/}
+  [[ $d == "$RELEASES_DIR/$name" && ! -L $d && ( $name =~ $REL_ID_RE || $name =~ $REL_TMP_RE ) ]] || return 1
+  chmod -R -P u+w -- "$d" && rm -rf -- "${d:?}" # -P: no sigue un enlace que se cuele tras la comprobación
+}
+
+# Versión instalada que ejecuta el proceso principal del servicio (vacío si no corre ninguna): su
+# STATIC_DIR vive ahí y borrarla deja la UI en 404 hasta el siguiente reinicio.
+running_release() {
+  local pid exe
+  pid=$(systemctl --user show -p MainPID --value "$SERVICE" 2>/dev/null || true)
+  [[ $pid =~ ^[1-9][0-9]*$ ]] || return 0
+  exe=$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)
+  if [[ $exe == "$RELEASES_DIR"/*/bin/invest-ai ]]; then printf '%s\n' "${exe%/bin/invest-ai}"; fi
+}
+
+# Borra las versiones antiguas: se quedan la nueva, la que usaba la unidad hasta ahora, la del proceso en
+# marcha y las 3 más recientes. También los .tmp-* abandonados (de más de 1 h) por un install que murió.
+# Las listas van separadas por NUL: un nombre con saltos de línea no puede hacerse pasar por otra ruta.
 prune_releases() { # prune_releases VERSION_ANTERIOR(puede ser vacía)
-  local prev=${1-} d n=0
+  local prev=${1-} running d n=0
   [[ -d $RELEASES_DIR ]] || return 0
-  while IFS= read -r d; do
+  running=$(running_release || true)
+  while IFS= read -r -d '' d; do
+    [[ ${d##*/} =~ $REL_ID_RE ]] || continue # lo que no es una versión no es nuestro: no se cuenta ni se toca
     n=$((n + 1))
-    if (( n <= 3 )) || [[ $d == "$REL_DIR" || $d == "$prev" ]]; then continue; fi
-    [[ $(dirname -- "$d") == "$RELEASES_DIR" ]] || continue
-    if chmod -R u+w -- "$d" && rm -rf -- "${d:?}"; then
-      info "versión antigua borrada: $(basename -- "$d")"
+    if (( n <= 3 )) || [[ $d == "$REL_DIR" || $d == "$prev" || ( -n $running && $d -ef $running ) ]]; then continue; fi
+    if drop_release "$d"; then
+      info "versión antigua borrada: ${d##*/}"
     else
       warn "no se pudo borrar la versión antigua $d"
     fi
-  done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -not -name '.tmp-*' -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+  done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -not -name '.tmp-*' -printf '%T@ %p\0' | sort -rnz | cut -zd' ' -f2-)
+  while IFS= read -r -d '' d; do
+    if drop_release "$d"; then info "temporal abandonado borrado: ${d##*/}"; fi
+  done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -name '.tmp-*' -mmin +60 -print0)
+  return 0
 }
 
 render() { # render PLANTILLA DESTINO : sustituye @ROOT@, @BIN@, @SCRIPT@, @DIST@, @DATA@ y @OLLAMA@
@@ -672,6 +715,24 @@ render() { # render PLANTILLA DESTINO : sustituye @ROOT@, @BIN@, @SCRIPT@, @DIST
   ollama_bin="$(command -v ollama || printf /usr/bin/ollama)"
   sed -e "s|@ROOT@|$ROOT|g" -e "s|@BIN@|${REL_BIN:-$BIN}|g" -e "s|@SCRIPT@|${REL_SCRIPT:-$SELF_PATH}|g" \
     -e "s|@DIST@|${REL_DIST:-$ROOT/frontend/dist}|g" -e "s|@DATA@|$DATA_DIR|g" -e "s|@OLLAMA@|$ollama_bin|g" -- "$1" >"$2"
+}
+
+# La unidad da escritura (ReadWritePaths) a DATA_DIR: no puede ser `/` ni $HOME, ni cubrir el proyecto, las
+# versiones instaladas o las unidades, ni estar dentro de las versiones (un proceso comprometido reescribiría
+# su propio binario). prepare_files (run, dev, install…) lo comprueba antes de su mkdir y chmod 700 sobre DATA_DIR.
+check_data_dir() {
+  local data p
+  data=$(realpath -m -- "$DATA_DIR")
+  DATA_DIR=$data # normalizada: systemd ignora un ReadWritePaths con «..»
+  if [[ $data == / || $data == "$(realpath -m -- "${HOME:-/}")" || $data == "$(realpath -m -- "$RELEASES_DIR")"/* ]]; then
+    die "los datos ($DATA_DIR, de DATABASE_URL) no pueden ser / ni tu carpeta personal ni estar dentro de las versiones instaladas: usa una carpeta propia (por defecto data/ del proyecto)."
+  fi
+  for p in "$ROOT" "$RELEASES_DIR" "$UNIT_DIR"; do
+    p=$(realpath -m -- "$p")
+    if [[ $p == "$data" || $p == "$data"/* ]]; then
+      die "los datos ($DATA_DIR, de DATABASE_URL) contienen $p: el servicio podría escribir ahí; usa una carpeta propia (por defecto data/ del proyecto)."
+    fi
+  done
 }
 
 cmd_install() {
@@ -727,7 +788,7 @@ cmd_uninstall() {
   systemctl --user stop "$OLLAMA_SERVICE" 2>/dev/null || true
   rm -f -- "${UNIT_DIR:?}/$SERVICE" "${UNIT_DIR:?}/$OLLAMA_SERVICE" "${APP_DIR:?}/invest-ai.desktop" "${ICON_DIR:?}/invest-ai.svg"
   if [[ -d $RELEASES_DIR ]]; then
-    chmod -R u+w -- "$RELEASES_DIR" && rm -rf -- "${RELEASES_DIR:?}"
+    chmod -R -P u+w -- "$RELEASES_DIR" && rm -rf -- "${RELEASES_DIR:?}"
     rmdir --ignore-fail-on-non-empty -- "$(dirname -- "$RELEASES_DIR")" 2>/dev/null || true
   fi
   systemctl --user daemon-reload
@@ -777,7 +838,6 @@ cmd_pull() {
   load_settings
   have ollama || die "falta ollama (sudo pacman -S ollama)."
   model=${model:-$LLM_MODEL}
-  [[ $model =~ ^[A-Za-z0-9][A-Za-z0-9._/:-]*$ && ${#model} -le 200 ]] || die "nombre de modelo no válido: $model"
   ollama_up || die "Ollama no responde en $LLM_BASE_URL: arráncalo (sudo systemctl start ollama) y repite."
   model_state "$model" || rc=$?
   if (( rc == 0 )); then

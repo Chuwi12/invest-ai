@@ -79,6 +79,8 @@ pub struct KnowledgeBase {
     fts: AtomicBool,
     /// El último intento de calcular embeddings falló: sirve para avisar UNA vez por caída (y otra al recuperarse).
     embedder_down: AtomicBool,
+    /// Relleno léxico que lanzó `open` (solo si había algo que rellenar).
+    backfill: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 fn meta_of(d: &DocumentInfo) -> DocMeta {
@@ -151,17 +153,20 @@ impl KnowledgeBase {
             backoff_until: Mutex::new(None),
             fts: AtomicBool::new(fts),
             embedder_down: AtomicBool::new(false),
+            backfill: Mutex::new(None),
         });
-        if fts {
-            // Los fragmentos anteriores a la tabla se indexan en segundo plano y en tandas.
+        // Los fragmentos anteriores a la tabla se indexan en segundo plano y en tandas. Si no hay nada que
+        // rellenar (lo normal) no se lanza nada; si el recuento falla, que lo intente y avise el relleno.
+        if fts && kb.lexical_backlog().await.unwrap_or(true) {
             let bg = kb.clone();
-            tokio::spawn(async move {
+            let task = tokio::spawn(async move {
                 match bg.backfill_lexical().await {
                     Ok(0) => {}
                     Ok(n) => tracing::info!(n, "fragmentos añadidos al índice léxico"),
                     Err(e) => tracing::warn!(error = %e, "no se pudo completar el índice léxico"),
                 }
             });
+            *kb.backfill.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
         }
         Ok(kb)
     }
@@ -176,10 +181,28 @@ impl KnowledgeBase {
         self.fts.load(Ordering::Relaxed)
     }
 
-    fn disable_fts(&self, e: &dyn std::fmt::Display) {
-        if self.fts.swap(false, Ordering::Relaxed) {
+    /// Espera a que acabe el relleno léxico de `open` (si lo hubo): los tests no dependen de tiempos.
+    #[doc(hidden)]
+    pub async fn wait_backfill(&self) {
+        let task = self.backfill.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(task) = task {
+            let _ = task.await;
+        }
+    }
+
+    /// Un fallo de FTS5 apaga el índice léxico solo si no es transitorio: con BUSY/LOCKED el índice sigue activo
+    /// y lo que quedó sin indexar lo completa el próximo relleno.
+    fn fts_failed(&self, e: &KnowledgeError) {
+        if e.is_transient() {
+            tracing::warn!(error = %e, "FTS5 ocupada: el índice léxico sigue activo");
+        } else if self.fts.swap(false, Ordering::Relaxed) {
             tracing::warn!(error = %e, "FTS5 falló: se degrada a solo vectores hasta reiniciar");
         }
+    }
+
+    /// ¿Hay fragmentos sin indexar en FTS5?
+    async fn lexical_backlog(&self) -> Result<bool> {
+        Ok(store::fts_count(&self.pool).await? != store::total_chunks(&self.pool).await?)
     }
 
     /// Indexa en la tabla FTS5 los fragmentos que aún no están (primera vez o tras un fallo), en
@@ -188,7 +211,7 @@ impl KnowledgeBase {
         if !self.lexical_enabled() {
             return Ok(0);
         }
-        if store::fts_count(&self.pool).await? == store::total_chunks(&self.pool).await? {
+        if !self.lexical_backlog().await? {
             return Ok(0);
         }
         let (mut after, mut done) = (0i64, 0usize);
@@ -197,7 +220,7 @@ impl KnowledgeBase {
             let rows = store::chunks_after(&self.pool, after, 500).await?;
             let Some(last) = rows.last().map(|r| r.chunk_id) else { break };
             if let Err(e) = store::fts_reindex(&self.pool, &rows).await {
-                self.disable_fts(&e);
+                self.fts_failed(&e);
                 return Err(e);
             }
             after = last;
@@ -367,8 +390,8 @@ impl KnowledgeBase {
             )
             .await?;
             if fts && let Err(e) = store::fts_insert(&mut tx, cid, &d.text, doc.title.trim(), d.section.as_deref()).await {
-                // Un fallo de FTS5 no debe perder el documento: se sigue sin índice léxico.
-                self.disable_fts(&e);
+                // Un fallo de FTS5 no debe perder el documento: se sigue sin indexarlo (y sin FTS si no era transitorio).
+                self.fts_failed(&e);
                 fts = false;
             }
             match vectors.get(h) {
@@ -730,7 +753,7 @@ impl KnowledgeBase {
         let (documents, text_bytes, embedding_bytes) = store::sizes(&self.pool).await?;
         let chunks = store::total_chunks(&self.pool).await? as usize;
         let pending = store::count_pending(&self.pool, &self.model).await? as usize;
-        let lexical_indexed = if self.lexical_enabled() { store::fts_count(&self.pool).await.unwrap_or(0).max(0) as usize } else { 0 };
+        let lexical_indexed = if self.lexical_enabled() { store::fts_count(&self.pool).await?.max(0) as usize } else { 0 };
         let ix = self.index_read();
         Ok(Stats {
             documents: documents as usize,

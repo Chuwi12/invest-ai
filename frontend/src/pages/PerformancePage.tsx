@@ -292,7 +292,9 @@ function WatchlistPanel({ w }: { w: WatchlistStatus }) {
   return (
     <div className="stack">
       <div className="row wrap">
-        <span className="chip accent"><CalendarClock aria-hidden="true" /> Cada día a las {w.time}</span>
+        <span className="chip accent" title={`La pasada de cada día de bolsa se hace desde 30 min después del cierre de EE. UU. hasta la apertura siguiente. ${w.time} es la hora preferida dentro de esa ventana, no una hora fija.`}>
+          <CalendarClock aria-hidden="true" /> Cada día de bolsa tras el cierre de EE. UU. · preferida {w.time}
+        </span>
         <span className="chip">{w.assets.length} activos · profundidad {w.depth}</span>
         {w.running ? <span className="chip warn">Pasada en marcha</span> : null}
         <span className="small">
@@ -308,11 +310,14 @@ function WatchlistPanel({ w }: { w: WatchlistStatus }) {
       ) : null}
       {run ? (
         <p className="small">
-          Última pasada: <strong>{formatDateTime(run.startedAt)}</strong> · {run.ok} correctos{run.failed > 0 ? <>, <strong className="down">{run.failed} con fallo</strong></> : null}
-          {run.finishedAt ? <span className="muted"> · duró {formatSpan((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000)}</span> : null}
+          Última pasada: <strong>{formatDateTime(run.startedAt)}</strong>
+          {run.status === 'missed'
+            ? <span className="down"> · perdida: llegó la apertura sin completar la pasada (equipo apagado o Ollama sin responder)</span>
+            : <> · {run.ok} correctos{run.failed > 0 ? <>, <strong className="down">{run.failed} con fallo</strong></> : null}</>}
+          {run.finishedAt && run.status !== 'missed' ? <span className="muted"> · duró {formatSpan((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000)}</span> : null}
           {late ? <span className="muted"> · recuperada: tocaba a las {formatDateTime(run.scheduledFor)}</span> : null}
           {run.powerWaitSecs > 0 ? <span className="muted"> · esperó {formatSpan(run.powerWaitSecs)} a que se enchufara el equipo</span> : null}
-          {run.status === 'aborted' ? <span className="down"> · abortada (Ollama o el mercado no respondían); se reintenta</span> : null}
+          {run.status === 'aborted' ? <span className="down"> · abortada (Ollama o el mercado no respondían, o se cerró la ventana); lo pendiente se reintenta mientras siga abierta</span> : null}
           {run.status === 'interrupted' ? <span className="down"> · interrumpida al apagar el servidor</span> : null}
         </p>
       ) : (
@@ -332,7 +337,7 @@ function WatchlistPanel({ w }: { w: WatchlistStatus }) {
                   <td>
                     {a.last === null ? <span className="muted">Sin intentos</span>
                       : a.last.status === 'ok' ? <span className="up">Correcto</span>
-                      : a.last.status === 'skipped' ? <span className="muted">No intentado</span>
+                      : a.last.status === 'skipped' ? <span className="muted">{a.last.errorCode === 'missed' ? 'Ventana perdida' : 'No intentado'}</span>
                       : <span className="down">Falló</span>}
                     {a.last ? <span className="small muted"> · {formatRelative(a.last.finishedAt)}</span> : null}
                   </td>
@@ -340,7 +345,7 @@ function WatchlistPanel({ w }: { w: WatchlistStatus }) {
                   <td className="small">{a.lastOkAt ? formatDateTime(a.lastOkAt) : '—'}</td>
                   <td className="small muted">
                     {a.last?.error ? `${a.last.error}${a.last.transient ? ' (transitorio)' : ''}${a.last.attempts > 1 ? ` · ${a.last.attempts} intentos` : ''}` : ''}
-                    {a.last?.status === 'skipped' ? 'La pasada se abortó antes de llegar aquí.' : ''}
+                    {a.last?.status === 'skipped' && a.last.errorCode !== 'missed' ? 'La pasada se abortó o se cerró la ventana antes de llegar aquí.' : ''}
                   </td>
                 </tr>
               ))}

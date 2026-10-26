@@ -36,6 +36,9 @@ pub struct HorizonReport {
     pub horizon_weeks: u32,
     pub analyses_total: i64,
     pub resolved: i64,
+    /// De los `resolved`, filas que usan la entrada de la regla anterior porque no hay histórico para
+    /// recalcularlas (activo deslistado o que el proveedor ya no sirve). Cuentan en todas las métricas.
+    pub fallback_rows: i64,
     /// Resueltos tras quitar solapes del mismo activo.
     pub resolved_independent: usize,
     /// Han madurado pero aún no tienen resultado (por resolver, reintento o sin datos).
@@ -160,9 +163,12 @@ pub async fn performance_report(
                 .bind(mature_cut)
                 .fetch_one(db)
                 .await?;
-        let (resolved, skipped): (i64, i64) = sqlx::query_as(
-            "SELECT COALESCE(SUM(status='resolved'),0), COALESCE(SUM(status='skipped'),0)
-               FROM analysis_outcomes WHERE horizon_weeks = ?1 AND rule_version = ?2",
+        // Mismo criterio que `store::resolved_rows`: la versión vigente y, marcada, la vía de reserva.
+        let (resolved, skipped, fallback_rows): (i64, i64, i64) = sqlx::query_as(
+            "SELECT COALESCE(SUM(status='resolved' AND (rule_version = ?2 OR fallback_for = ?2)),0),
+                    COALESCE(SUM(status='skipped' AND rule_version = ?2),0),
+                    COALESCE(SUM(status='resolved' AND fallback_for = ?2),0)
+               FROM analysis_outcomes WHERE horizon_weeks = ?1",
         )
         .bind(i64::from(h))
         .bind(RULE_VERSION)
@@ -175,6 +181,7 @@ pub async fn performance_report(
             horizon_weeks: h,
             analyses_total: total,
             resolved,
+            fallback_rows,
             resolved_independent: independent,
             pending: (matured - resolved - skipped).max(0),
             not_matured: total - matured,
@@ -185,6 +192,17 @@ pub async fn performance_report(
             calibration,
         });
     }
+    let mut caveats = vec![
+        "Todos los activos comparten el mismo régimen de mercado: la muestra efectiva es mucho menor que el nº de análisis.".to_string(),
+        "Mantener/esperar acierta con una banda de ±2 %·√semanas: su tasa de acierto no es comparable con la de comprar/evitar sin mirar la tasa base.".into(),
+        "Los activos que nunca llegaron a tener resultado (sin precio posterior, excluidos de bolsa) no entran: sesgo de supervivencia en el lado optimista.".into(),
+    ];
+    let fallback: i64 = horizons.iter().map(|h| h.fallback_rows).sum();
+    if fallback > 0 {
+        caveats.push(format!(
+            "{fallback} resultados (entre todos los horizontes) usan la entrada de la regla anterior porque su activo ya no tiene histórico para recalcularlos: cuentan, pero su entrada no es la de la regla v{RULE_VERSION}."
+        ));
+    }
     Ok(PerformanceReport {
         generated_at: now,
         rule_version: RULE_VERSION,
@@ -192,10 +210,6 @@ pub async fn performance_report(
         horizons,
         active_weights: weights::active_version(db).await?,
         weight_history: weights::list_versions(db).await?,
-        caveats: vec![
-            "Todos los activos comparten el mismo régimen de mercado: la muestra efectiva es mucho menor que el nº de análisis.".into(),
-            "Mantener/esperar acierta con una banda de ±2 %·√semanas: su tasa de acierto no es comparable con la de comprar/evitar sin mirar la tasa base.".into(),
-            "Los activos sin precio posterior (excluidos de bolsa) no entran: sesgo de supervivencia en el lado optimista.".into(),
-        ],
+        caveats,
     })
 }

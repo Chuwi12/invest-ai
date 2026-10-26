@@ -6,7 +6,7 @@ const stats = (over: Partial<VerdictStats> = {}): VerdictStats => ({
   verdict: 'buy', n: 100, hits: 55, hitRate: 0.55, hitRateCi: [0.45, 0.65], meanExcess: 0.01, meanExcessCi: [-0.01, 0.03], clusters: 20, ...over,
 })
 const version = (over: Partial<WeightVersion> = {}): WeightVersion => ({
-  version: 1, kind: 'learned', status: 'active', multipliers: [1, 1, 1, 1, 1, 1, 1], factorNames: [], createdAtMs: 0, horizonWeeks: 4,
+  version: 1, ruleVersion: 2, kind: 'learned', status: 'active', multipliers: [1, 1, 1, 1, 1, 1, 1], factorNames: [], createdAtMs: 0, horizonWeeks: 4,
   trainedToMs: null, validatedFromMs: null, validatedToMs: null, nTrain: null, nVal: null, metrics: {}, parentVersion: null, note: null, ...over,
 })
 

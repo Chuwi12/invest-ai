@@ -2,7 +2,9 @@
 //! activo, del índice, exceso y acierto. Idempotente (las filas `resolved`/`skipped` de la versión
 //! vigente no se tocan), reanudable (tope de activos por pasada; lo que falta se hace en la siguiente) y
 //! barato (cero peticiones si nada ha madurado; una petición de histórico por activo y por benchmark).
-//! Las filas de una versión anterior de las reglas se vuelven a poner en cola (ver [`reopen_stale`]).
+//! Las filas de una versión anterior de las reglas se vuelven a poner en cola (ver [`reopen_stale`]) SIN
+//! borrar sus cifras: se archivan al sustituirlas y, si la regla nueva no se puede calcular de forma
+//! permanente, se quedan como vía de reserva (ver [`write_fallback`]).
 
 use std::collections::{BTreeMap, HashMap, hash_map::Entry};
 
@@ -53,6 +55,9 @@ pub struct ResolveReport {
     pub deferred_assets: usize,
     /// Filas de una versión anterior de las reglas que esta pasada ha vuelto a poner en cola.
     pub reopened: usize,
+    /// Filas que esta pasada ha dejado en la vía de reserva: la regla nueva no se pudo calcular de forma
+    /// permanente y conservan las cifras de la versión anterior (cuentan en las métricas, con marca).
+    pub fallback: usize,
 }
 
 /// Tope de lo que puede haber tardado un análisis en generarse para fiarse de `durationMs` (3 h).
@@ -90,11 +95,17 @@ struct Pair {
     head_idx: usize,
     horizon: u32,
     attempts: i64,
+    /// La fila conserva las cifras de una versión anterior (reabierta): no se pueden perder.
+    has_prev: bool,
 }
+
+/// (status, retry_after, attempts, conserva cifras de una versión anterior) de una fila ya escrita.
+type RowState = (String, Option<i64>, i64, bool);
 
 enum Written {
     Skipped,
     Retry,
+    Fallback,
 }
 
 /// Una pasada de resolución. `now` se inyecta para poder probar con el tiempo simulado.
@@ -133,14 +144,15 @@ pub async fn resolve_pending(
     }
 
     // Estado ya escrito: definitivas, o a la espera de reintento.
-    let existing: Vec<(String, i64, String, Option<i64>, i64)> = sqlx::query_as(
-        "SELECT analysis_id, horizon_weeks, status, retry_after, attempts FROM analysis_outcomes",
+    let existing: Vec<(String, i64, String, Option<i64>, i64, bool)> = sqlx::query_as(
+        "SELECT analysis_id, horizon_weeks, status, retry_after, attempts, entry_price IS NOT NULL
+           FROM analysis_outcomes",
     )
     .fetch_all(db)
     .await?;
-    let mut state: HashMap<(String, i64), (String, Option<i64>, i64)> = HashMap::new();
-    for (a, h, s, r, n) in existing {
-        state.insert((a, h), (s, r, n));
+    let mut state: HashMap<(String, i64), RowState> = HashMap::new();
+    for (a, h, s, r, n, prev) in existing {
+        state.insert((a, h), (s, r, n, prev));
     }
 
     let mut by_asset: BTreeMap<String, Vec<Pair>> = BTreeMap::new();
@@ -149,17 +161,18 @@ pub async fn resolve_pending(
             if h.generated_at + i64::from(hw) * week_ms + cfg.buffer_secs * 1000 > now_ms {
                 continue;
             }
-            let mut attempts = 0;
-            if let Some((status, retry_after, n)) = state.get(&(h.id.clone(), i64::from(hw))) {
+            let (mut attempts, mut has_prev) = (0, false);
+            if let Some((status, retry_after, n, prev)) = state.get(&(h.id.clone(), i64::from(hw))) {
                 if status != "retry" || retry_after.is_some_and(|r| r > now_ms) {
                     continue;
                 }
-                attempts = *n;
+                (attempts, has_prev) = (*n, *prev);
             }
             by_asset.entry(h.asset_id.clone()).or_default().push(Pair {
                 head_idx: i,
                 horizon: hw,
                 attempts,
+                has_prev,
             });
         }
     }
@@ -214,17 +227,15 @@ pub async fn resolve_pending(
         let bench = parsed.as_ref().ok().and_then(rules::benchmark_for);
         let (Ok(id), Some(bench)) = (parsed, bench) else {
             for p in &pairs {
-                let h = &heads[p.head_idx];
-                write_final(
+                let w = write_final(
                     db,
-                    h,
-                    p.horizon,
-                    "skipped",
+                    &heads[p.head_idx],
+                    p,
                     "sin benchmark definido para este activo",
                     now_ms,
                 )
                 .await?;
-                report.skipped += 1;
+                count(&mut report, w);
             }
             continue;
         };
@@ -232,17 +243,9 @@ pub async fn resolve_pending(
             Some(Ok(c)) => c,
             Some(Err(DomainError::NotFound(m))) => {
                 for p in &pairs {
-                    let h = &heads[p.head_idx];
-                    write_final(
-                        db,
-                        h,
-                        p.horizon,
-                        "skipped",
-                        &format!("activo sin histórico: {m}"),
-                        now_ms,
-                    )
-                    .await?;
-                    report.skipped += 1;
+                    let why = format!("activo sin histórico: {m}");
+                    let w = write_final(db, &heads[p.head_idx], p, &why, now_ms).await?;
+                    count(&mut report, w);
                 }
                 continue;
             }
@@ -252,10 +255,8 @@ pub async fn resolve_pending(
                     _ => "histórico no disponible".into(),
                 };
                 for p in &pairs {
-                    count(
-                        &mut report,
-                        write_retry(db, &heads[p.head_idx], p, &why, now_ms, cfg).await?,
-                    );
+                    let w = write_retry(db, &heads[p.head_idx], p, &why, now_ms, cfg, true).await?;
+                    count(&mut report, w);
                 }
                 continue;
             }
@@ -270,10 +271,9 @@ pub async fn resolve_pending(
                         _ => "benchmark no disponible".into(),
                     };
                     for p in &pairs {
-                        count(
-                            &mut report,
-                            write_retry(db, &heads[p.head_idx], p, &why, now_ms, cfg).await?,
-                        );
+                        let w =
+                            write_retry(db, &heads[p.head_idx], p, &why, now_ms, cfg, true).await?;
+                        count(&mut report, w);
                     }
                     continue;
                 }
@@ -298,13 +298,37 @@ pub async fn resolve_pending(
             ) {
                 Computation::NotYet => report.not_yet += 1,
                 Computation::NoData(why) => {
-                    count(&mut report, write_retry(db, h, p, &why, now_ms, cfg).await?)
+                    count(
+                        &mut report,
+                        write_retry(db, h, p, &why, now_ms, cfg, false).await?,
+                    )
                 }
                 Computation::Resolved(r) => {
                     let (factors, overall) = (m.factors.clone(), m.overall);
                     let verdict = rules::parse_verdict(&h.verdict);
                     let hit = verdict.map(|v| rules::is_hit(v, r.excess, p.horizon));
                     let class = id.class.as_str();
+                    // Archivo y sustitución en una transacción: las cifras de la versión anterior no se
+                    // pierden ni quedan a medias.
+                    let mut tx = db.begin().await?;
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO analysis_outcomes_archive
+                            (analysis_id, horizon_weeks, rule_version, superseded_by, archived_at, fallback_for, bench_id,
+                             bench_kind, entry_ts, exit_ts, entry_price, exit_price, bench_entry_price, bench_exit_price,
+                             asset_return, bench_return, excess_return, hit, factors, overall, resolved_at)
+                         SELECT analysis_id, horizon_weeks, rule_version, ?3, ?4, fallback_for, bench_id,
+                                bench_kind, entry_ts, exit_ts, entry_price, exit_price, bench_entry_price, bench_exit_price,
+                                asset_return, bench_return, excess_return, hit, factors, overall, resolved_at
+                           FROM analysis_outcomes
+                          WHERE analysis_id = ?1 AND horizon_weeks = ?2 AND status = 'retry'
+                            AND entry_price IS NOT NULL AND rule_version < ?3",
+                    )
+                    .bind(&h.id)
+                    .bind(i64::from(p.horizon))
+                    .bind(RULE_VERSION)
+                    .bind(now_ms)
+                    .execute(&mut *tx)
+                    .await?;
                     sqlx::query(
                         "INSERT INTO analysis_outcomes
                             (analysis_id, horizon_weeks, asset_id, asset_class, verdict, confidence, model, generated_at,
@@ -313,7 +337,7 @@ pub async fn resolve_pending(
                              asset_return, bench_return, excess_return, hit, factors, overall, resolved_at)
                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'resolved',NULL,?9,NULL,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)
                          ON CONFLICT(analysis_id, horizon_weeks) DO UPDATE SET
-                            status='resolved', note=NULL, retry_after=NULL, attempts=excluded.attempts,
+                            status='resolved', note=NULL, retry_after=NULL, attempts=excluded.attempts, fallback_for=NULL,
                             rule_version=excluded.rule_version, bench_id=excluded.bench_id, bench_kind=excluded.bench_kind,
                             entry_ts=excluded.entry_ts, exit_ts=excluded.exit_ts, entry_price=excluded.entry_price,
                             exit_price=excluded.exit_price, bench_entry_price=excluded.bench_entry_price,
@@ -348,8 +372,9 @@ pub async fn resolve_pending(
                     .bind(factors)
                     .bind(overall)
                     .bind(now_ms)
-                    .execute(db)
+                    .execute(&mut *tx)
                     .await?;
+                    tx.commit().await?;
                     report.resolved += 1;
                 }
             }
@@ -368,6 +393,7 @@ fn count(r: &mut ResolveReport, w: Written) {
     match w {
         Written::Skipped => r.skipped += 1,
         Written::Retry => r.retry += 1,
+        Written::Fallback => r.fallback += 1,
     }
 }
 
@@ -418,72 +444,95 @@ async fn analysis_meta(db: &SqlitePool, h: &AnalysisHead) -> AnalysisMeta {
 }
 
 /// Subir `RULE_VERSION` cambia lo que significa una fila ya etiquetada (aquí, qué precio es la entrada):
-/// las `resolved` y `skipped` de una versión anterior pasan a `retry` con la versión vigente y se
-/// recalculan en esta pasada o en las siguientes (con el mismo tope de activos), así el historial
-/// medido con la regla antigua no se pierde ni se mezcla. Se borran sus cifras para que ninguna fila
-/// `skipped` conserve un resultado de la regla anterior. Las `retry` solo cambian de versión. Las
-/// estadísticas y el panel leen únicamente filas de la versión vigente, así que mientras dura el
-/// recálculo ven una muestra parcial pero nunca mezclada, y lo que falta cuenta como «pendiente».
-/// Idempotente. Devuelve cuántas filas se reabrieron.
+/// las `resolved` y `skipped` de una versión anterior pasan a `retry` y se recalculan en esta pasada o en
+/// las siguientes (con el mismo tope de activos). **No se borra nada**: las cifras y la `rule_version` de la
+/// fila siguen donde estaban hasta que la versión nueva se haya calculado bien (entonces se archivan y se
+/// sustituyen en una transacción) o, si no se puede calcular de forma permanente, se quedan como vía de
+/// reserva ([`write_fallback`]). Las estadísticas y el panel solo cuentan filas de la versión vigente (o
+/// en vía de reserva), así que mientras dura el recálculo ven una muestra parcial pero nunca mezclada, y lo
+/// que falta cuenta como «pendiente». Idempotente: lo reabierto ya es `retry` y lo que está en la vía de
+/// reserva para esta versión no se toca (la siguiente subida sí lo reabre). Devuelve cuántas filas se reabrieron.
 async fn reopen_stale(db: &SqlitePool) -> Result<usize, LearningError> {
     let reopened = sqlx::query(
         "UPDATE analysis_outcomes
-            SET status = 'retry', retry_after = NULL, attempts = 0, rule_version = ?1,
-                note = 'recalculando con la regla v' || ?1,
-                bench_id = NULL, bench_kind = NULL, entry_ts = NULL, exit_ts = NULL, entry_price = NULL,
-                exit_price = NULL, bench_entry_price = NULL, bench_exit_price = NULL, asset_return = NULL,
-                bench_return = NULL, excess_return = NULL, hit = NULL
-          WHERE rule_version < ?1 AND status IN ('resolved', 'skipped')",
+            SET status = 'retry', retry_after = NULL, attempts = 0,
+                note = 'recalculando con la regla v' || ?1
+          WHERE rule_version < ?1 AND status IN ('resolved', 'skipped') AND COALESCE(fallback_for, 0) < ?1",
     )
     .bind(RULE_VERSION)
     .execute(db)
     .await?
     .rows_affected();
-    sqlx::query(
-        "UPDATE analysis_outcomes SET rule_version = ?1 WHERE rule_version < ?1 AND status = 'retry'",
-    )
-    .bind(RULE_VERSION)
-    .execute(db)
-    .await?;
     Ok(usize::try_from(reopened).unwrap_or(usize::MAX))
 }
 
-/// Fila definitiva sin precios (`skipped`). No pisa una fila ya escrita salvo `retry`.
+/// Fallo PERMANENTE (activo sin histórico, sin benchmark): la regla vigente no se puede calcular. Sin cifras
+/// anteriores la fila queda `skipped`; con ellas se queda en la vía de reserva y no sale de las métricas.
+/// No pisa una fila ya escrita salvo `retry`.
 async fn write_final(
     db: &SqlitePool,
     h: &AnalysisHead,
-    horizon: u32,
-    status: &str,
+    p: &Pair,
     note: &str,
     now_ms: i64,
-) -> Result<(), LearningError> {
+) -> Result<Written, LearningError> {
+    if p.has_prev {
+        return write_fallback(db, h, p, note).await;
+    }
     let class = h.asset_id.split_once(':').map_or("other", |(c, _)| c);
     sqlx::query(
         "INSERT INTO analysis_outcomes (analysis_id, horizon_weeks, asset_id, asset_class, verdict, confidence, model,
                                         generated_at, status, note, rule_version, resolved_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'skipped',?9,?10,?11)
          ON CONFLICT(analysis_id, horizon_weeks) DO UPDATE SET status=excluded.status, note=excluded.note,
             retry_after=NULL, rule_version=excluded.rule_version, resolved_at=excluded.resolved_at
          WHERE analysis_outcomes.status = 'retry'",
     )
     .bind(&h.id)
-    .bind(i64::from(horizon))
+    .bind(i64::from(p.horizon))
     .bind(&h.asset_id)
     .bind(class)
     .bind(&h.verdict)
     .bind(h.confidence)
     .bind(&h.model)
     .bind(h.generated_at)
-    .bind(status)
     .bind(note)
     .bind(RULE_VERSION)
     .bind(now_ms)
     .execute(db)
     .await?;
-    Ok(())
+    Ok(Written::Skipped)
 }
 
-/// Reintento con retroceso exponencial (6 h · 2^intentos, tope 7 días); al agotarlos, `skipped`.
+/// Vía de reserva: la fila vuelve a `resolved` con las cifras de la versión anterior (no se tocan, ni su
+/// `rule_version`), marcada con `fallback_for` = la versión vigente y una nota explícita. Así el activo
+/// deslistado cuya pérdida ya estaba medida no desaparece de las métricas (sesgo de supervivencia). Una sola
+/// sentencia: atómica. No reintenta por su cuenta: la siguiente subida de versión la reabre.
+async fn write_fallback(
+    db: &SqlitePool,
+    h: &AnalysisHead,
+    p: &Pair,
+    why: &str,
+) -> Result<Written, LearningError> {
+    sqlx::query(
+        "UPDATE analysis_outcomes
+            SET status = 'resolved', fallback_for = ?3, retry_after = NULL,
+                note = 'entrada de la regla anterior (v' || rule_version || '), sin histórico para recalcular: ' || ?4
+          WHERE analysis_id = ?1 AND horizon_weeks = ?2 AND status = 'retry' AND entry_price IS NOT NULL",
+    )
+    .bind(&h.id)
+    .bind(i64::from(p.horizon))
+    .bind(RULE_VERSION)
+    .bind(why)
+    .execute(db)
+    .await?;
+    Ok(Written::Fallback)
+}
+
+/// Reintento con retroceso exponencial (6 h · 2^intentos, tope 7 días); al agotarlos, `skipped`; o, si la
+/// fila conserva cifras de una versión anterior, la vía de reserva. Un fallo `transient` (red, límites, el
+/// proveedor caído) NO agota los intentos de una fila con cifras anteriores: espera con el retroceso máximo y
+/// sigue intentándolo, porque no es una prueba de que el histórico no exista.
 async fn write_retry(
     db: &SqlitePool,
     h: &AnalysisHead,
@@ -491,10 +540,14 @@ async fn write_retry(
     why: &str,
     now_ms: i64,
     cfg: &ResolveConfig,
+    transient: bool,
 ) -> Result<Written, LearningError> {
     let attempts = p.attempts + 1;
-    if attempts >= cfg.max_attempts {
+    if attempts >= cfg.max_attempts && !(p.has_prev && transient) {
         let note = format!("sin datos tras {attempts} intentos: {why}");
+        if p.has_prev {
+            return write_fallback(db, h, p, &note).await;
+        }
         sqlx::query(
             "INSERT INTO analysis_outcomes (analysis_id, horizon_weeks, asset_id, asset_class, verdict, confidence, model,
                                             generated_at, status, note, attempts, rule_version, resolved_at)
@@ -521,12 +574,14 @@ async fn write_retry(
         return Ok(Written::Skipped);
     }
     let wait = (6 * 3600i64 * (1i64 << attempts.min(10))).min(7 * 86_400) * 1000;
+    // Al actualizar una fila `retry` existente no se tocan `rule_version` ni `resolved_at`: si conserva
+    // cifras de una versión anterior, siguen siendo las de esa versión.
     sqlx::query(
         "INSERT INTO analysis_outcomes (analysis_id, horizon_weeks, asset_id, asset_class, verdict, confidence, model,
                                         generated_at, status, note, attempts, retry_after, rule_version, resolved_at)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'retry',?9,?10,?11,?12,?13)
          ON CONFLICT(analysis_id, horizon_weeks) DO UPDATE SET note=excluded.note, attempts=excluded.attempts,
-            retry_after=excluded.retry_after, rule_version=excluded.rule_version, resolved_at=excluded.resolved_at
+            retry_after=excluded.retry_after
          WHERE analysis_outcomes.status = 'retry'",
     )
     .bind(&h.id)
