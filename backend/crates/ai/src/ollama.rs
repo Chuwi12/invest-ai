@@ -8,6 +8,10 @@
 //! Timeouts: la conexión tiene 5 s; las llamadas cortas (`tags`, `show`, `ps`, `delete`) 10 s en
 //! total; las largas (chat, pull) solo tienen «tiempo máximo sin recibir bytes» (`read_timeout`),
 //! porque una respuesta de varios minutos es normal pero un servidor mudo no.
+//!
+//! Tamaños: Ollama no comprime, así que el cliente no descomprime nunca (sin bombas gzip/brotli) y todo
+//! cuerpo se lee por trozos con tope: `MAX_BODY_BYTES` en las respuestas no streaming y, en los streams NDJSON,
+//! `MAX_LINE_BYTES` por línea y `MAX_CHAT_STREAM_BYTES` en total (el pull no lo lleva: no acumula nada).
 
 use std::{
     collections::HashMap,
@@ -18,7 +22,7 @@ use std::{
 use domain::{DomainError, PullEvent};
 use futures::{Stream, StreamExt, stream::BoxStream};
 use reqwest::{Client, StatusCode};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 use crate::think::{Piece, ThinkSplitter};
@@ -26,6 +30,12 @@ use crate::think::{Piece, ThinkSplitter};
 const SHORT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Una línea NDJSON de Ollama nunca debería acercarse a esto; protege la memoria.
 const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
+/// Tope de un cuerpo no streaming (`tags`, `show`, `ps` y mensajes de error). Lo real son KB (`show` sin `verbose`, con
+/// licencia y plantilla, ronda 1 MB); aunque incluyera el vocabulario del tokenizador (varios MB) cabría de sobra.
+const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// Tope total de un chat en streaming. Cada token viaja en una línea de ~150 B; con el máximo de `num_ctx` (262 144 tokens,
+/// `config.rs`) una generación entera pesa unos 40 MB. 128 MiB deja más de 3× de margen y acota lo que `chat()` agrega.
+const MAX_CHAT_STREAM_BYTES: usize = 128 * 1024 * 1024;
 
 /// Cuánto dura la desconfianza hacia «forzar GPU» de un modelo tras un fallo de memoria: durante este
 /// tiempo se pide el reparto automático sin volver a intentarlo (cada intento fallido cuesta una carga).
@@ -263,6 +273,10 @@ pub struct RunningModel {
 impl OllamaClient {
     pub fn new(base_url: &str, read_timeout: Duration) -> Result<Self, DomainError> {
         let http = Client::builder()
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
             .connect_timeout(Duration::from_secs(5))
             .read_timeout(read_timeout)
             .pool_idle_timeout(Duration::from_secs(60))
@@ -357,7 +371,7 @@ impl OllamaClient {
                 .await
                 .map_err(map_reqwest)?;
             let resp = check_status(resp, &params.model).await?;
-            let mut lines = ndjson(resp.bytes_stream());
+            let mut lines = ndjson(resp.bytes_stream(), MAX_CHAT_STREAM_BYTES);
             let mut splitter = ThinkSplitter::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
             while let Some(line) = lines.next().await {
@@ -433,7 +447,7 @@ impl OllamaClient {
         }
         let resp = self.http.get(self.url("/api/tags")).timeout(SHORT_TIMEOUT).send().await.map_err(map_reqwest)?;
         let resp = check_status(resp, "").await?;
-        Ok(resp.json::<Tags>().await.map_err(map_reqwest)?.models)
+        Ok(read_json::<Tags>(resp).await?.models)
     }
 
     pub async fn show(&self, model: &str) -> Result<ShowInfo, DomainError> {
@@ -446,7 +460,7 @@ impl OllamaClient {
             .await
             .map_err(map_reqwest)?;
         let resp = check_status(resp, model).await?;
-        resp.json().await.map_err(map_reqwest)
+        read_json(resp).await
     }
 
     /// Modelos cargados en memoria ahora mismo.
@@ -458,7 +472,7 @@ impl OllamaClient {
         }
         let resp = self.http.get(self.url("/api/ps")).timeout(SHORT_TIMEOUT).send().await.map_err(map_reqwest)?;
         let resp = check_status(resp, "").await?;
-        Ok(resp.json::<Ps>().await.map_err(map_reqwest)?.models)
+        Ok(read_json::<Ps>(resp).await?.models)
     }
 
     pub async fn delete(&self, model: &str) -> Result<(), DomainError> {
@@ -493,7 +507,8 @@ impl OllamaClient {
                 },
                 Err(e) => { yield PullEvent::Error { message: map_reqwest(e).to_string() }; return; }
             };
-            let mut lines = ndjson(resp.bytes_stream());
+            // Sin tope total: no acumula nada y una descarga larga emite ~17 líneas/s; solo importa el tope por línea.
+            let mut lines = ndjson(resp.bytes_stream(), usize::MAX);
             while let Some(line) = lines.next().await {
                 let line = match line {
                     Ok(l) => l,
@@ -576,7 +591,11 @@ async fn check_status(resp: reqwest::Response, model: &str) -> Result<reqwest::R
     if status.is_success() {
         return Ok(resp);
     }
-    let text = resp.text().await.unwrap_or_default();
+    // Un cuerpo ilegible o enorme va en el mensaje, pero manda el código HTTP (404 → NotFound, 400 → InvalidInput).
+    let text = match read_limited(resp, MAX_BODY_BYTES).await {
+        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+        Err(e) => e.to_string(),
+    };
     let msg = serde_json::from_str::<Value>(&text)
         .ok()
         .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_owned))
@@ -589,24 +608,57 @@ async fn check_status(resp: reqwest::Response, model: &str) -> Result<reqwest::R
     })
 }
 
-/// Parte un stream de bytes en líneas NDJSON no vacías, sin copiar más de lo necesario.
+/// Lee el cuerpo por trozos y aborta en cuanto pasa de `max` bytes (mismo patrón que `market::http::read_limited`;
+/// `market` no es dependencia de este crate). Sin descompresión, `max` cuenta lo que llega por el cable.
+async fn read_limited(mut resp: reqwest::Response, max: usize) -> Result<Vec<u8>, DomainError> {
+    if resp.content_length().is_some_and(|n| n > max as u64) {
+        return Err(upstream("respuesta demasiado grande".into()));
+    }
+    let mut buf = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(map_reqwest)? {
+        if buf.len() + chunk.len() > max {
+            return Err(upstream("respuesta demasiado grande".into()));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
+}
+
+/// JSON de una respuesta no streaming, con tope de tamaño.
+async fn read_json<T: DeserializeOwned>(resp: reqwest::Response) -> Result<T, DomainError> {
+    serde_json::from_slice(&read_limited(resp, MAX_BODY_BYTES).await?).map_err(|e| upstream(format!("respuesta no válida: {e}")))
+}
+
+/// Parte un stream de bytes en líneas NDJSON no vacías. Aborta si una línea pasa de `MAX_LINE_BYTES` o el stream
+/// entero de `max_total`: un servidor roto u hostil no puede alargarlo sin fin.
 fn ndjson(
     bytes: impl Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
+    max_total: usize,
 ) -> BoxStream<'static, Result<Vec<u8>, DomainError>> {
     let s = async_stream::try_stream! {
         let mut bytes = Box::pin(bytes);
         let mut buf: Vec<u8> = Vec::new();
+        let mut total = 0usize;
         while let Some(chunk) = bytes.next().await {
-            buf.extend_from_slice(&chunk.map_err(map_reqwest)?);
-            while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-                let line: Vec<u8> = buf.drain(..=pos).collect();
-                let trimmed = line.trim_ascii();
-                if !trimmed.is_empty() {
-                    yield trimmed.to_vec();
-                }
+            let chunk = chunk.map_err(map_reqwest)?;
+            total = total.saturating_add(chunk.len());
+            if total > max_total {
+                Err(upstream("respuesta demasiado grande".into()))?;
             }
-            if buf.len() > MAX_LINE_BYTES {
-                Err(upstream("línea de respuesta demasiado grande".into()))?;
+            // Solo se recorre el trozo nuevo (una línea enorme en trozos pequeños no cuesta O(n²)) y el tope se
+            // comprueba antes de copiar, así que `buf` nunca pasa de `MAX_LINE_BYTES`.
+            for part in chunk.split_inclusive(|&b| b == b'\n') {
+                if buf.len() + part.len() > MAX_LINE_BYTES {
+                    Err(upstream("línea de respuesta demasiado grande".into()))?;
+                }
+                buf.extend_from_slice(part);
+                if buf.ends_with(b"\n") {
+                    let line = std::mem::take(&mut buf);
+                    let trimmed = line.trim_ascii();
+                    if !trimmed.is_empty() {
+                        yield trimmed.to_vec();
+                    }
+                }
             }
         }
         let rest = buf.trim_ascii();

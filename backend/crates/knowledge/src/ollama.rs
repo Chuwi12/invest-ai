@@ -101,13 +101,25 @@ impl OllamaEmbedConfig {
     }
 }
 
-/// `Response::json` etiqueta como `decode` TODO fallo: también el timeout o el corte al leer el cuerpo (en reqwest 0.12
-/// `bytes()` los envuelve así, de modo que `is_timeout()` solo lo ve por la cadena de causas y `is_body()` nunca es cierto).
-/// Solo un JSON mal formado (serde_json como causa) es una respuesta inválida; lo demás es transitorio.
-fn body_error(e: reqwest::Error) -> EmbedError {
-    let bad = std::error::Error::source(&e).is_some_and(|s| s.is::<serde_json::Error>());
-    let msg = e.without_url().to_string();
-    if bad { EmbedError::Bad(msg) } else { EmbedError::Unavailable(msg) }
+/// Tope del cuerpo de respuesta (2xx y error): una real, de 16 vectores × 4096 floats, ronda 1 MB.
+const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+/// Lee el cuerpo por trozos y aborta al pasar de `MAX_BODY_BYTES` (mismo patrón que `market::http::read_limited`;
+/// `market` no es dependencia de este crate). Pasarse es `Bad` (reintentar no lo arregla); un corte o un timeout a
+/// mitad de cuerpo es transitorio. Con `Response::json` los dos serían «decode», de ahí que se parsee aparte.
+async fn read_limited(mut resp: reqwest::Response) -> Result<Vec<u8>, EmbedError> {
+    let too_big = || EmbedError::Bad(format!("respuesta demasiado grande (más de {MAX_BODY_BYTES} bytes)"));
+    if resp.content_length().is_some_and(|n| n > MAX_BODY_BYTES as u64) {
+        return Err(too_big());
+    }
+    let mut buf = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| EmbedError::Unavailable(e.without_url().to_string()))? {
+        if buf.len() + chunk.len() > MAX_BODY_BYTES {
+            return Err(too_big());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
 }
 
 pub struct OllamaEmbedder {
@@ -122,7 +134,12 @@ struct EmbedResponse {
 
 impl OllamaEmbedder {
     pub fn new(cfg: OllamaEmbedConfig) -> Result<Self, EmbedError> {
+        // Ollama no comprime: sin descompresión una bomba gzip/brotli no se expande (aunque otro crate active las features).
         let http = reqwest::Client::builder()
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
             .connect_timeout(Duration::from_secs(3))
             .timeout(cfg.timeout)
             .build()
@@ -150,12 +167,12 @@ impl OllamaEmbedder {
         if status == reqwest::StatusCode::NOT_FOUND {
             return Err(EmbedError::ModelMissing(self.cfg.model.clone()));
         }
+        let body = read_limited(resp).await?;
         if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            let msg = format!("HTTP {status}: {}", text.chars().take(200).collect::<String>());
+            let msg = format!("HTTP {status}: {}", String::from_utf8_lossy(&body).chars().take(200).collect::<String>());
             return Err(if status.is_server_error() { EmbedError::Unavailable(msg) } else { EmbedError::Bad(msg) });
         }
-        let parsed: EmbedResponse = resp.json().await.map_err(body_error)?;
+        let parsed: EmbedResponse = serde_json::from_slice(&body).map_err(|e| EmbedError::Bad(format!("JSON no válido: {e}")))?;
         if parsed.embeddings.len() != inputs.len() {
             return Err(EmbedError::Bad(format!("se pidieron {} vectores y llegaron {}", inputs.len(), parsed.embeddings.len())));
         }
@@ -304,6 +321,63 @@ mod tests {
             cfg.timeout = Duration::from_millis(300);
             let err = OllamaEmbedder::new(cfg).unwrap().embed(&["a".into()], EmbedKind::Document).await.unwrap_err();
             assert!(matches!(err, EmbedError::Unavailable(_)), "stall={stall}: {err:?}");
+        }
+    }
+
+    /// Servidor que responde `head` y luego `n` bytes en trozos de 64 KiB (chunked, sin `Content-Length`) hasta que el cliente corta.
+    async fn flood(head: &str, n: usize) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let head = head.to_owned();
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            let _ = s.read(&mut [0u8; 4096]).await;
+            if s.write_all(head.as_bytes()).await.is_err() {
+                return;
+            }
+            let chunk = vec![b' '; 0x10000];
+            for _ in 0..n / chunk.len() {
+                if s.write_all(b"10000\r\n").await.is_err() || s.write_all(&chunk).await.is_err() || s.write_all(b"\r\n").await.is_err() {
+                    return;
+                }
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    async fn embed_one(url: &str) -> Result<Vec<Vec<f32>>, EmbedError> {
+        OllamaEmbedder::new(OllamaEmbedConfig::new(url, "m")).unwrap().embed(&["a".into()], EmbedKind::Document).await
+    }
+
+    #[tokio::test]
+    async fn a_body_over_the_cap_is_bad_not_transient() {
+        const CHUNKED: &str = "transfer-encoding: chunked\r\n\r\n";
+        let over = MAX_BODY_BYTES + 0x100000;
+        for head in [
+            format!("HTTP/1.1 200 OK\r\n{CHUNKED}"),
+            // Lo que se cuenta es lo que llega: aunque se anuncie gzip no se descomprime.
+            format!("HTTP/1.1 200 OK\r\ncontent-encoding: gzip\r\n{CHUNKED}"),
+            format!("HTTP/1.1 400 Bad Request\r\n{CHUNKED}"),
+            format!("HTTP/1.1 500 Internal Server Error\r\n{CHUNKED}"),
+        ] {
+            let err = embed_one(&flood(&head, over).await).await.unwrap_err();
+            assert!(matches!(&err, EmbedError::Bad(m) if m.contains("demasiado grande")), "{head:?}: {err:?}");
+        }
+        // Con `Content-Length` enorme se rechaza sin leer nada (el servidor cierra sin enviar cuerpo).
+        let head = format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n", MAX_BODY_BYTES + 1);
+        let err = embed_one(&flood(&head, 0).await).await.unwrap_err();
+        assert!(matches!(&err, EmbedError::Bad(m) if m.contains("demasiado grande")), "{err:?}");
+    }
+
+    /// Ollama no comprime: el cliente no descomprime nunca (un `Content-Encoding` hostil no puede disparar una bomba).
+    /// Si la descompresión estuviera activa, reqwest intentaría expandir este JSON plano y fallaría.
+    #[tokio::test]
+    async fn content_encoding_is_not_decoded() {
+        for enc in ["gzip", "br"] {
+            let app = Router::new().route("/api/embed", post(move || async move { ([("content-encoding", enc)], r#"{"embeddings":[[3.0,4.0]]}"#) }));
+            let out = embed_one(&serve(app).await).await.unwrap_or_else(|e| panic!("{enc}: {e}"));
+            assert_eq!(out.len(), 1);
         }
     }
 }

@@ -273,9 +273,17 @@ degrada a vectores sin perder el documento; borrado, actualización y purga mant
   `spawn_news_worker` dejó de depender de `stats()`: llama directamente a `embed_pending` (que sale enseguida si no hay pendientes).
 - `OllamaEmbedder`: `Response::json` de reqwest 0.12 marca como `decode` TODO fallo (también el corte o el timeout al leer el cuerpo), así que
   `is_body()` nunca es cierto ahí. Solo un JSON mal formado (causa `serde_json::Error`) es `Bad` (pausa de 300 s); el resto es `Unavailable` (30 s).
+  Hoy el cuerpo se lee aparte con `read_limited` (ver «Tope del cuerpo de respuesta») y se parsea con `serde_json`: mismo reparto de errores, sin `Response::json`.
 - Medición (hybrid y archive, 4 instancias en paralelo, `timeout 60`): antes 2 fallos en 2 000 ejecuciones del test afectado (`hybrid.rs:182`,
   `lexical_indexed = 0`); después 0 en 6 000 (3 000 del binario `hybrid` entero, 1 000 de `archive`, 2 000 del test afectado) y 0 cuelgues.
   El cuelgue de ~10 min visto una vez no se reprodujo ni antes ni después: su causa no está confirmada.
+
+### Tope del cuerpo de respuesta (26-oct-2026)
+- `OllamaEmbedder` no descomprime (`.no_gzip().no_brotli()`: Ollama no comprime y una bomba gzip/brotli de un servidor ajeno agotaba la
+  memoria) y lee el cuerpo por trozos con un tope de **32 MiB** en 2xx y en errores; una respuesta real (16 × 4096 floats) ronda 1 MB.
+  Pasarse es `EmbedError::Bad` (no se arregla reintentando, pausa de 300 s); un corte o un timeout a mitad de cuerpo sigue siendo `Unavailable`.
+- Solo importa si `RAG_EMBED_BASE_URL` apunta a un Ollama ajeno o si otro proceso ocupa `127.0.0.1:11434`. Detalle, pruebas y mediciones en
+  `security.md` («Auditoría verificada (2026-10-26)»). Si algún día un modelo devolviera lotes de más de 32 MiB, subir `MAX_BODY_BYTES` en `knowledge/src/ollama.rs`.
 
 ## Pendiente / límites
 - **Medido con Ollama real**: velocidad, VRAM y calidad con/sin RAG (ver «Medición real»). **Sigue sin medirse**: calidad de recuperación es↔en

@@ -474,6 +474,53 @@ arreglo: falla.
   ya podía mandar cualquier cabecera). No se valida `Forwarded` ni `X-Forwarded-Host`: la app no está pensada para
   ir detrás de un proxy.
 
+## Auditoría verificada (2026-10-26): respuestas de Ollama sin tope de tamaño
+
+Commit: pendiente (no se ha hecho commit).
+
+### Los clientes de Ollama leían el cuerpo entero y descomprimían gzip/brotli — BAJA  (VERIFICADO por la auditoría; arreglo probado)
+
+- Componente: `knowledge/src/ollama.rs` (`embed_batch`: `Response::json()` y `Response::text()` sin tope, con un cliente
+  que descomprime gzip y brotli porque el workspace activa esas features) y `ai/src/ollama.rs`. En `ai` la sospecha de la
+  auditoría resultó cierta: mismas features, `tags`/`show`/`ps` con `Response::json()` y `check_status` con `text()` sin
+  tope; el stream NDJSON tenía tope por línea (8 MiB) pero se comprobaba después de sacar las líneas completas, no había
+  tope total y se rebuscaba el `\n` en TODO el búfer en cada trozo (coste cuadrático con una línea enorme en trozos pequeños).
+- Solo es explotable si `LLM_BASE_URL` o `RAG_EMBED_BASE_URL` apuntan a un Ollama ajeno, o si otro proceso ocupa
+  `127.0.0.1:11434`. Defensa en profundidad, no urgente.
+- Medido por la auditoría: 521 879 bytes de gzip se convirtieron en 512 MiB, con un pico de 1 GB en una sola llamada a
+  `embed()`. Reproducido aquí con una bomba de 521 844 bytes: un cliente `reqwest` con gzip activo la expande a 512 MiB.
+- Arreglo (patrón de `market::http::read_limited`, S-07):
+  1. Los dos clientes llevan `.no_gzip().no_brotli()`: Ollama no comprime. El método existe aunque la feature no esté
+     activa, así que no depende de qué crates se compilen juntos.
+  2. `knowledge`: `read_limited` lee por trozos con `MAX_BODY_BYTES` = **32 MiB** en 2xx y en errores (una respuesta real,
+     16 vectores × 4096 floats, ronda 1 MB). Pasarse es `EmbedError::Bad`; un corte o un timeout a mitad de cuerpo sigue
+     siendo `Unavailable`. El JSON se parsea aparte con `serde_json` (`Bad` si no es válido), igual que antes.
+  3. `ai`: `read_limited`/`read_json` con `MAX_BODY_BYTES` = **16 MiB** en `tags`, `show`, `ps` y errores (lo real son KB;
+     `show` sin `verbose` ronda 1 MB). `ndjson` pasa a ser lineal y estricto: **8 MiB por línea** (valor que ya había, ahora
+     se comprueba antes de copiar) y **128 MiB en total** para el chat (`MAX_CHAT_STREAM_BYTES`): una línea por token son
+     ~150 B y `num_ctx` llega a 262 144 (`config.rs`), así que la generación más larga posible pesa ~40 MB; 128 MiB deja
+     más de 3× de margen y acota lo que `chat()` agrega en memoria. El `pull` no lleva tope total (no acumula nada y emite
+     ~17 líneas/s: un tope cortaría descargas largas legítimas); solo el de línea.
+  4. El helper está copiado en cada crate en vez de reutilizado: `market` no es dependencia de `knowledge` ni de `ai`
+     (añadirla arrastra `moka`, `tokio-tungstenite` y `feed-rs`, y obliga a tocar sus `Cargo.toml`) y devuelve `ProviderError`.
+- Pruebas (servidores falsos en loopback): `knowledge::ollama::tests::a_body_over_the_cap_is_bad_not_transient` (33 MiB
+  chunked en 2xx, en 2xx con `Content-Encoding: gzip`, en 400 y en 500, y `Content-Length` enorme: siempre `Bad`),
+  `content_encoding_is_not_decoded`; `ai::ollama::tests::` `oversized_non_streaming_bodies_are_rejected`,
+  `a_giant_ndjson_line_aborts_chat_and_pull`, `ndjson_line_cap_aborts_a_line_without_newline`,
+  `ndjson_total_cap_aborts_the_stream`, `ndjson_splits_across_chunks_and_skips_blanks`,
+  `read_limited_aborts_a_chunked_body_over_the_limit`, `a_long_legitimate_stream_is_not_cut` (20 000 líneas, ~3 MB) y
+  `content_encoding_is_not_decoded`. Comprobado por mutación: sin `.no_gzip().no_brotli()` fallan los de `Content-Encoding`
+  (hay que lanzarlos con `-p knowledge -p ai -p market`, que unifica las features como el servidor; con un solo crate la
+  feature `gzip` ni siquiera está activa y pasan igual).
+- Medición con un arnés fuera del repo (`embed()` real contra un servidor Python en un puerto efímero): la bomba de
+  521 844 bytes devuelve `Bad` en 1 ms con 5 MiB de pico (no se expande); 100 MiB sin comprimir y sin `Content-Length`,
+  con todo el proceso en un cgroup de 64 MiB, devuelve `Bad("respuesta demasiado grande")` en 15 ms con 40 MiB de pico.
+- Límite que queda: dentro de los 32 MiB, un JSON `[[],[],…]` (3 B por vector vacío) se parsea a `Vec<Vec<f32>>` con 24 B
+  por vector, es decir, hasta ~250 MB transitorios (estimado, no medido). Si importa, bajar el tope (la respuesta real es
+  ~30× menor) o contar vectores antes de parsear.
+- Límite que queda en `ai` (16 MiB): `show`/`tags` con elementos mínimos se expanden ~16× al parsear (medido: 274 MiB
+  y 157 MiB de pico). Solo con un Ollama hostil; las respuestas reales son KB.
+
 ---
 
 ## Hallazgos

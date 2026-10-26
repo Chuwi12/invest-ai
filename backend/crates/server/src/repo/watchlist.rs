@@ -98,7 +98,8 @@ pub struct NewRun<'a> {
     pub power_wait_secs: i64,
 }
 
-pub async fn start_run(db: &SqlitePool, r: NewRun<'_>) -> ApiResult<i64> {
+/// `start_run`, `add_result` y `finish_run` aceptan un pool o una transacción (`&mut *tx`).
+pub async fn start_run(db: impl sqlx::SqliteExecutor<'_>, r: NewRun<'_>) -> ApiResult<i64> {
     let res = sqlx::query(
         "INSERT INTO watchlist_runs (local_date, scheduled_for, started_at, trigger, status, depth, planned, power, power_wait_secs)
          VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?6, ?7, ?8)",
@@ -125,7 +126,7 @@ pub async fn set_run_model(db: &SqlitePool, run_id: i64, model: &str) -> ApiResu
     Ok(())
 }
 
-pub async fn finish_run(db: &SqlitePool, run_id: i64, status: &str, finished_at: i64) -> ApiResult<()> {
+pub async fn finish_run(db: impl sqlx::SqliteExecutor<'_>, run_id: i64, status: &str, finished_at: i64) -> ApiResult<()> {
     sqlx::query(
         "UPDATE watchlist_runs SET status = ?2, finished_at = ?3,
             ok = (SELECT COUNT(*) FROM watchlist_results WHERE run_id = ?1 AND status = 'ok'),
@@ -154,7 +155,7 @@ pub async fn mark_interrupted(db: &SqlitePool, now_ms: i64) -> ApiResult<u64> {
     Ok(res.rows_affected())
 }
 
-pub async fn add_result(db: &SqlitePool, r: NewResult<'_>) -> ApiResult<()> {
+pub async fn add_result(db: impl sqlx::SqliteExecutor<'_>, r: NewResult<'_>) -> ApiResult<()> {
     sqlx::query(
         "INSERT INTO watchlist_results (run_id, local_date, asset_id, status, transient, attempts, analysis_id,
              verdict, error_code, error, started_at, finished_at)

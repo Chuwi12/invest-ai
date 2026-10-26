@@ -13,7 +13,7 @@ use server::{
     fake::{FakeAnalyst, FakeMarket, annotate_fake},
     repo::watchlist as wrepo,
     watchlist::{
-        DEFAULT_WATCHLIST, ManualClock, ManualPower, PowerProbe, RetryPolicy, SystemPower, WatchlistConfig, next_due, run_scheduler,
+        Clock, DEFAULT_WATCHLIST, ManualClock, ManualPower, PowerProbe, RetryPolicy, SystemPower, WatchlistConfig, next_due, run_scheduler,
         window::window_of,
     },
 };
@@ -389,11 +389,14 @@ const MODEL: &str = "qwen3.5:9b";
 struct SimOllama {
     installed: std::sync::atomic::AtomicBool,
     reachable: std::sync::atomic::AtomicBool,
+    /// Con `true`, `list` no responde (comprobación previa lenta) hasta que vuelva a `false`.
+    slow: std::sync::atomic::AtomicBool,
+    list_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl SimOllama {
     fn new(installed: bool) -> Arc<Self> {
-        Arc::new(Self { installed: installed.into(), reachable: true.into() })
+        Arc::new(Self { installed: installed.into(), reachable: true.into(), slow: false.into(), list_calls: 0.into() })
     }
 
     fn set_installed(&self, v: bool) {
@@ -408,6 +411,10 @@ impl SimOllama {
 #[async_trait]
 impl ModelService for SimOllama {
     async fn list(&self) -> ModelsResponse {
+        self.list_calls.fetch_add(1, Ordering::SeqCst);
+        while self.slow.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         let reachable = self.reachable.load(Ordering::SeqCst);
         let model = LlmModel {
             id: MODEL.into(), name: MODEL.into(), family: "qwen3.5".into(), parameters: "9B".into(), active_parameters: None,
@@ -1243,5 +1250,137 @@ async fn battery_delay_has_a_cap_and_unknown_power_does_not_wait() {
     wait_for(|| async { runs(&app).await.iter().any(|r| r["status"] == "completed").then_some(()) }).await;
     let r = &runs(&app).await[0];
     assert_eq!((r["power"].as_str(), r["powerWaitSecs"].as_i64()), (Some("unknown"), Some(0)));
+    stop(&state, handle).await;
+}
+
+// --- Casos límite: comprobación previa lenta, suspensión en la espera de reintento, `missed` atómico ---
+
+#[tokio::test]
+async fn the_open_arriving_during_a_slow_preflight_creates_no_empty_run_and_the_rest_is_missed() {
+    let app = TestApp::new().await;
+    let ollama = SimOllama::new(true);
+    ollama.slow.store(true, Ordering::SeqCst);
+    // Jueves 15-oct 13:29 UTC: queda un minuto de la ventana de D=14 (EE. UU. abre a las 13:30 UTC).
+    let clock = ManualClock::new(utc(15, 13, 29), OFFSET);
+    let (state, handle, analyst) = start_sim(&app, cfg("stock:AAPL, stock:MSFT"), clock.clone(), &ollama).await;
+    wait_for(|| async { (ollama.list_calls.load(Ordering::SeqCst) > 0).then_some(()) }).await;
+    clock.set(utc(15, 13, 31)); // abre EE. UU. con la consulta a Ollama aún sin responder
+    ollama.slow.store(false, Ordering::SeqCst); // responde: el modelo está, pero ya es tarde
+    wait_for(|| async { db_runs(&app).await.iter().any(|r| r.2 == "missed").then_some(()) }).await;
+
+    let got = db_runs(&app).await;
+    assert_eq!(got.iter().map(|r| (r.1.as_str(), r.2.as_str())).collect::<Vec<_>>(), [("2026-10-14", "missed")], "ni una pasada `aborted` vacía");
+    let rows = day_rows(&app, "2026-10-14").await;
+    assert!(rows.len() == 2 && rows.iter().all(|(s, t, c)| s == "skipped" && !*t && c.as_deref() == Some("missed")), "{rows:?}");
+    assert_eq!(analyst.inner.analyze_calls.load(Ordering::SeqCst), 0, "no se analizó con el mercado abierto");
+    stop(&state, handle).await;
+}
+
+/// Reloj que anota cada espera: la prueba sabe cuándo el programador ya duerme y puede mover el reloj sin carreras.
+struct SpyClock {
+    inner: Arc<ManualClock>,
+    sleeps: std::sync::Mutex<Vec<DateTime<Utc>>>,
+}
+
+impl SpyClock {
+    fn new(start: DateTime<Utc>) -> Arc<Self> {
+        Arc::new(Self { inner: ManualClock::new(start, OFFSET), sleeps: Default::default() })
+    }
+
+    fn sleeping_until(&self, t: DateTime<Utc>) -> bool {
+        self.sleeps.lock().unwrap().contains(&t)
+    }
+}
+
+#[async_trait]
+impl Clock for SpyClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.inner.now()
+    }
+
+    fn utc_to_local(&self, t: DateTime<Utc>) -> chrono::NaiveDateTime {
+        self.inner.utc_to_local(t)
+    }
+
+    fn local_to_utc(&self, l: chrono::NaiveDateTime) -> DateTime<Utc> {
+        self.inner.local_to_utc(l)
+    }
+
+    async fn sleep_until(&self, t: DateTime<Utc>) {
+        self.sleeps.lock().unwrap().push(t);
+        self.inner.sleep_until(t).await;
+    }
+}
+
+async fn start_spy(app: &TestApp, cfg: WatchlistConfig, clock: Arc<SpyClock>) -> (AppState, tokio::task::JoinHandle<()>) {
+    // Estado nuevo sobre la misma BD, como `restart`: un `stop` anterior canceló el apagado del de `app`.
+    let state = AppState::new(app.market.clone(), app.analyst.clone(), app.state.db.clone(), Settings::default())
+        .with_news_annotator(annotate_fake)
+        .with_power(Arc::new(ManualPower::default()))
+        .with_watchlist(cfg, clock.clone());
+    let handle = tokio::spawn(run_scheduler(state.clone(), state.watchlist.clone(), clock));
+    (state, handle)
+}
+
+#[tokio::test]
+async fn waking_up_after_the_open_during_a_retry_wait_makes_no_new_attempt_and_leaves_the_asset_missed() {
+    let app = TestApp::new().await;
+    app.analyst.fail_first_calls.store(1, Ordering::SeqCst); // el primer intento de AAPL falla (transitorio)
+    // Jueves 15-oct 13:25 UTC; la espera de reintento (60 s) acaba a las 13:26, antes de la apertura (13:30).
+    let clock = SpyClock::new(utc(15, 13, 25));
+    let (state, handle) = start_spy(&app, cfg("stock:AAPL, stock:MSFT"), clock.clone()).await;
+    wait_for(|| async { clock.sleeping_until(utc(15, 13, 26)).then_some(()) }).await;
+    clock.inner.set(utc(15, 14, 0)); // el equipo se suspende en la espera y despierta con EE. UU. abierto
+    wait_for(|| async { db_runs(&app).await.iter().any(|r| r.2 == "aborted").then_some(()) }).await;
+
+    assert_eq!(app.analyst.analyze_calls.load(Ordering::SeqCst), 1, "ningún intento nuevo con el mercado abierto");
+    wait_for(|| async { db_runs(&app).await.iter().any(|r| r.2 == "missed").then_some(()) }).await;
+    let ok: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM watchlist_results WHERE status = 'ok'").fetch_one(&state.db).await.unwrap();
+    assert_eq!(ok, 0, "ningún `ok` para D con datos de mercado abierto");
+    let rows = day_rows(&app, "2026-10-14").await;
+    let kinds: Vec<(&str, bool)> = rows.iter().map(|r| (r.0.as_str(), r.1)).collect();
+    assert_eq!(kinds, [("failed", true), ("skipped", false), ("skipped", false)], "{rows:?}");
+    assert_eq!(rows[1].2.as_deref(), Some("missed"));
+    assert!(origins(&app).await.is_empty());
+    stop(&state, handle).await;
+}
+
+#[tokio::test]
+async fn a_write_failure_in_the_middle_of_recording_a_lost_window_leaves_nothing_and_the_next_try_records_it_whole() {
+    let app = TestApp::new().await;
+    const LIST: &str = "stock:AAPL, stock:MSFT";
+    complete_monday_12(&app, LIST).await;
+    // El equipo vuelve el jueves 15 a las 13:35 UTC (abierto EE. UU.): hay que registrar D=13 y D=14.
+    // Un trigger hace fallar la 2.ª inserción de una `missed` (la de MSFT de D=13), es decir, a mitad de la ventana.
+    sqlx::raw_sql(
+        "CREATE TRIGGER inject_failure BEFORE INSERT ON watchlist_results
+         WHEN NEW.error_code = 'missed' AND (SELECT COUNT(*) FROM watchlist_results WHERE error_code = 'missed') = 1
+         BEGIN SELECT RAISE(ABORT, 'fallo inyectado'); END",
+    )
+    .execute(&app.state.db)
+    .await
+    .unwrap();
+    let clock = SpyClock::new(utc(15, 13, 35));
+    let (state, handle) = start_spy(&app, cfg(LIST), clock.clone()).await;
+    // Falla y el programador espera 5 min para reintentar.
+    wait_for(|| async { clock.sleeping_until(utc(15, 13, 40)).then_some(()) }).await;
+    let got = db_runs(&app).await;
+    assert_eq!(got.iter().map(|r| (r.1.as_str(), r.2.as_str())).collect::<Vec<_>>(), [("2026-10-12", "completed")], "ninguna pasada a medias ni `running`");
+    assert!(day_rows(&app, "2026-10-13").await.is_empty(), "ningún registro parcial");
+
+    sqlx::raw_sql("DROP TRIGGER inject_failure").execute(&app.state.db).await.unwrap();
+    clock.inner.set(utc(15, 13, 41));
+    wait_for(|| async { (db_runs(&app).await.len() == 3).then_some(()) }).await;
+    let got = db_runs(&app).await;
+    assert_eq!(
+        got.iter().map(|r| (r.1.as_str(), r.2.as_str())).collect::<Vec<_>>(),
+        [("2026-10-12", "completed"), ("2026-10-13", "missed"), ("2026-10-14", "missed")],
+        "las dos ventanas, completas y cerradas"
+    );
+    for day in ["2026-10-13", "2026-10-14"] {
+        assert_eq!(day_rows(&app, day).await.len(), 2, "{day}: un `missed` por activo");
+    }
+    let (_, w) = app.get("/api/watchlist").await;
+    assert_eq!(w["running"], false);
     stop(&state, handle).await;
 }

@@ -576,8 +576,11 @@ async fn record_missed(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Cloc
     let last = last_per_asset(&rows);
     let now = clock.now().timestamp_millis();
     let depth = serde_json::to_value(cfg.depth).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+    // Todo o nada: un fallo a mitad no deja una pasada `running` ni resultados sueltos (que harían creer
+    // a `last_pass_started` que hubo una pasada real tras la apertura y cortarían la búsqueda de ventanas).
+    let mut tx = state.db.begin().await?;
     let run_id = repo::start_run(
-        &state.db,
+        &mut *tx,
         repo::NewRun {
             local_date: &date,
             scheduled_for: preferred_instant(clock, w, cfg.time).0.timestamp_millis(),
@@ -600,7 +603,7 @@ async fn record_missed(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Cloc
             msg.push_str(&format!(". Último intento: {prev}"));
         }
         repo::add_result(
-            &state.db,
+            &mut *tx,
             NewResult {
                 run_id, local_date: &date, asset: id, status: "skipped", transient: false, attempts: 0,
                 analysis_id: None, verdict: None, error_code: Some("missed"), error: Some(&msg),
@@ -609,7 +612,8 @@ async fn record_missed(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Cloc
         )
         .await?;
     }
-    repo::finish_run(&state.db, run_id, "missed", now).await?;
+    repo::finish_run(&mut *tx, run_id, "missed", now).await?;
+    tx.commit().await?;
     tracing::warn!(run_id, dia = %w.day, perdidos = pending.len(), "lista de seguimiento: llegó la apertura sin completar la pasada; se registra como perdida (missed)");
     Ok(())
 }
@@ -757,6 +761,10 @@ async fn analyze_with_retries(
                 if !wait_until(state, clock, until).await {
                     return Attempt::Shutdown;
                 }
+                if clock.now() >= deadline {
+                    // El equipo despertó (suspensión) con la apertura ya pasada: ni un intento más.
+                    return Attempt::Failed { error, attempts, transient };
+                }
             }
         }
     }
@@ -764,7 +772,8 @@ async fn analyze_with_retries(
 
 /// Una ronda: los activos pendientes del día de bolsa de `w`, de uno en uno. Registra todo en BD.
 /// `due` es la hora preferida de la pasada. A la apertura (`w.end`) se corta: no se empieza ningún
-/// análisis más y la ronda queda `aborted`; lo pendiente lo registra el programador como perdido.
+/// análisis más y la ronda queda `aborted`; lo pendiente lo registra el programador como perdido. Si la
+/// apertura llega durante la comprobación previa ([`llm_ready`]), ni siquiera se abre la pasada.
 pub async fn run_round(
     state: &AppState,
     cfg: &WatchlistConfig,
@@ -777,26 +786,32 @@ pub async fn run_round(
     let date = w.day.to_string();
     let pending = pending_assets(state, cfg, w).await?;
     let depth = serde_json::to_value(cfg.depth).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
-    let run_id =
-        repo::start_run(
-            &state.db,
-            repo::NewRun {
-                local_date: &date,
-                scheduled_for: due.timestamp_millis(),
-                started_at: clock.now().timestamp_millis(),
-                trigger,
-                depth: &depth,
-                planned: pending.len(),
-                power: power.0,
-                power_wait_secs: power.1,
-            },
-        )
-        .await?;
-    tracing::info!(run_id, trigger, planned = pending.len(), "lista de seguimiento: empieza la pasada");
-
     // Comprobación previa: sin Ollama o sin el modelo, ni se empieza. Los activos quedan `skipped`
     // transitorios (se ve el motivo y siguen pendientes) y la ronda `aborted`; el programador reintenta.
-    if let Err(reason) = llm_ready(state).await {
+    // Va ANTES de abrir la pasada: puede tardar hasta `PREFLIGHT_TIMEOUT` y, si llega la apertura mientras
+    // tanto, no debe quedar una pasada vacía (lo pendiente lo registra el programador como `missed`).
+    let ready = llm_ready(state).await;
+    if clock.now() >= w.end {
+        tracing::warn!(?ready, "lista de seguimiento: llegó la apertura de EE. UU. durante la comprobación previa; no se abre la pasada");
+        return Ok(RoundEnd::Finished);
+    }
+    let run_id = repo::start_run(
+        &state.db,
+        repo::NewRun {
+            local_date: &date,
+            scheduled_for: due.timestamp_millis(),
+            started_at: clock.now().timestamp_millis(),
+            trigger,
+            depth: &depth,
+            planned: pending.len(),
+            power: power.0,
+            power_wait_secs: power.1,
+        },
+    )
+    .await?;
+    tracing::info!(run_id, trigger, planned = pending.len(), "lista de seguimiento: empieza la pasada");
+
+    if let Err(reason) = ready {
         tracing::warn!(run_id, %reason, "lista de seguimiento: el LLM no está listo; la pasada no empieza y se reintentará más tarde");
         let now = clock.now().timestamp_millis();
         for id in &pending {
@@ -818,7 +833,7 @@ pub async fn run_round(
     let mut aborted = false;
     let mut window_closed = false;
     for id in &pending {
-        if !aborted && clock.now() >= w.end {
+        if clock.now() >= w.end {
             // Llegó la apertura: ni un análisis más con el mercado abierto.
             tracing::warn!(run_id, "lista de seguimiento: llegó la apertura de EE. UU.; se corta la pasada");
             window_closed = true;

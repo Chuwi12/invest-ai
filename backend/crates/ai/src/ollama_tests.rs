@@ -233,3 +233,117 @@ fn memory_error_detection_is_specific() {
     assert!(!is_gpu_memory_error(&up("room for improvement"))); // «oom» dentro de una palabra
     assert!(!is_gpu_memory_error(&DomainError::Unavailable("out of memory".into())));
 }
+
+// --- Tamaño de las respuestas: topes por trozos, sin descompresión ---------------------------------
+
+fn bytes_stream(parts: &[&'static str]) -> impl Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static {
+    futures::stream::iter(parts.iter().map(|p| Ok(bytes::Bytes::from_static(p.as_bytes()))).collect::<Vec<_>>())
+}
+
+async fn collect_lines(s: BoxStream<'static, Result<Vec<u8>, DomainError>>) -> (Vec<String>, Option<DomainError>) {
+    let (mut lines, mut err) = (Vec::new(), None);
+    let mut s = s;
+    while let Some(item) = s.next().await {
+        match item {
+            Ok(l) => lines.push(String::from_utf8(l).unwrap()),
+            Err(e) => err = Some(e),
+        }
+    }
+    (lines, err)
+}
+
+#[tokio::test]
+async fn ndjson_splits_across_chunks_and_skips_blanks() {
+    // Una línea cortada entre trozos, líneas vacías, CRLF y un resto sin salto final.
+    let s = ndjson(bytes_stream(&["{\"a\":1}\n{\"b\"", ":2}\r\n\n  \n{\"c\":", "3}\n{\"d\":4}"]), usize::MAX);
+    let (lines, err) = collect_lines(s).await;
+    assert!(err.is_none(), "{err:?}");
+    assert_eq!(lines, [r#"{"a":1}"#, r#"{"b":2}"#, r#"{"c":3}"#, r#"{"d":4}"#]);
+}
+
+#[tokio::test]
+async fn ndjson_total_cap_aborts_the_stream() {
+    let s = ndjson(bytes_stream(&["aaaa\n"; 10]), 24);
+    let (lines, err) = collect_lines(s).await;
+    assert_eq!(lines.len(), 4, "las líneas anteriores al tope sí llegan");
+    assert!(err.is_some_and(|e| e.to_string().contains("demasiado grande")));
+}
+
+#[tokio::test]
+async fn ndjson_line_cap_aborts_a_line_without_newline() {
+    // 8 MiB + 1 KiB sin un solo salto de línea, en trozos de 1 KiB.
+    let chunk = bytes::Bytes::from(vec![b'a'; 1024]);
+    let n = MAX_LINE_BYTES / 1024 + 1;
+    let s = ndjson(futures::stream::iter((0..n).map(move |_| Ok(chunk.clone()))), usize::MAX);
+    let (lines, err) = collect_lines(s).await;
+    assert!(lines.is_empty());
+    assert!(err.is_some_and(|e| e.to_string().contains("línea de respuesta demasiado grande")));
+}
+
+#[tokio::test]
+async fn read_limited_aborts_a_chunked_body_over_the_limit() {
+    // Sin `Content-Length` (chunked): el tope no puede apoyarse en la cabecera.
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::get(|| async {
+            let chunks = (0..10).map(|_| Ok::<_, std::convert::Infallible>(bytes::Bytes::from(vec![b'a'; 1024])));
+            axum::body::Body::from_stream(futures::stream::iter(chunks))
+        }),
+    );
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", l.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+    let err = read_limited(reqwest::get(&url).await.unwrap(), 4096).await.unwrap_err();
+    assert!(err.to_string().contains("demasiado grande"), "{err}");
+    assert_eq!(read_limited(reqwest::get(&url).await.unwrap(), 64 * 1024).await.unwrap().len(), 10 * 1024);
+}
+
+#[tokio::test]
+async fn oversized_non_streaming_bodies_are_rejected() {
+    let m = MockOllama::start().await;
+    *m.state.show.lock().unwrap() = json!({ "modelfile": "a".repeat(MAX_BODY_BYTES + 1) });
+    let err = client(&m).show("qwen2.5:7b").await.unwrap_err();
+    assert!(matches!(&err, DomainError::Upstream { message, .. } if message.contains("demasiado grande")), "{err:?}");
+    // También el cuerpo de un error HTTP.
+    m.push_chat_failure(500, &"x".repeat(MAX_BODY_BYTES + 1));
+    let err = client(&m).chat(params("x")).await.unwrap_err();
+    assert!(matches!(&err, DomainError::Upstream { message, .. } if message.contains("demasiado grande")), "{err:?}");
+    // Y uno normal sigue funcionando (`tags_show_ps_delete` cubre el resto de endpoints).
+    *m.state.show.lock().unwrap() = json!({ "capabilities": ["tools"] });
+    assert!(client(&m).show("qwen2.5:7b").await.unwrap().has("tools"));
+}
+
+#[tokio::test]
+async fn a_giant_ndjson_line_aborts_chat_and_pull() {
+    let m = MockOllama::start().await;
+    m.push_chat(vec![content_line(&"a".repeat(MAX_LINE_BYTES + 1))]);
+    let err = client(&m).chat(params("x")).await.unwrap_err();
+    assert!(err.to_string().contains("línea de respuesta demasiado grande"), "{err}");
+    *m.state.pull_lines.lock().unwrap() = vec![json!({ "status": "a".repeat(MAX_LINE_BYTES + 1) }).to_string()];
+    let events: Vec<PullEvent> = client(&m).pull_stream("qwen3:4b").collect().await;
+    assert!(matches!(&events[..], [PullEvent::Error { message }] if message.contains("demasiado grande")), "{events:?}");
+}
+
+#[tokio::test]
+async fn a_long_legitimate_stream_is_not_cut() {
+    // ~3 MB en 20 000 líneas: mucho más que cualquier respuesta real de un análisis.
+    let m = MockOllama::start().await;
+    m.push_chat((0..20_000).map(|_| content_line("token ")).chain([done_line()]).collect());
+    let out = client(&m).chat(params("x")).await.unwrap();
+    assert_eq!(out.content.len(), 20_000 * "token ".len());
+}
+
+/// Ollama no comprime: el cliente no descomprime nunca (un `Content-Encoding` hostil no dispara una bomba).
+/// Con la descompresión activa, reqwest intentaría expandir este JSON plano y fallaría.
+#[tokio::test]
+async fn content_encoding_is_not_decoded() {
+    for enc in ["gzip", "br"] {
+        let app = axum::Router::new()
+            .route("/api/tags", axum::routing::get(move || async move { ([("content-encoding", enc)], r#"{"models":[]}"#) }));
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+        let c = OllamaClient::new(&url, Duration::from_secs(5)).unwrap();
+        assert!(c.tags().await.unwrap_or_else(|e| panic!("{enc}: {e}")).is_empty());
+    }
+}
