@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use axum::{Router, extract::Query, extract::State, http::StatusCode, routing::get};
 use chrono::{Duration as Dur, Utc};
 use common::TestApp;
-use domain::{AssetClass, SocialPost, SocialSource};
+use domain::{AssetClass, AssetSummary, SocialData, SocialPost, SocialSource};
 use market::{
     http::build_client,
     providers::{PResult, ProviderError, x::X},
@@ -107,6 +107,31 @@ async fn app_with_providers(providers: Vec<Arc<Fake>>, refresh_minutes: u64, x_c
     app
 }
 
+/// Hace como si hubieran pasado 2 h desde lo ya guardado: las instantáneas y también las ejecuciones. (Mover
+/// solo `as_of` dejaría las ejecuciones como «refrescos posteriores a la última instantánea».)
+async fn age_by_two_hours(app: &TestApp) {
+    for q in [
+        "UPDATE social_metrics SET as_of = as_of - 7200000",
+        "UPDATE social_runs SET fetched_at = fetched_at - 7200000, window_start = window_start - 7200000",
+    ] {
+        sqlx::query(q).execute(&app.state.db).await.unwrap();
+    }
+}
+
+fn summary(symbol: &str) -> AssetSummary {
+    AssetSummary {
+        id: format!("stock:{symbol}").parse().unwrap(),
+        symbol: symbol.into(),
+        name: format!("{symbol} Inc."),
+        class: AssetClass::Stock,
+        exchange: None,
+        currency: None,
+        country: None,
+        source: "test".into(),
+        source_url: None,
+    }
+}
+
 async fn count(app: &TestApp, table: &str) -> i64 {
     sqlx::query(&format!("SELECT COUNT(*) FROM {table}")).fetch_one(&app.state.db).await.unwrap().get(0)
 }
@@ -174,7 +199,7 @@ async fn metrics_snapshot_needs_a_real_refresh_and_is_at_most_hourly() {
     app.get("/api/assets/stock:MSFT/social").await;
     assert_eq!(count(&app, "social_metrics").await, 2);
     // Pasada una hora, la siguiente observación sí se anota (las instantáneas se añaden, nunca se pisan).
-    sqlx::query("UPDATE social_metrics SET as_of = as_of - 7200000").execute(&app.state.db).await.unwrap();
+    age_by_two_hours(&app).await;
     app.get("/api/assets/stock:AAPL/social").await;
     assert_eq!(count(&app, "social_metrics").await, 3);
     let n: i64 = sqlx::query("SELECT COUNT(*) FROM social_metrics WHERE asset_id = 'stock:AAPL'").fetch_one(&app.state.db).await.unwrap().get(0);
@@ -187,7 +212,7 @@ async fn a_failed_or_exhausted_refresh_records_no_snapshot() {
     let app = app_with(fake.clone(), 0).await;
     app.get("/api/assets/stock:AAPL/social").await;
     assert_eq!(count(&app, "social_metrics").await, 1);
-    sqlx::query("UPDATE social_metrics SET as_of = as_of - 7200000").execute(&app.state.db).await.unwrap();
+    age_by_two_hours(&app).await;
     // Con lo guardado de antes y el refresco fallido, el digest se sirve pero no es una observación nueva.
     fake.set(Mode::Fail);
     let (st, v) = app.get("/api/assets/stock:AAPL/social").await;
@@ -198,9 +223,50 @@ async fn a_failed_or_exhausted_refresh_records_no_snapshot() {
     let fake_x = Fake::new(SocialSource::X, Mode::Ok);
     let app = app_with(fake_x.clone(), 0).await;
     app.get("/api/assets/stock:AAPL/social").await;
-    sqlx::query("UPDATE social_metrics SET as_of = as_of - 7200000").execute(&app.state.db).await.unwrap();
+    age_by_two_hours(&app).await;
     fake_x.set(Mode::Exhausted);
     app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(count(&app, "social_metrics").await, 1);
+}
+
+/// La decisión de anotar la instantánea vive en la BD, no en una variable de la petición: el análisis corta
+/// `digest()` a los 20 s, y si eso ocurre entre guardar el refresco y anotarla, la siguiente lectura la anota.
+#[tokio::test]
+async fn a_refresh_saved_but_cancelled_before_the_snapshot_is_recorded_by_the_next_read() {
+    let fake = Fake::reddit(Mode::Ok);
+    let app = app_with(fake.clone(), 360).await;
+    let svc = app.state.social.clone().unwrap();
+    // El refresco llega a guardarse (publicaciones + ejecución correcta) y la petición muere antes de la instantánea.
+    assert!(svc.refresh(&summary("AAPL")).await.refreshed);
+    assert_eq!(fake.calls(), 1);
+    assert_eq!(count(&app, "social_posts").await, 3);
+    assert_eq!(count(&app, "social_metrics").await, 0, "cancelada antes de la instantánea");
+    // La siguiente lectura (sin refrescar: la caché sigue vigente) anota la que faltaba…
+    let (st, v) = app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["digest"]["metrics"]["mentions"], 3);
+    assert_eq!(fake.calls(), 1, "no hizo falta volver a consultar la red");
+    assert_eq!(count(&app, "social_metrics").await, 1);
+    // …y es idempotente: leer otra vez no añade nada mientras no haya un refresco nuevo.
+    app.get("/api/assets/stock:AAPL/social").await;
+    app.get("/api/assets/stock:AAPL/social").await;
+    assert_eq!(count(&app, "social_metrics").await, 1);
+}
+
+/// Lo mismo con un reinicio de por medio: sin estado en memoria que lo recuerde.
+#[tokio::test]
+async fn a_refresh_saved_before_a_restart_gets_its_snapshot_from_the_new_process() {
+    let fake = Fake::reddit(Mode::Ok);
+    let app = app_with(fake.clone(), 360).await;
+    assert!(app.state.social.clone().unwrap().refresh(&summary("AAPL")).await.refreshed);
+    assert_eq!(count(&app, "social_metrics").await, 0);
+    // «Reinicio»: otro servicio sobre la misma BD, sin esperas ni cerrojos en memoria.
+    let cfg = SocialConfig { refresh_minutes: 360, ..Default::default() };
+    let budget = Arc::new(SqliteBudget::new(app.state.db.clone()));
+    let fresh = SocialService::with_providers(cfg, app.state.db.clone(), vec![fake.clone() as Arc<dyn SocialProvider>], budget);
+    let d = fresh.digest(&summary("AAPL")).await.unwrap().expect("hay publicaciones guardadas");
+    assert_eq!(d.metrics.mentions, 3);
+    assert_eq!(fake.calls(), 1, "el refresco previo sigue vigente tras el reinicio");
     assert_eq!(count(&app, "social_metrics").await, 1);
 }
 
@@ -321,6 +387,80 @@ async fn x_is_queried_for_a_limited_number_of_distinct_assets_per_hour() {
     let (_, v) = app.get("/api/assets/stock:TSLA/social").await;
     assert_eq!(v["digest"]["metrics"]["mentions"], 3);
     assert_eq!(x.calls(), 3, "TSLA sigue sin hueco en X");
+}
+
+/// Servicio con X «configurado» (solo para el estado: el proveedor es simulado y no usa la API) y un tope de
+/// activos por hora con activos exentos (la lista de seguimiento).
+async fn app_with_x_cap_and_exempt(x: Arc<Fake>, cap: u32, exempt: &[&str]) -> TestApp {
+    let mut app = TestApp::new().await;
+    let cfg = SocialConfig { refresh_minutes: 0, x: Some(x_cfg("127.0.0.1:9".parse().unwrap(), 1_000)), ..Default::default() };
+    let budget = Arc::new(SqliteBudget::new(app.state.db.clone()));
+    let svc = SocialService::with_providers_and_x_limits(cfg, app.state.db.clone(), vec![x as Arc<dyn SocialProvider>], budget, cap, exempt.iter().map(|s| (*s).to_string()));
+    app.state = app.state.clone().with_social(Some(svc), vec![]);
+    app.router = server::app(app.state.clone(), None);
+    app
+}
+
+#[tokio::test]
+async fn watchlist_assets_do_not_use_the_hourly_x_asset_cap_and_the_status_reports_it() {
+    let x = Fake::new(SocialSource::X, Mode::Ok);
+    let app = app_with_x_cap_and_exempt(x.clone(), 2, &["stock:AAPL", "stock:MSFT"]).await;
+    let status = || async {
+        let (st, v) = app.get("/api/social/status").await;
+        assert_eq!(st, StatusCode::OK);
+        v["x"]["assetsPerHour"].clone()
+    };
+    let s = status().await;
+    assert_eq!((s["limit"].clone(), s["used"].clone(), s["exemptAssets"].clone(), s["full"].clone()), (2.into(), 0.into(), 2.into(), false.into()), "{s}");
+    assert_eq!(s["windowMinutes"], 60);
+
+    // La pasada de la lista (AAPL y MSFT) llega a X y no gasta huecos…
+    for id in ["AAPL", "MSFT"] {
+        app.get(&format!("/api/assets/stock:{id}/social")).await;
+    }
+    assert_eq!(x.calls(), 2);
+    let s = status().await;
+    assert_eq!((s["used"].clone(), s["full"].clone(), s["nextSlotAt"].clone()), (0.into(), false.into(), serde_json::Value::Null), "{s}");
+    // …así que el uso interactivo dispone de los dos huecos enteros.
+    for id in ["stock:TSLA", "etf:SPY"] {
+        app.get(&format!("/api/assets/{id}/social")).await;
+    }
+    assert_eq!(x.calls(), 4);
+    let s = status().await;
+    assert_eq!((s["used"].clone(), s["full"].clone()), (2.into(), true.into()), "{s}");
+    assert!(s["nextSlotAt"].as_str().is_some_and(|t| t.starts_with("20")), "con el tope lleno dice cuándo se libera un hueco: {s}");
+    // Un tercer activo ajeno a la lista se queda sin X…
+    app.get("/api/assets/crypto:BTC/social").await;
+    assert_eq!(x.calls(), 4);
+    // …pero los de la lista siguen entrando con el tope lleno.
+    app.get("/api/assets/stock:AAPL/social").await;
+    app.get("/api/assets/stock:MSFT/social").await;
+    assert_eq!(x.calls(), 6);
+    assert_eq!(status().await["used"], 2, "los exentos no ocupan hueco");
+}
+
+#[tokio::test]
+async fn exempt_assets_still_spend_the_monthly_budget() {
+    // El presupuesto MENSUAL no se exime nunca: el proveedor X real reserva lecturas aunque el activo no cuente
+    // para el tope por hora. (Un activo distinto por petición: el proveedor guarda en caché 30 min cada consulta.)
+    let (addr, calls) = x_mock().await;
+    let mut app = TestApp::new().await;
+    let cfg = SocialConfig { refresh_minutes: 0, x: Some(x_cfg(addr, 25)), ..Default::default() };
+    let budget = Arc::new(SqliteBudget::new(app.state.db.clone()));
+    let x = X::new(build_client(Duration::from_secs(5)).unwrap(), x_cfg(addr, 25), budget.clone());
+    let svc = SocialService::with_providers_and_x_limits(cfg, app.state.db.clone(), vec![Arc::new(x) as Arc<dyn SocialProvider>], budget.clone(), 1, ["stock:AAPL", "stock:MSFT", "stock:TSLA"].map(String::from));
+    app.state = app.state.clone().with_social(Some(svc), vec![]);
+    app.router = server::app(app.state.clone(), None);
+    let month = Utc::now().format("%Y-%m").to_string();
+    for id in ["AAPL", "MSFT", "TSLA"] {
+        app.get(&format!("/api/assets/stock:{id}/social")).await;
+    }
+    // 25 de saldo, peticiones de 10: caben dos; la tercera se corta aunque TSLA esté exento del tope por hora.
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(budget.used(&month).await, 20);
+    let (_, st) = app.get("/api/social/status").await;
+    assert_eq!(st["x"]["assetsPerHour"]["used"], 0, "exento: no ocupa hueco");
+    assert_eq!(st["x"]["used"], 20, "pero sus lecturas sí cuentan en el presupuesto mensual");
 }
 
 async fn get_with(app: &TestApp, uri: &str, headers: &[(&str, &str)]) -> StatusCode {

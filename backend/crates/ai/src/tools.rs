@@ -107,8 +107,8 @@ pub fn definitions() -> Vec<Value> {
     ]
 }
 
-/// Definición de `search_knowledge`. Solo se ofrece al modelo si existe el archivo de conocimiento
-/// (`RAG_ENABLED=1`); por eso no está en [`definitions`], que se mantiene idéntica.
+/// Definición de `search_knowledge`. Solo se ofrece al modelo si el chat puede consultar el archivo de
+/// conocimiento (`RAG_CHAT=1`); por eso no está en [`definitions`], que se mantiene idéntica.
 pub fn knowledge_definition() -> Value {
     let id = json!({"type": "string", "description": "Optional asset id such as 'stock:AAPL' (or a bare ticker) to restrict the search to that asset."});
     func(
@@ -215,7 +215,9 @@ impl ToolRunner {
             return Err(ToolError(tr!(self.lang, "id de activo no válido «{}»: usa '<clase>:<símbolo>' (p. ej. stock:AAPL) o search_assets", "invalid asset id «{}»: use '<class>:<symbol>' (e.g. stock:AAPL) or search_assets", sanitize_untrusted(raw, 64))));
         }
         let hits = self.market.search(raw, 1).await?;
-        hits.into_iter().next().map(|h| h.id).ok_or_else(|| ToolError(tr!(self.lang, "no se encontró ningún activo para «{}»", "no asset found for «{}»", sanitize_untrusted(raw, 64))))
+        // Un resultado cuyo símbolo no pasa la lista blanca (lo ha puesto un proveedor) no es un activo
+        // utilizable: `AssetId::from_str` no lo aceptaría después y su texto acabaría en el prompt (N1).
+        hits.into_iter().map(|h| h.id).find(|id| domain::valid_symbol(&id.symbol)).ok_or_else(|| ToolError(tr!(self.lang, "no se encontró ningún activo para «{}»", "no asset found for «{}»", sanitize_untrusted(raw, 64))))
     }
 
     fn stub(&self, id: &AssetId) -> AssetSnapshot {
@@ -341,7 +343,7 @@ impl ToolRunner {
         for h in &hits {
             text.push_str(&format!(
                 "- {} · {} · {}{} ({})\n",
-                h.id,
+                printable_id(&h.id),
                 sanitize_untrusted(&h.name, 100),
                 h.class.as_str(),
                 h.exchange.as_deref().map(|e| format!(" · {}", sanitize_untrusted(e, 30))).unwrap_or_default(),
@@ -460,7 +462,8 @@ impl ToolRunner {
                     let na = || "n/d".to_string();
                     let opt = |v: Option<f64>, g: fn(f64) -> String| v.map_or_else(na, g);
                     text.push_str(&format!(
-                        "| {id} | {} | {} | {} | {} | {} | {} | {} | {} | {:.0} | {} | {} |\n",
+                        "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {:.0} | {} | {} |\n",
+                        printable_id(id),
                         opt(s.quote.as_ref().map(|q| q.price), fmt::price),
                         opt(s.quote.as_ref().and_then(|q| q.change_pct).map(|c| c / 100.0), fmt::pct_signed),
                         opt(ind.and_then(|i| i.return1m), fmt::pct_signed),
@@ -474,16 +477,16 @@ impl ToolRunner {
                         scoring::verdict_name(l, card.verdict),
                     ));
                     if let Some(q) = &s.quote {
-                        notes.push(format!("{id}: {} {}", q.source, q.timestamp.format("%Y-%m-%d %H:%M UTC")));
+                        notes.push(format!("{}: {} {}", printable_id(id), q.source, q.timestamp.format("%Y-%m-%d %H:%M UTC")));
                     }
                 }
-                Err(e) => text.push_str(&format!("| {id} | {} |\n", sanitize_untrusted(&e.to_string(), 120))),
+                Err(e) => text.push_str(&format!("| {} | {} |\n", printable_id(id), sanitize_untrusted(&e.to_string(), 120))),
             }
         }
         if !notes.is_empty() {
             text.push_str(&format!("{}: {}\n", l.t("Fuentes de cotización", "Quote sources"), notes.join("; ")));
         }
-        let summary = format!("{} {}", l.t("comparativa de", "comparison of"), ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "));
+        let summary = format!("{} {}", l.t("comparativa de", "comparison of"), ids.iter().map(printable_id).collect::<Vec<_>>().join(", "));
         Ok(ToolOutput { text, summary, analysis: None })
     }
 
@@ -516,6 +519,13 @@ impl ToolRunner {
 // ---------------------------------------------------------------------------------------------
 // Argumentos
 // ---------------------------------------------------------------------------------------------
+
+/// `<clase>:<símbolo>` apto para el texto que lee el modelo. Un id que viene de `resolve` o de
+/// `FromStr` ya cumple la lista blanca de `domain::valid_symbol`, pero el id de un resultado de
+/// búsqueda lo puso un proveedor: se sanea siempre (no cambia un id válido).
+fn printable_id(id: &AssetId) -> String {
+    sanitize_untrusted(&id.to_string(), 80)
+}
 
 /// Algunos modelos envían los argumentos como una cadena JSON en lugar de un objeto.
 fn normalize_args(raw: &Value) -> Result<Value, ToolError> {

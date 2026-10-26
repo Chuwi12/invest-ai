@@ -141,8 +141,8 @@ pub struct AnalysisEngine {
     client: OllamaClient,
     models: Arc<ModelManager>,
     cfg: AiConfig,
-    /// Archivo de conocimiento local (RAG). `None` (por defecto, `RAG_ENABLED=0`): el análisis es
-    /// idéntico al que no conoce el RAG; ver `crate::rag`.
+    /// Archivo de conocimiento local (RAG) del ANÁLISIS (`RAG_ANALYSIS`; el chat tiene el suyo, `RAG_CHAT`).
+    /// `None` (por defecto, `RAG_ANALYSIS=0`): el análisis es idéntico al que no conoce el RAG; ver `crate::rag`.
     knowledge: Option<Arc<dyn KnowledgeSearch>>,
     /// Datos de redes sociales (opinión). `None` (por defecto, sin credenciales): el análisis es
     /// idéntico byte a byte al que no conoce las redes; ver `crate::social`.
@@ -184,10 +184,6 @@ impl AnalysisEngine {
     pub fn with_social(mut self, social: Option<Arc<dyn domain::SocialData>>) -> Self {
         self.social = social;
         self
-    }
-
-    pub(crate) fn knowledge(&self) -> Option<Arc<dyn KnowledgeSearch>> {
-        self.knowledge.clone()
     }
 
     fn lang(&self) -> Lang {

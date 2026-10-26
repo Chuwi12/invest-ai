@@ -157,7 +157,7 @@ export function mockPerformance(): PerformanceReport {
   const vs = getVersions()
   return {
     generatedAt: new Date().toISOString(),
-    ruleVersion: 1,
+    ruleVersion: 2,
     analysesTotal: total,
     horizons: ([1, 4, 12] as const).map((h) => horizon(h, total)),
     activeWeights: vs.find((v) => v.status === 'active') ?? null,

@@ -1,11 +1,19 @@
 [Unit]
-Description=Ollama de usuario para invest-ai (solo si nadie escucha ya en :11434)
+Description=Ollama de respaldo para invest-ai (solo si no hay ollama.service del sistema ni nadie en :11434)
 After=network.target
 
 [Service]
 Type=simple
-# Si ya hay un Ollama (p. ej. ollama.service del sistema) la unidad se omite sin error.
+# Es un RESPALDO: se omite sin error (exec-condition) si ya hay un Ollama o va a haberlo.
+# 1) Si hay uno escuchando en :11434, no se pisa.
+# 2) Si existe un ollama.service del SISTEMA habilitado, tampoco arranca NUNCA, aunque su puerto aún
+#    esté libre: al arrancar el equipo (linger) esta unidad de usuario se adelantaba, se quedaba el
+#    puerto y el Ollama del sistema moría con «address already in use» (RestartPreventExitStatus=1,
+#    sin reintento) dejando los modelos de /var/lib/ollama inaccesibles; el de usuario tiene el
+#    almacén ~/.ollama vacío. Se evalúa en cada arranque, así que sigue valiendo si el usuario
+#    habilita o deshabilita ollama.service más tarde (docs/notes/ops.md, «carrera de los dos Ollama»).
 ExecCondition=/usr/bin/bash -c '! { exec 3<>/dev/tcp/127.0.0.1/11434; } 2>/dev/null'
+ExecCondition=/usr/bin/bash -c '! /usr/bin/systemctl --system is-enabled --quiet ollama.service'
 ExecStart=@OLLAMA@ serve
 Environment=OLLAMA_HOST=127.0.0.1:11434
 Restart=on-failure

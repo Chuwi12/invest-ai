@@ -93,7 +93,7 @@ en el universo 3 hay que leerlo con esa reserva; un resultado nulo en el 2 es el
    favor). Para que sirva en la práctica, además **(iv) la cartera long-short neta de costes del mismo factor y horizonte gana
    > 0**. Todo lo que no cumpla (i)-(iii) se lee como «no se distingue del azar».
 3. **Subperiodos** (por fecha de evaluación): 2018–2020, 2021–2023, 2024–hoy.
-4. **Acierto por veredicto** con la regla a priori de `learning::rules` (`is_hit`, `RULE_VERSION` 1): el veredicto es el
+4. **Acierto por veredicto** con la regla a priori de `learning::rules` (`is_hit`, igual en `RULE_VERSION` 1 y 2; la v2 solo cambia la entrada de los análisis guardados, y el backtest conserva la de la v1 con `compute_from_day`): el veredicto es el
    **cuantitativo provisional** de `score_en` sobre el snapshot de precios (no el del LLM). Se da, por veredicto y horizonte, nº,
    acierto, **acierto de referencia** (probabilidad de acierto de ese veredicto en la muestra entera: para comprar/acumular, la
    tasa base de superar al índice; para reducir/evitar, su complementaria; mantener/esperar, la masa de la banda neutra) y la

@@ -1,6 +1,6 @@
 //! Integración con el archivo de conocimiento local (RAG, crate `knowledge`).
 //!
-//! Con `knowledge = None` (valor por defecto, `RAG_ENABLED=0`) nada de este módulo se ejecuta ni
+//! Con `knowledge = None` (valor por defecto: `RAG_ANALYSIS=0` y `RAG_CHAT=0`) nada de este módulo se ejecuta ni
 //! cambia un solo byte de los prompts, de las herramientas o de la respuesta: los tests
 //! `rag_off_*` lo fijan con una huella del texto enviado al modelo. Ver `docs/notes/rag.md`.
 //!

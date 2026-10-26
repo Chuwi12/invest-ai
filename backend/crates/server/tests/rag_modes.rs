@@ -43,6 +43,9 @@ use tokio_util::sync::CancellationToken;
 #[derive(Default)]
 struct StubState {
     chats: Mutex<Vec<Value>>,
+    /// El primer turno del chat (el que ofrece herramientas y aún no tiene resultados) responde pidiendo
+    /// `analyze_asset` sobre AAPL; todo lo demás, la respuesta fija de siempre.
+    analyze_from_chat: bool,
 }
 
 struct Stub {
@@ -53,16 +56,33 @@ struct Stub {
 /// Mismo contrato que el simulado de `ai` (`/api/tags`, `/api/show`, `/api/ps`, `/api/chat`), con una respuesta
 /// fija para toda petición de chat: lo que importa aquí es lo que se ENVÍA, no lo que contesta.
 async fn start_stub() -> Stub {
-    let state = Arc::new(StubState::default());
+    start_stub_with(false).await
+}
+
+fn ndjson(lines: &[Value]) -> Response {
+    let body = lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n") + "\n";
+    Response::builder().header(header::CONTENT_TYPE, "application/x-ndjson").body(Body::from(body)).unwrap()
+}
+
+/// `analyze_from_chat`: el primer turno del chat pide `analyze_asset` (ver [`StubState`]).
+async fn start_stub_with(analyze_from_chat: bool) -> Stub {
+    let state = Arc::new(StubState { analyze_from_chat, ..StubState::default() });
     let chat = |State(s): State<Arc<StubState>>, Json(body): Json<Value>| async move {
+        let offers_tools = body["tools"].as_array().is_some_and(|t| !t.is_empty());
+        let has_tool_result = body["messages"].as_array().is_some_and(|m| m.iter().any(|x| x["role"] == "tool"));
         s.chats.lock().unwrap().push(body);
-        let lines = [
+        let done = json!({"message": {"role": "assistant", "content": ""}, "done": true, "done_reason": "stop", "prompt_eval_count": 120, "eval_count": 30});
+        if s.analyze_from_chat && offers_tools && !has_tool_result {
+            return ndjson(&[
+                json!({"message": {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "analyze_asset", "arguments": {"id": "stock:AAPL"}}}]}, "done": false}),
+                done,
+            ]);
+        }
+        ndjson(&[
             json!({"message": {"role": "assistant", "content": "{\"stance\":\"neutral\","}, "done": false}),
             json!({"message": {"role": "assistant", "content": "\"confidence\":0.5,\"findings\":[]}"}, "done": false}),
-            json!({"message": {"role": "assistant", "content": ""}, "done": true, "done_reason": "stop", "prompt_eval_count": 120, "eval_count": 30}),
-        ];
-        let body = lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n") + "\n";
-        Response::builder().header(header::CONTENT_TYPE, "application/x-ndjson").body(Body::from(body)).unwrap()
+            done,
+        ])
     };
     let app = Router::new()
         .route("/api/chat", post(chat))
@@ -149,9 +169,15 @@ fn seeded(key: &str, kind: DocKind, title: &str, text: &str) -> NewDocument {
     }
 }
 
-/// Una pasada completa (análisis estándar + un turno de chat) con `modes`; `None` = sin RAG en absoluto.
-async fn run(modes: Option<RagModes>) -> Run {
-    let stub = start_stub().await;
+/// El analista real montado como en `main` sobre el Ollama simulado `stub`, con `modes` (`None` = sin RAG).
+struct Rig {
+    rag: Option<Rag>,
+    analyst: Arc<dyn Analyst>,
+    market: Arc<dyn MarketData>,
+    shutdown: CancellationToken,
+}
+
+async fn rig(modes: Option<RagModes>, stub: &Stub) -> Rig {
     let pool = db::connect_memory().await.expect("BD en memoria");
     let shutdown = CancellationToken::new();
     let raw_market: Arc<dyn MarketData> = Arc::new(fixture::FakeMarket::new());
@@ -177,6 +203,13 @@ async fn run(modes: Option<RagModes>) -> Run {
         Some(rag) => rag.wrap(raw_market, raw_ipo, real),
         None => (raw_market, raw_ipo, real),
     };
+    Rig { rag, analyst, market, shutdown }
+}
+
+/// Una pasada completa (análisis estándar + un turno de chat) con `modes`; `None` = sin RAG en absoluto.
+async fn run(modes: Option<RagModes>) -> Run {
+    let stub = start_stub().await;
+    let Rig { rag, analyst, market, shutdown } = rig(modes, &stub).await;
 
     // Análisis estándar sobre el fixture (determinista).
     let result = analyst.analyze_with(&fixture::stock_snapshot(), Some(AnalysisDepth::Standard)).await;
@@ -240,6 +273,38 @@ fn text_of(reqs: &[Value]) -> String {
 
 const fn m(archive: bool, analysis: bool, chat: bool) -> RagModes {
     RagModes { archive, analysis, chat }
+}
+
+/// Lo enviado al modelo en un turno de chat en que este pide `analyze_asset`.
+struct ChatLaunchedAnalysis {
+    /// Peticiones del propio chat (su system prompt lleva «CHAT MODE»), en orden.
+    chat: Vec<Value>,
+    /// Peticiones del análisis que el chat lanzó con la herramienta (etapas y juez), en orden.
+    analysis: Vec<Value>,
+}
+
+/// Un turno de chat sobre AAPL en el que el modelo simulado pide `analyze_asset` (el análisis se guarda
+/// con `origin='chat'` y entra en el historial como cualquier otro).
+async fn run_chat_analysis(modes: Option<RagModes>) -> ChatLaunchedAnalysis {
+    let stub = start_stub_with(true).await;
+    let Rig { analyst, market, shutdown, .. } = rig(modes, &stub).await;
+    let req = ChatRequest {
+        conversation_id: "c1".into(),
+        history: vec![],
+        user_message: "¿invierto en Apple?".into(),
+        focus: vec![aapl()],
+        market,
+        language: "es".into(),
+    };
+    let events: Vec<domain::ChatEvent> = analyst.chat(req).collect().await;
+    assert!(
+        events.iter().any(|e| matches!(e, domain::ChatEvent::ToolResult { name, .. } if name == "analyze_asset")),
+        "el chat llegó a ejecutar analyze_asset: {events:?}"
+    );
+    let reqs = stub.state.chats.lock().unwrap().clone();
+    shutdown.cancel();
+    let (chat, analysis): (Vec<Value>, Vec<Value>) = reqs.into_iter().partition(|r| r["messages"][0]["content"].as_str().is_some_and(|c| c.contains("CHAT MODE")));
+    ChatLaunchedAnalysis { chat, analysis }
 }
 
 // ----------------------------------------------------------------------------------------- tests
@@ -377,4 +442,26 @@ async fn archiving_without_ollama_keeps_the_text_and_the_maintenance_does_not_sp
     let s = rag.kb.stats().await.unwrap();
     assert_eq!((s.documents, s.chunks, s.pending), (10, 10, 10), "{s:?}");
     assert_eq!(calls.load(Ordering::SeqCst), 1, "una sola llamada al embedder caído en toda la sesión");
+}
+
+#[tokio::test]
+async fn the_analysis_the_chat_launches_follows_rag_analysis_not_rag_chat() {
+    let off = run_chat_analysis(None).await;
+    assert!(off.analysis.len() >= 2, "el análisis lanzado desde el chat hizo varias peticiones: {}", off.analysis.len());
+    assert!(!off.chat.is_empty());
+    let off_analysis = text_of(&off.analysis);
+    assert!(!off_analysis.contains("knowledge_base"));
+
+    // 1/0/1 (RAG_ANALYSIS=0, RAG_CHAT=1): el chat sí ofrece la herramienta (control), pero el análisis
+    // que lanza es idéntico, byte a byte, al de «sin RAG»: antes seguía a RAG_CHAT y recuperaba.
+    let only_chat = run_chat_analysis(Some(m(true, false, true))).await;
+    assert!(text_of(&only_chat.chat).contains("search_knowledge"), "RAG_CHAT=1: el chat ofrece search_knowledge");
+    assert_eq!(text_of(&only_chat.analysis), off_analysis, "RAG_ANALYSIS=0: el análisis lanzado desde el chat es idéntico a «sin RAG»");
+
+    // 1/1/0 (RAG_ANALYSIS=1, RAG_CHAT=0): el chat no ofrece `search_knowledge` y su primer turno es idéntico
+    // al de «sin RAG»; el análisis que lanza SÍ recupera (control: si no, esta mitad no probaría nada).
+    let only_analysis = run_chat_analysis(Some(m(true, true, false))).await;
+    assert!(!text_of(&only_analysis.chat).contains("search_knowledge"), "RAG_CHAT=0: el chat no ofrece search_knowledge");
+    assert_eq!(text_of(&only_analysis.chat[..1]), text_of(&off.chat[..1]), "RAG_CHAT=0: primer turno del chat idéntico a «sin RAG»");
+    assert!(text_of(&only_analysis.analysis).contains("<knowledge_base>"), "RAG_ANALYSIS=1: el análisis lanzado desde el chat recupera");
 }

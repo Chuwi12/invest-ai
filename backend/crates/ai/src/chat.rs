@@ -13,6 +13,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use domain::{ChatEvent, ChatMessage, ChatRequest, Role};
 use futures::{StreamExt, stream::BoxStream};
+use knowledge::KnowledgeSearch;
 
 use crate::{
     analysis::{AnalysisEngine, data_block, language_name, system_prompt},
@@ -38,13 +39,25 @@ const ANALYZE_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 pub struct ChatEngine {
     client: OllamaClient,
     models: Arc<ModelManager>,
+    /// Motor del análisis completo (`analyze_asset`) y de los parámetros del modelo. Lleva SU búsqueda
+    /// (`RAG_ANALYSIS`), no la del chat: lo que el chat lanza con `analyze_asset` es un análisis más.
     analysis: Arc<AnalysisEngine>,
+    /// Archivo de conocimiento del CHAT (`RAG_CHAT`): lo que ofrece `search_knowledge`. `None` (por
+    /// defecto): la herramienta no existe y el chat es idéntico al que no conoce el RAG.
+    knowledge: Option<Arc<dyn KnowledgeSearch>>,
     cfg: AiConfig,
 }
 
 impl ChatEngine {
     pub fn new(client: OllamaClient, models: Arc<ModelManager>, analysis: Arc<AnalysisEngine>, cfg: AiConfig) -> Self {
-        Self { client, models, analysis, cfg }
+        Self { client, models, analysis, knowledge: None, cfg }
+    }
+
+    /// Conecta la búsqueda del chat (`search_knowledge`). Con `None` no cambia nada. Es independiente de
+    /// la del `AnalysisEngine`: cada interruptor (`RAG_ANALYSIS`, `RAG_CHAT`) solo llega a lo suyo.
+    pub fn with_knowledge(mut self, knowledge: Option<Arc<dyn KnowledgeSearch>>) -> Self {
+        self.knowledge = knowledge;
+        self
     }
 
     pub fn run(self: Arc<Self>, req: ChatRequest) -> BoxStream<'static, ChatEvent> {
@@ -88,7 +101,7 @@ never leave English words in tables or sentences.",
             if !caps.tools {
                 system.push_str(&format!("\nTools are NOT available with this model ({}): answer only from the preloaded data and say what you cannot check.", caps.id));
             }
-            let knowledge = this.analysis.knowledge();
+            let knowledge = this.knowledge.clone();
             if caps.tools && knowledge.is_some() {
                 system.push_str(crate::rag::CHAT_RULES);
             }

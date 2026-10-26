@@ -1,4 +1,5 @@
-//! Configuración por entorno (`RAG_*`). Valores vacíos o ilegibles se ignoran.
+//! Configuración por entorno (`RAG_*`). Los valores vacíos se ignoran; los ilegibles también, salvo en los
+//! tres interruptores (ver abajo), donde apagan.
 //!
 //! # Interruptores: archivado frente a recuperación
 //! El archivo de conocimiento tiene tres interruptores independientes ([`RagModes`]):
@@ -11,12 +12,17 @@
 //!
 //! Precedencia (de mayor a menor), para cada interruptor por separado:
 //! 1. `INVEST_AI_FAKE=1` apaga los tres (lo aplica el servidor, no esta configuración).
-//! 2. La propia variable (`RAG_ARCHIVE`, `RAG_ANALYSIS` o `RAG_CHAT`) si trae un valor legible.
+//! 2. La propia variable (`RAG_ARCHIVE`, `RAG_ANALYSIS` o `RAG_CHAT`), si existe y no está vacía:
+//!    - con un valor legible, manda ese valor;
+//!    - con un valor **ilegible** (`disabled`, `tal vez`...) ese interruptor queda **APAGADO**, sea cual sea
+//!      lo que digan los niveles 3 y 4, y se deja un aviso. Un error de escritura nunca enciende la
+//!      recuperación (antes caía al nivel siguiente: `RAG_ANALYSIS=disabled` con `RAG_ENABLED=1` la dejaba
+//!      encendida).
 //! 3. `RAG_ENABLED` (**obsoleta**), si existe: `1` pone a 1 los interruptores no fijados y `0` los pone a 0.
 //! 4. El valor por defecto de la tabla.
 //!
-//! Un valor ilegible en una de las tres variables se ignora (cae al nivel siguiente) y deja una nota en
-//! [`KnowledgeConfig::notes`], igual que el uso de `RAG_ENABLED`: el servidor las registra con `tracing::warn!`.
+//! Los avisos (valor ilegible, uso de `RAG_ENABLED`) van a [`KnowledgeConfig::notes`]: el servidor los
+//! registra con `tracing::warn!`.
 
 use std::{collections::HashMap, time::Duration};
 
@@ -118,8 +124,10 @@ fn read_modes(text: &impl Fn(&str) -> Option<String>, notes: &mut Vec<String>) -
         let fallback = legacy.unwrap_or(default);
         let Some(raw) = text(name) else { return fallback };
         parse_flag(&raw).unwrap_or_else(|| {
-            notes.push(format!("{name}={raw:?} no es 1/0, true/false, yes/no ni on/off: se ignora y queda en {}", u8::from(fallback)));
-            fallback
+            // Ilegible = APAGADO, no «el nivel siguiente»: un fallo al escribir no puede dejar encendida la
+            // recuperación (ni, con el archivado, el gasto de disco y de VRAM).
+            notes.push(format!("{name}={raw:?} no es 1/0, true/false, yes/no ni on/off: valor ilegible, el interruptor queda APAGADO (0)"));
+            false
         })
     };
     let modes = RagModes {
@@ -301,14 +309,27 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_switch_is_ignored_with_a_note() {
+    fn unreadable_switch_turns_that_switch_off_with_a_note() {
+        // N4: antes un valor ilegible «caía al nivel siguiente» (RAG_ENABLED o el defecto).
         let (got, notes) = modes(&[("RAG_ANALYSIS", "tal vez")]);
-        assert_eq!(got, m(true, false, false), "cae al defecto");
-        assert!(notes.iter().any(|n| n.contains("RAG_ANALYSIS") && n.contains("se ignora")), "{notes:?}");
-        // Con RAG_ENABLED=1 cae a él, no al defecto.
-        let (got, notes) = modes(&[("RAG_ENABLED", "1"), ("RAG_CHAT", "dunno")]);
-        assert_eq!(got, m(true, true, true));
+        assert_eq!(got, m(true, false, false), "el resto no cambia; la recuperación sigue apagada");
+        assert!(notes.iter().any(|n| n.contains("RAG_ANALYSIS") && n.contains("APAGADO")), "{notes:?}");
+        // El caso del auditor: RAG_ENABLED=1 y RAG_ANALYSIS=disabled dejaba la recuperación ENCENDIDA.
+        let (got, notes) = modes(&[("RAG_ENABLED", "1"), ("RAG_ANALYSIS", "disabled")]);
+        assert_eq!(got, m(true, false, true), "solo el análisis queda apagado");
         assert_eq!(notes.len(), 2, "el valor ilegible y la variable obsoleta: {notes:?}");
+        let (got, notes) = modes(&[("RAG_ENABLED", "1"), ("RAG_CHAT", "dunno")]);
+        assert_eq!(got, m(true, true, false));
+        assert_eq!(notes.len(), 2, "el valor ilegible y la variable obsoleta: {notes:?}");
+        // También apaga el archivado, cuyo defecto es 1 (y con RAG_ENABLED=1 seguiría encendido).
+        assert_eq!(modes(&[("RAG_ARCHIVE", "disabled")]).0, m(false, false, false));
+        assert_eq!(modes(&[("RAG_ENABLED", "1"), ("RAG_ARCHIVE", "maybe")]).0, m(false, true, true));
+        // Lo legible sigue mandando sobre RAG_ENABLED, y vacío = no fijado.
+        assert_eq!(modes(&[("RAG_ENABLED", "0"), ("RAG_ARCHIVE", "1"), ("RAG_CHAT", "  ")]).0, m(true, false, false));
+        // Un aviso por variable ilegible, con el valor entre comillas (Debug: sin saltos de línea sueltos).
+        let (_, notes) = modes(&[("RAG_CHAT", "a\nb"), ("RAG_ANALYSIS", "x")]);
+        assert_eq!(notes.len(), 2);
+        assert!(notes.iter().all(|n| !n.contains('\n')), "{notes:?}");
     }
 
     #[test]

@@ -6,7 +6,11 @@
 //! defecto: sin credenciales `SocialService::from_config` devuelve `None`, no se cablea nada y no
 //! se hace ninguna petición. Un fallo de redes nunca rompe un análisis ni el arranque.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use ai::social::{CoverageRun, compute_metrics, pick_excerpts};
 use async_trait::async_trait;
@@ -38,8 +42,10 @@ const METRICS_MIN_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// Ventana de recuento de activos distintos consultados en X.
 const X_ASSETS_WINDOW: Duration = Duration::from_secs(60 * 60);
 /// Activos DISTINTOS que se consultan en X por hora si no se define `X_MAX_ASSETS_PER_HOUR`.
-/// Una lista de seguimiento normal cabe de sobra; es la segunda barrera (tras el control de origen
-/// de `guard.rs`) contra quien intente agotar el presupuesto mensual con símbolos distintos.
+/// Es la segunda barrera (tras el control de origen de `guard.rs`) contra quien intente agotar el
+/// presupuesto mensual con símbolos distintos. Los activos de la lista de seguimiento NO cuentan para
+/// él (ver `SocialService::x_slot`), así que el uso interactivo dispone de los 30 huecos aunque la
+/// pasada diaria esté en curso.
 pub const DEFAULT_X_MAX_ASSETS_PER_HOUR: u32 = 30;
 const MAX_X_MAX_ASSETS_PER_HOUR: u32 = 1000;
 /// A partir de este número de activos se limpian los cerrojos y esperas que ya nadie usa.
@@ -63,12 +69,23 @@ pub fn parse_x_max_assets_per_hour(raw: Option<&str>) -> u32 {
     }
 }
 
+/// Ids de los activos de la lista de seguimiento (`WATCHLIST`, o la de por defecto) si está activada: los
+/// que no cuentan para `X_MAX_ASSETS_PER_HOUR`. Lee las mismas variables que `Config::from_env`, que ya
+/// habrá fallado al arrancar si son inválidas (aquí un error equivale a «sin lista»).
+fn watchlist_assets() -> HashSet<String> {
+    match crate::watchlist::WatchlistConfig::from_env() {
+        Ok(c) if c.enabled => c.assets.iter().map(ToString::to_string).collect(),
+        _ => HashSet::new(),
+    }
+}
+
 /// Resultado de un intento de refresco de un activo.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Refresh {
     /// Último error (fallo de red, presupuesto agotado, tope de activos de X).
     pub error: Option<String>,
-    /// Alguna red respondió y se guardó lo recibido: solo entonces hay datos nuevos que anotar.
+    /// Alguna red respondió y se guardó lo recibido. Es informativo: la instantánea de métricas ya no
+    /// depende de este valor en memoria (se decide en SQL, ver `record_metrics`).
     pub refreshed: bool,
 }
 
@@ -175,6 +192,9 @@ pub struct SocialService {
     cooldown: std::sync::Mutex<HashMap<(String, SocialSource), DateTime<Utc>>>,
     /// Tope de activos distintos consultados en X por hora (`X_MAX_ASSETS_PER_HOUR`).
     x_max_assets: u32,
+    /// Activos que no cuentan para ese tope: los de la lista de seguimiento (un conjunto fijo que
+    /// define el usuario). El presupuesto mensual de lecturas sí los cuenta siempre.
+    x_exempt: HashSet<String>,
     x_window: std::sync::Mutex<XWindow>,
 }
 
@@ -209,15 +229,16 @@ impl SocialService {
         }
         tracing::info!(reddit = cfg.reddit.is_some(), x = cfg.x.is_some(), "redes sociales activadas (opinión, no entra en la puntuación)");
         let x_max_assets = parse_x_max_assets_per_hour(std::env::var("X_MAX_ASSETS_PER_HOUR").ok().as_deref());
+        let x_exempt = watchlist_assets();
         if cfg.x.is_some() {
-            tracing::info!(activos_por_hora = x_max_assets, "X: tope de activos distintos consultados por hora");
+            tracing::info!(activos_por_hora = x_max_assets, exentos = x_exempt.len(), "X: tope de activos distintos consultados por hora (los de la lista de seguimiento no cuentan)");
         }
-        Some(Self::build(pool, cfg, providers, budget, x_max_assets))
+        Some(Self::build(pool, cfg, providers, budget, x_max_assets, x_exempt))
     }
 
     /// Con proveedores a medida (tests) y el tope de activos de X por defecto.
     pub fn with_providers(cfg: SocialConfig, pool: SqlitePool, providers: Vec<Arc<dyn SocialProvider>>, budget: Arc<SqliteBudget>) -> Arc<Self> {
-        Self::build(pool, cfg, providers, budget, DEFAULT_X_MAX_ASSETS_PER_HOUR)
+        Self::build(pool, cfg, providers, budget, DEFAULT_X_MAX_ASSETS_PER_HOUR, HashSet::new())
     }
 
     /// Como `with_providers`, con otro tope de activos distintos por hora en X (tests).
@@ -228,10 +249,30 @@ impl SocialService {
         budget: Arc<SqliteBudget>,
         x_max_assets_per_hour: u32,
     ) -> Arc<Self> {
-        Self::build(pool, cfg, providers, budget, x_max_assets_per_hour.max(1))
+        Self::build(pool, cfg, providers, budget, x_max_assets_per_hour.max(1), HashSet::new())
     }
 
-    fn build(pool: SqlitePool, cfg: SocialConfig, providers: Vec<Arc<dyn SocialProvider>>, budget: Arc<SqliteBudget>, x_max_assets: u32) -> Arc<Self> {
+    /// Como `with_providers_and_x_cap`, y además con los ids de activo (`stock:AAPL`) que no cuentan para
+    /// el tope: los de la lista de seguimiento (tests).
+    pub fn with_providers_and_x_limits(
+        cfg: SocialConfig,
+        pool: SqlitePool,
+        providers: Vec<Arc<dyn SocialProvider>>,
+        budget: Arc<SqliteBudget>,
+        x_max_assets_per_hour: u32,
+        x_exempt: impl IntoIterator<Item = String>,
+    ) -> Arc<Self> {
+        Self::build(pool, cfg, providers, budget, x_max_assets_per_hour.max(1), x_exempt.into_iter().collect())
+    }
+
+    fn build(
+        pool: SqlitePool,
+        cfg: SocialConfig,
+        providers: Vec<Arc<dyn SocialProvider>>,
+        budget: Arc<SqliteBudget>,
+        x_max_assets: u32,
+        x_exempt: HashSet<String>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             pool,
             cfg,
@@ -240,6 +281,7 @@ impl SocialService {
             locks: Default::default(),
             cooldown: Default::default(),
             x_max_assets,
+            x_exempt,
             x_window: Default::default(),
         })
     }
@@ -269,7 +311,18 @@ impl SocialService {
 
     /// Reserva un hueco para consultar `asset` en X: como mucho `x_max_assets` activos distintos en
     /// la última hora. Un activo ya contado sigue entrando (no ocupa un hueco nuevo).
+    ///
+    /// Los de la lista de seguimiento no ocupan hueco ni quedan fuera por falta de él: la pasada diaria
+    /// gasta tantos huecos como activos tiene la lista, y si el uso interactivo los agotaba el resto de
+    /// la lista se analizaba sin X, sesgando la serie que mide `learning` según lo que se hubiera abierto
+    /// ese día. No hay abuso posible: es un conjunto fijo por configuración (no crece con símbolos
+    /// inventados) y cada activo sigue limitado por `SOCIAL_REFRESH_MINUTES` y por el presupuesto
+    /// MENSUAL de lecturas, que cuenta siempre. (Desde `SocialData::digest` no se conoce quién llama:
+    /// el análisis corre en una tarea aparte, así que se exime por activo y no por origen.)
     fn x_slot(&self, asset: &str, now: DateTime<Utc>) -> XSlot {
+        if self.x_exempt.contains(asset) {
+            return XSlot::Granted;
+        }
         let mut w = self.x_window.lock().unwrap_or_else(|p| p.into_inner());
         let since = now - chrono_dur(X_ASSETS_WINDOW);
         w.seen.retain(|_, t| *t > since);
@@ -283,6 +336,25 @@ impl SocialService {
             w.warned_at = Some(now);
         }
         XSlot::Denied { first }
+    }
+
+    /// Estado del tope de activos distintos por hora en X, para `GET /api/social/status`.
+    fn x_assets_status(&self, now: DateTime<Utc>) -> Value {
+        let w = self.x_window.lock().unwrap_or_else(|p| p.into_inner());
+        let since = now - chrono_dur(X_ASSETS_WINDOW);
+        let used = w.seen.values().filter(|t| **t > since).count();
+        let max = usize::try_from(self.x_max_assets).unwrap_or(usize::MAX);
+        let full = used >= max;
+        // Cuándo se libera un hueco: cuando el activo contado más antiguo salga de la ventana.
+        let next_slot_at = full.then(|| w.seen.values().filter(|t| **t > since).min().map(|t| *t + chrono_dur(X_ASSETS_WINDOW))).flatten();
+        json!({
+            "limit": self.x_max_assets,
+            "used": used,
+            "full": full,
+            "windowMinutes": X_ASSETS_WINDOW.as_secs() / 60,
+            "exemptAssets": self.x_exempt.len(),
+            "nextSlotAt": next_slot_at,
+        })
     }
 
     /// Consulta las redes si la última consulta correcta de ese activo y red es más antigua que
@@ -435,9 +507,10 @@ impl SocialService {
     }
 
     /// Lo guardado para el activo, sin consultar a nadie. `None` si no hay publicaciones recientes.
-    /// Con `record` intenta añadir una instantánea de métricas: solo se anota si no hay otra del
-    /// mismo activo en la última hora (`METRICS_MIN_INTERVAL`); quien llama pasa `true` solo tras
-    /// un refresco real (`digest_for`), para que `learning` no vea instantáneas duplicadas.
+    /// Con `record` intenta añadir una instantánea de métricas; `record_metrics` lo decide en SQL: solo
+    /// si hay una ejecución correcta más reciente que la última instantánea (un refresco real aún no
+    /// anotado) y ninguna instantánea del activo en la última hora (`METRICS_MIN_INTERVAL`). Es
+    /// idempotente y barato, así que `digest_for` lo pide siempre.
     pub async fn stored_digest(&self, asset: &AssetSummary, record: bool) -> Result<Option<SocialDigest>, sqlx::Error> {
         let key = asset.id.to_string();
         let now = Utc::now();
@@ -492,14 +565,24 @@ impl SocialService {
         Ok(Some(SocialDigest { asset: asset.id.clone(), metrics, excerpts }))
     }
 
-    /// Añade una instantánea (nunca actualiza una anterior), salvo que ya haya otra del activo en
-    /// la última hora. Comprobación e inserción van en una sola sentencia: sin carreras.
+    /// Añade una instantánea (nunca actualiza una anterior). La decisión va en la propia sentencia
+    /// `INSERT … SELECT … WHERE`, no en una variable en memoria, así que resiste cancelaciones y
+    /// reinicios (p. ej. el análisis corta `digest()` a los 20 s después de guardar el refresco y antes
+    /// de anotar la instantánea: la siguiente lectura la anota). Solo se inserta si:
+    /// - no hay otra instantánea del activo en la última hora (`?18`), y
+    /// - existe una ejecución correcta (`ok = 1`) más reciente que la última instantánea: hubo un
+    ///   refresco real que ninguna instantánea recoge todavía. Una lectura de lo ya guardado, un
+    ///   fallo o el presupuesto agotado (`ok = 0`) no la crean.
+    ///
+    /// Comprobación e inserción van en una sola sentencia: sin carreras.
     async fn record_metrics(&self, key: &str, m: &domain::SocialMetrics) -> Result<(), sqlx::Error> {
         let recent_after = m.as_of - chrono_dur(METRICS_MIN_INTERVAL);
         sqlx::query(
             "INSERT INTO social_metrics (asset_id, as_of, window_days, mentions, authors, bullish, bearish, neutral, mentions_window, bullish_window, bearish_window, baseline_mean, baseline_days, ratio, z, truncated, by_source)
              SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
-             WHERE NOT EXISTS (SELECT 1 FROM social_metrics WHERE asset_id = ?1 AND as_of > ?18)",
+             WHERE NOT EXISTS (SELECT 1 FROM social_metrics WHERE asset_id = ?1 AND as_of > ?18)
+               AND EXISTS (SELECT 1 FROM social_runs WHERE asset_id = ?1 AND ok = 1
+                           AND fetched_at > COALESCE((SELECT MAX(as_of) FROM social_metrics WHERE asset_id = ?1), 0))",
         )
         .bind(key)
         .bind(m.as_of.timestamp_millis())
@@ -524,11 +607,13 @@ impl SocialService {
         .map(|_| ())
     }
 
-    /// Refresca si toca y devuelve lo guardado. La instantánea de métricas solo se anota tras un
-    /// refresco real (no por cada lectura de lo ya guardado) y como mucho una por activo y hora.
+    /// Refresca si toca y devuelve lo guardado. La instantánea de métricas solo se anota si hay un
+    /// refresco real que ninguna instantánea recoge todavía (no por cada lectura de lo ya guardado) y
+    /// como mucho una por activo y hora. Se pide en cada llamada porque la decisión es de SQL: si una
+    /// petición se cancela entre guardar el refresco y anotarla, la siguiente lectura la anota.
     pub async fn digest_for(&self, asset: &AssetSummary) -> Result<Option<SocialDigest>, DomainError> {
-        let refreshed = self.refresh(asset).await.refreshed;
-        self.stored_digest(asset, refreshed).await.map_err(|e| DomainError::Internal(format!("redes sociales: {e}")))
+        let _ = self.refresh(asset).await;
+        self.stored_digest(asset, true).await.map_err(|e| DomainError::Internal(format!("redes sociales: {e}")))
     }
 
     /// Ruta `GET /api/social/status`.
@@ -551,6 +636,7 @@ impl SocialService {
                     "exhausted": remaining < market::social::X_MIN_RESULTS,
                     "accounts": x.accounts.len(),
                     "searchAll": x.search_all,
+                    "assetsPerHour": self.x_assets_status(now),
                 })
             }
             None => json!({ "enabled": false }),

@@ -18,7 +18,7 @@ Diseño en [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) y contrato de la API e
 ```
 
 Un solo comando: comprueba prerequisitos (cargo, node/npm, ollama), crea `.env` (permisos 600) y
-`data/`, arranca Ollama si no está corriendo, descarga el modelo `LLM_MODEL` si falta, instala
+`data/`, arranca Ollama si no está corriendo, avisa si falta el modelo `LLM_MODEL` (y en una terminal pregunta antes de descargarlo; `./invest-ai pull` lo descarga), instala
 dependencias y compila frontend y backend **solo si cambiaron**, arranca el servidor en
 `127.0.0.1:8787` (frontend y API en un único puerto y proceso) y abre el navegador. Ctrl+C lo para
 todo, incluido el Ollama que arrancó el propio script (nunca uno que ya estuviera corriendo).
@@ -33,7 +33,8 @@ en caliente, unos segundos.
 | `./invest-ai status` | Estado de app, Ollama, modelo cargado (`ollama ps`), servicio y compilación |
 | `./invest-ai logs [-f] [server\|ollama\|vite]` | Logs (en `~/.local/state/invest-ai/`, o journal si corre como servicio) |
 | `./invest-ai open` | Abre el navegador; arranca la app si no corre (lo usa el icono) |
-| `./invest-ai install [--autostart]` | Servicio systemd **de usuario** `invest-ai.service` endurecido + entrada en el menú de KDE; `--autostart` lo arranca al iniciar sesión |
+| `./invest-ai install [--autostart] [--no-build]` | Servicio systemd **de usuario** `invest-ai.service` endurecido + entrada en el menú de KDE. Copia una versión inmutable a `~/.local/share/invest-ai/releases/` (el servicio no ejecuta el árbol de trabajo); `--autostart` lo arranca al iniciar sesión; `--no-build` instala lo ya compilado. No reinicia el servicio |
+| `./invest-ai pull [MODELO]` | Descarga el modelo (por defecto `LLM_MODEL`) si no está instalado |
 | `./invest-ai uninstall` | Quita servicio y entrada del menú (no toca `data/` ni `.env`) |
 | `./invest-ai selftest [--llm]` | Prueba de humo en < 30 s sin LLM (en ~1 s en la práctica): health, cotización real y reciente de `stock:AAPL` y `crypto:BTC` (con fuente y marca de tiempo, comprobando su antigüedad según el estado del mercado), un tick real por WebSocket, `/models` (hardware y modelo activo instalado) y cabeceras de seguridad. Usa la instancia en marcha o arranca una temporal en un puerto libre. `OK`/`FALLO` por punto; código de salida 1 si algo falla. `--llm` añade un análisis `quick` de AAPL (~40 s) |
 | `--fake` | Datos simulados, sin red ni Ollama (demo) |

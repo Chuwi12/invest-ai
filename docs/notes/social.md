@@ -83,7 +83,7 @@ mayúsculas; ≥ 4 en cualquier caso). Límites: nombres de una sola palabra cor
 
 ## Métricas (deterministas, en Rust)
 
-Por activo y momento de consulta (`social_metrics`, solo se **añaden** filas, nunca se actualizan):
+Por activo y momento de consulta (`social_metrics`, solo se **añaden** filas, nunca se actualizan; cuándo se anota una, en «Instantáneas de métricas»):
 menciones de las últimas 24 h y de la ventana, autores distintos (hash), alcistas/bajistas/neutras,
 y comparación con la media de hasta 30 bloques previos de 24 h: cociente y z (con un suelo de Poisson
 en la desviación). Tono = léxico de `ai/src/sentiment.rs` + jerga de redes (`calls`, `🚀`, `puts`…).
@@ -120,9 +120,72 @@ El juez recibe un bloque `<social_sentiment>` **aparte** de `<knowledge_base>`: 
    («presupuesto mensual agotado») y la ruta de estado marca `exhausted`.
 5. Caché de 30 min por consulta y mínimo `SOCIAL_REFRESH_MINUTES` (360) entre consultas de un activo.
 6. Estimación de coste en el log de arranque y en `GET /api/social/status` (`estimatedCostUsd`, `maxMonthlyCostUsd`).
+7. Con el presupuesto agotado hay una **espera de 1 h por activo** (en memoria): sin ella cada GET repetía la consulta y escribía otra fila `ok = 0` en `social_runs`
+   sin poder conseguir nada. Pasada la hora, o tras reiniciar con más presupuesto, se vuelve a intentar.
+8. Segunda barrera: `X_MAX_ASSETS_PER_HOUR` (más abajo) limita los activos DISTINTOS consultados en X por hora, para que símbolos inventados no agoten el mes en una tarde.
+   El presupuesto mensual cuenta SIEMPRE, también para los activos que no cuentan para ese tope.
 
 Sigue siendo una estimación: el cargo real lo decide X (p. ej. si factura también los usuarios
 expandidos, o reintentos). Pon también un límite de gasto en el panel de X.
+
+## Instantáneas de métricas: cuándo se anotan
+
+Una fila de `social_metrics` es lo que se sabía en su `as_of`; es la serie que `learning` podrá evaluar algún día. Para que ni los duplicados ni los huecos la sesguen:
+
+- **Solo tras un refresco real**: existe una ejecución correcta (`social_runs.ok = 1`) más reciente que la última instantánea del activo. Leer lo ya guardado, un fallo o
+  el presupuesto agotado (`ok = 0`) no crean ninguna.
+- **Como mucho una por activo y hora** (`METRICS_MIN_INTERVAL`).
+- Las dos condiciones se deciden dentro de la propia sentencia, `INSERT … SELECT … WHERE NOT EXISTS (instantánea en la última hora) AND EXISTS (ejecución `ok = 1` posterior
+  a la última instantánea)`, y no con un booleano en memoria. `digest_for` la intenta en **cada** llamada: es idempotente y barata (una sentencia cuyas subconsultas usan los índices por activo).
+  Así resiste:
+  - **cancelaciones**: el análisis corta `digest()` a los 20 s. Antes la decisión era `record = refreshed`, una variable de la petición; si se cancelaba después de guardar una
+    ejecución `ok = 1` y antes de anotar la instantánea, no había otra hasta el siguiente refresco (360 min). Ahora la siguiente lectura la anota;
+  - **reinicios** (no hay estado en memoria que recordar) y **peticiones concurrentes** (la sentencia es atómica).
+- Si un refresco cae dentro de la hora de otra instantánea no se anota en el momento; la primera lectura pasada la hora la anota con su `as_of` real (los datos son los de la
+  última consulta, así que no hay anticipación). Sin publicaciones guardadas no hay instantánea.
+
+Tests (`server/tests/social.rs`): `a_refresh_saved_but_cancelled_before_the_snapshot_is_recorded_by_the_next_read`, `a_refresh_saved_before_a_restart_gets_its_snapshot_from_the_new_process`,
+`metrics_snapshot_needs_a_real_refresh_and_is_at_most_hourly` y `a_failed_or_exhausted_refresh_records_no_snapshot`.
+
+## Retención
+
+Se aplica tras cada refresco y tras cada fallo registrado (`purge_old`), en la misma transacción que el guardado cuando la hay.
+
+| Tabla | Se conserva | Criterio | Por qué |
+|---|---|---|---|
+| `social_posts` | 45 d | fecha de **publicación** | más que los 30 d de línea base + el día actual |
+| `social_runs` | 45 d | `fetched_at` | dice qué periodos están observados; `stored_digest` mira 40 d atrás |
+| `social_metrics` | 365 d | `as_of` | es el material que `learning` evaluará; con una por activo y hora son como mucho 8 760 filas por activo y año |
+| `social_x_budget` | sin purga | — | una fila por mes |
+
+## Tope de activos distintos en X (`X_MAX_ASSETS_PER_HOUR`)
+
+- Entero entre 1 y 1000, **30 por defecto** (sin definir o vacío); no numérico o 0 → el valor por defecto, con un `warn` en el log. Cuenta activos DISTINTOS consultados en X en la última hora
+  (ventana móvil de 60 min); un activo ya contado en la ventana sigue pudiendo consultarse. Reddit no tiene este tope.
+- Al alcanzarlo, el activo nuevo no llega a X (no se escribe ninguna fila en `social_runs`), el error de esa lectura es «tope de activos distintos por hora en X alcanzado» y el log
+  avisa una vez por ventana. Se sigue sirviendo lo de Reddit y lo guardado.
+- **La lista de seguimiento no cuenta para el tope.** Su pasada diaria (20 activos por defecto) gastaba 20 de los 30 huecos; si el usuario abría 11 activos distintos esa hora,
+  el resto de la lista se analizaba sin X y la serie que medirá `learning` quedaba sesgada por lo que se hubiera mirado ese día. Desde `SocialData::digest(&AssetSummary)` no se
+  puede saber quién llama (el análisis corre en una tarea aparte, `analyze_stream`, y el trait no lleva origen), así que se exime **por activo, no por origen**: `SocialService::from_config`
+  lee la misma configuración que el planificador (`WatchlistConfig::from_env`; con `WATCHLIST_ENABLED=0` no hay exentos). No abre una vía de abuso: es un conjunto fijo por
+  configuración (no crece con símbolos inventados), y cada activo sigue limitado por `SOCIAL_REFRESH_MINUTES`, por la caché de 30 min y, sobre todo, por el **presupuesto mensual, que
+  cuenta siempre**. Consecuencia aceptada: abrir a mano un activo de la lista tampoco ocupa hueco.
+- **Por qué no se subió el valor por defecto en su lugar**: la pasada puede coincidir con el uso interactivo (con `WATCHLIST_TIME` por la mañana, p. ej. `09:15`, el usuario
+  también está usando la app), y un tope más alto solo traslada el problema: la lista es configurable (`WATCHLIST` puede tener más de 20 activos) y lo que se abra a la vez sigue
+  compitiendo por los mismos huecos. Con la exención, el resultado de la pasada no depende de lo que se mire ese rato ni del tamaño de la lista.
+- `GET /api/social/status` expone el estado en `x.assetsPerHour`: `{ limit, used, full, windowMinutes, exemptAssets, nextSlotAt }` (`used` = huecos ocupados ahora, sin contar los
+  exentos; `nextSlotAt` = cuándo se libera uno, `null` si no está lleno). Con `full: true`, los activos nuevos se consultan sin X hasta `nextSlotAt`.
+- Tests: `watchlist_assets_do_not_use_the_hourly_x_asset_cap_and_the_status_reports_it`, `exempt_assets_still_spend_the_monthly_budget` y `x_is_queried_for_a_limited_number_of_distinct_assets_per_hour`.
+
+## Esperas
+
+| Cuándo | Espera | Dónde |
+|---|---|---|
+| Fallo de una consulta (red, HTTP, guardado) | 10 min por activo y red | memoria |
+| Presupuesto mensual de X agotado | 1 h por activo | memoria |
+| Última consulta correcta más reciente que `SOCIAL_REFRESH_MINUTES` (360) | hasta cumplirse | `social_runs` (persiste) |
+
+Las esperas por fallo o por presupuesto viven en memoria: un reinicio las borra, y el primer GET tras él vuelve a intentarlo (con el presupuesto agotado, sin salir a la red).
 
 ## RAG (tarea opcional): no se ha hecho
 

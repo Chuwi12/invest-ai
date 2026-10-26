@@ -13,17 +13,52 @@ Estado: **implementado y probado con datos sintéticos; sin datos reales con los
 Código: `backend/crates/learning` (`rules`, `resolve`, `calibration`, `weights`, `report`, `stats`, `store`). Migración
 **`0005_learning.sql`** (tablas `analysis_outcomes`, `scoring_weights`, `learning_runs`; la 0004 es del RAG).
 
-## 1. Resultados: reglas A PRIORI (versión 1, `rules::RULE_VERSION`)
+## 1. Resultados: reglas A PRIORI (versión 2, `rules::RULE_VERSION`)
 
-Fijadas antes de ver ningún resultado. Cambiarlas exige subir `RULE_VERSION`; las filas ya etiquetadas no se reescriben y las
-estadísticas solo cuentan la versión vigente.
+Fijadas antes de ver ningún resultado. Cambiarlas exige subir `RULE_VERSION`, y **subirla re-etiqueta el histórico** con la regla
+nueva (ver «Versiones de la regla», abajo). Las estadísticas, la calibración y los pesos leen solo filas de la versión vigente:
+nunca se mezclan versiones.
 
-- **Horizontes**: 1, 4 y 12 semanas (7·h días) desde `generated_at`.
-- **Precios**: cierres diarios de `MarketData::history(…, D1)`. **Entrada** = cierre de la sesión del día (UTC) del análisis, o
-  de la siguiente si ese día no hay sesión (equivale a una orden «al cierre» ejecutable tras leer el análisis). **Salida** =
-  primer cierre con día ≥ entrada + 7·h días. La vela de salida debe estar **completa** (`t + 24 h ≤ ahora`): la vela en
-  curso (parcial) nunca se usa. Huecos > 5 días → «sin datos». Solo se usan velas, nunca `price_at_analysis` (splits).
-  Raw/ajustado: los cierres son los del proveedor (Yahoo, sin ajustar por dividendos); el sesgo afecta igual al índice.
+- **Horizontes**: 1, 4 y 12 semanas (7·h días) contadas desde el día de la **entrada** (no desde `generated_at`).
+- **Precios**: cierres diarios de `MarketData::history(…, D1)`. **Salida** = primer cierre con día ≥ entrada + 7·h días. La vela
+  de salida debe estar **completa** (`t + 24 h ≤ ahora`): la vela en curso (parcial) nunca se usa. Huecos > 5 días → «sin datos».
+  Solo se usan velas, nunca `price_at_analysis` (ver el motivo en la entrada). Raw/ajustado: los cierres son los del proveedor
+  (Yahoo, sin ajustar por dividendos); el sesgo afecta igual al índice.
+- **Entrada (regla v2, `rules::compute`)** = cierre de la **última sesión que ya había abierto cuando el análisis vio los datos**.
+  Ese instante es `generated_at − durationMs` (`generated_at` se fija al ACABAR de generar y los datos se leyeron al empezar; con
+  un LLM local son minutos y, si cruzan la apertura, la sesión que el análisis no vio parecería la última; sin `durationMs`, o con
+  más de 3 h, se usa `generated_at`). El resolutor lee ese dato del JSON de `analyses` (`resolve::analysis_meta`).
+
+  | El análisis vio los datos… | Entrada |
+  |---|---|
+  | martes 07:15 UTC (antes de abrir EE. UU.: el pase de las 09:15 de Madrid) | cierre del **lunes** |
+  | sábado, domingo o festivo | cierre del viernes (o del último día con sesión) |
+  | miércoles 15:00 UTC (mercado abierto) | cierre de **ese miércoles** |
+  | miércoles 21:30 UTC (tras el cierre) | cierre de ese miércoles |
+  | cripto, cualquier hora del martes | cierre del **martes** (día UTC) |
+
+  Criterio de inversor: el análisis decide con el precio que vio, y la rentabilidad se mide desde ahí hacia delante, sin acreditarle
+  un movimiento que ya conocía ni descartar uno que no podía conocer.
+  - *Mercado cerrado* (antes de abrir, fin de semana, festivo, tras el cierre): el precio que vio es el último cierre; la orden se
+    ejecutaría en la apertura siguiente y el hueco nocturno cuenta como resultado. → último cierre.
+  - *Mercado abierto*: vio un precio intradía que las velas diarias no tienen. El cierre **anterior** (la lectura literal de «último
+    cierre disponible») incluiría el tramo cierre-anterior → momento del análisis, que el análisis ya conocía: le acreditaría un
+    movimiento ya ocurrido (hasta ~1 de las 5 sesiones de la ventana de 1 semana) y, en el aprendizaje de pesos, haría que el
+    momentum «predijera» un movimiento que forma parte de su propia señal. El cierre de **esa** sesión es el primer precio
+    posterior que existe en las velas; descarta lo que quedaba de sesión (hasta 6,5 h), lo cual no sesga, solo resta señal.
+  - *`price_at_analysis`* (el precio exacto que vio) se descartó: (i) el benchmark necesitaría el precio de SPY/BTC en el mismo
+    instante y solo hay velas diarias, así que el exceso mezclaría instantes distintos; (ii) la cotización puede ir con retraso y sin
+    ajustar por splits, mientras que el histórico de la salida sí viene ajustado; (iii) falta en algunos análisis. Haría falta pedir velas intradía
+    del activo y del índice por cada análisis (más peticiones; no hecho).
+  - *Cripto* (24/7): no hay «mercado cerrado»; cada día UTC es una sesión que abre a las 00:00 UTC y la entrada es el cierre del día
+    UTC del análisis (igual que en la v1). **No es el precio del momento**, que las velas diarias no tienen: es el primer cierre
+    posterior, 0-24 h después. El cierre del día anterior metería hasta 24 h de movimiento ya visto (7 h en el pase de las 07:15 UTC).
+  - *Apertura de EE. UU.*: 9:30 de Nueva York, calculada con la regla de horario de verano de 2007 (2.º domingo de marzo-1.er domingo
+    de noviembre): 13:30 UTC en verano, 14:30 UTC en invierno (`rules::session_open_s`, comprobada contra la base de zonas horarias
+    en el test `session_open_matches_the_new_york_time_zone_database`). No hay calendario de festivos: la sesión se sabe por la
+    vela (el día UTC de `t`; Yahoo la fecha en la apertura y Alpha Vantage a las 00:00 UTC del día, y ambas dan el mismo día), y un
+    festivo no tiene vela. Las sesiones cortas abren igual. Un hueco > 5 días entre la última sesión abierta y el instante → «sin datos».
+  - El benchmark entra en el mismo día de vela que el activo.
 - **Benchmark** (`rules::benchmark_for`):
   - acción/ETF/fondo de EE. UU. (símbolo sin sufijo de bolsa extranjera tipo `.MC`, `.L`…) → **SPY** (exceso = activo − SPY);
   - **SPY**, `^GSPC/^IXIC/^DJI/^RUT/^NDX` y **BTC** son su propio índice → `bench_kind = absolute`: exceso = rentabilidad
@@ -44,6 +79,29 @@ estadísticas solo cuentan la versión vigente.
 - **Sin clave foránea a `analyses`** a propósito: si el usuario borra un análisis, su resultado se conserva (si no, borrar los
   fallos sesgaría el historial: sesgo de supervivencia). Test `deleting_an_analysis_keeps_its_outcome`.
 - Cada fila guarda los 7 componentes de la puntuación (riesgo invertido) para poder reentrenar sin releer el JSON.
+
+### Versiones de la regla
+
+| Versión | Entrada | Motivo |
+|---|---|---|
+| 1 | cierre de la sesión del día UTC de `generated_at`, o de la siguiente | diseño original, pensado para análisis hechos de día o tras el cierre |
+| 2 (23-oct-2026) | cierre de la última sesión ya abierta cuando el análisis vio los datos | la lista de seguimiento pasó a hacerse en una ventana (de madrugada o por la mañana de D+1): con la v1, un análisis que vio el cierre de D se medía desde el cierre de D+1. Se cambió sin ningún resultado resuelto en la BD, no por rendimiento |
+
+**Qué pasa al subir la versión** (`resolve::reopen_stale`, al principio de cada pasada de `resolve_pending`):
+- Las filas `resolved` y `skipped` de una versión anterior pasan a `retry` con la versión vigente, con las cifras de resultado
+  borradas, y se **recalculan** con el mismo tope de activos por pasada (lo que no cabe sigue en la siguiente). Las `retry` solo
+  cambian de versión. Se recalculan también las filas de análisis ya borrados (`analysis_outcomes` no tiene clave foránea): la fila
+  conserva lo necesario y, sin JSON que releer, se queda con los factores guardados y `generated_at` como instante de referencia.
+- Las cifras antiguas **no se conservan** (la fila es única por análisis y horizonte, y cambiar la clave exigiría una migración).
+  `ResolveReport.reopened` dice cuántas filas se reabrieron.
+- Nunca se mezclan: `store::resolved_rows` (estadísticas, calibración, pesos) y los contadores del panel filtran por
+  `rule_version = RULE_VERSION`. Mientras dura el recálculo la muestra es parcial pero homogénea, y lo que falta cuenta como
+  «pendiente» (antes de este cambio, las filas de una versión anterior no se recalculaban nunca, quedaban fuera de toda métrica y
+  hacían crecer `pending` para siempre).
+- **Cuidado con el uso**: re-etiquetar el histórico permite, en teoría, ajustar la regla hasta que las cifras salgan bien. Por eso
+  cada versión se anota aquí con su motivo, y el motivo no puede ser el rendimiento. No se invalidan los pesos ya adoptados con filas
+  de la versión anterior: siguen vigentes hasta que la retención o la puerta los reevalúen con filas de la vigente (hoy no hay
+  ninguno). Si una subida cambiara mucho lo medido, conviene `weights::rollback(db, None, …)`.
 
 ## 2. Calibración (`calibration`)
 
@@ -153,22 +211,67 @@ entrenamiento: puede haber filtración de información posterior a su fecha de c
 resultados invalida la medición** (sesgo de selección y de comparaciones múltiples): si hay que cambiarla, se anota la fecha y se
 mide por separado. `WATCHLIST=` en `.env` la sustituye; `/watchlist` indica si es la de por defecto (`defaultList`).
 
+**Ventana de la pasada** (rediseño del 23-oct-2026; código en `server/src/watchlist/window.rs`). El PC del usuario no está
+encendido a una hora fija (tras la recuperación fallida del 20-oct a las 23:32 no se ejecutó ninguna pasada más: «una pasada a las 23:00» no llegaba a ocurrir), así que no hay una hora
+de la pasada sino una **ventana**: la pasada del **día de bolsa D** puede hacerse en cualquier momento entre el **cierre de EE. UU. de D**
+y la **apertura siguiente** (D+1, o el lunes si D es viernes). En ese intervalo el análisis ve el cierre de D, que es lo que se mide.
+
+| | |
+|---|---|
+| Cierre / apertura | 16:00 / 9:30 **de Nueva York**, no «22:00 / 15:30 de Madrid»: los cambios de hora de EE. UU. (2.º domingo de marzo, 1.er domingo de noviembre) y de Europa (últimos domingos de marzo y octubre) no coinciden. Entre medias (2-3 semanas de marzo, 1 de octubre-noviembre; en 2026: 8-29 mar y 25 oct-1 nov) la diferencia es de 5 h y el mercado cierra a las **21:00** y abre a las **14:30** de Madrid. La hora de Nueva York se calcula con la regla de EE. UU. de 2007 (sin base de zonas horarias) |
+| Margen | La pasada no empieza hasta **30 min después del cierre** (la vela diaria tarda en consolidarse) |
+| `WATCHLIST_TIME` | Hora local **preferida** dentro de la ventana: la primera vez que el reloj la marca a partir del cierre + margen (23:00 → esa noche; 09:15 → la mañana siguiente, o el sábado si D es viernes). Si cae en plena sesión (p. ej. 16:00) se ajusta al cierre + margen **con un aviso** en el log. Un mismo valor puede valer una semana y otra no (21:30 de Madrid vale en las semanas desfasadas y no en las normales) |
+| Con la hora preferida ya pasada | Si el servidor arranca (o el equipo despierta) con la ventana abierta y la preferida ya pasó, hace la pasada **de inmediato** (`trigger = recovery`; se guardan la hora prevista, `scheduledFor`, y la real, `startedAt`). El PC encendido a las 09:00 de D+1 hace la pasada de D |
+| Fin de semana | La pasada del **viernes** vale hasta la apertura del **lunes** (sábado y domingo incluidos) |
+| Apertura sin pasada | Si llega la apertura de EE. UU. y a algún activo le falta su análisis, **esa pasada se pierde**: se registra una pasada con estado **`missed`** (un resultado `skipped` permanente por activo, con `error_code = missed` y el último error si lo hubo) y **no se analiza con el mercado abierto**. Es idempotente (un reinicio durante la sesión no la vuelve a registrar). Solo se registra la ventana más reciente: un día entero sin servidor no deja fila (queda constancia por su ausencia). Una pasada en curso se **corta a la apertura**: no se empieza ningún análisis más (queda `aborted`) y lo pendiente se registra como `missed` |
+| `local_date` | En `watchlist_runs` y `watchlist_results` es el **día de bolsa D**, no el día de ejecución (una pasada hecha el jueves a las 09:00 con el cierre del miércoles lleva `2026-10-14`) |
+| Festivos de EE. UU. | **No hay calendario**: un festivo se trata como un día laborable más. La ventana de la víspera acaba a las 9:30 del festivo y la «pasada» del festivo analiza el último cierre real (se repite el mismo cierre). Las sesiones cortas (13:00) cierran antes de las 16:00, así que el margen es conservador. Un calendario de festivos es trabajo pendiente |
+| Cripto | Opera 24/7: su precio es **el del momento de la pasada** (puede ser horas después del cierre de la bolsa), no el de las 16:00 de Nueva York. Para cripto la entrada medida por `learning` (cierre diario UTC del día del análisis) ya era una aproximación |
+
 **Programador** (tarea Tokio cancelable con `state.shutdown`):
-1. Una pasada al día a `WATCHLIST_TIME` (hora **local** del sistema). 23:00 en Madrid es posterior al cierre de EE. UU., así que el
-   análisis ve el cierre del día; la entrada del benchmark es el cierre de la sesión (`rules`).
-2. **Recuperación**: al arrancar, si ya pasó la hora de hoy y a algún activo de la lista le falta un análisis válido ese día
-   (`watchlist_results`), se lanza de inmediato con `trigger = recovery`. Se guardan la hora prevista (`scheduledFor`) y la real
-   (`startedAt`). Una pasada que quedó `running` por un apagado o caída se marca `interrupted` y sus activos sin `ok` se rehacen.
-   Solo se recupera el día en curso (un día entero sin servidor se pierde y queda constancia por la ausencia de pasada).
+1. Calcula la fase del reloj: ventana de D abierta (cierre ≤ ahora < apertura siguiente) o mercado abierto. Con el mercado abierto,
+   registra como `missed` lo que quedó pendiente de la ventana que acaba de cerrarse y espera al próximo cierre. Con la ventana abierta y
+   activos pendientes, espera a la hora preferida (si no ha llegado), la batería (ver 5) y empieza.
+2. **Recuperación**: es el caso «la hora preferida ya pasó» de la tabla. Una pasada que quedó `running` por un apagado o caída se marca
+   `interrupted` al arrancar y sus activos sin `ok` se rehacen si la ventana sigue abierta.
 3. **De uno en uno** y por el mismo camino que la API (`routes::analysis::run_to_completion`: single-flight, límite de generaciones,
    guardado en BD), con `WATCHLIST_DEPTH` y el modelo activo. Si ya había un análisis del activo en curso por la API, se suma a él.
-4. **Fallos**: un activo que falla no detiene la lista y queda registrado con código y mensaje. Los transitorios (Ollama caído,
-   límites, red) se reintentan 3 veces con espera de 1 y 5 min; con 2 activos seguidos agotados se aborta la pasada (el resto queda
-   `skipped`, visible) y se hacen hasta 3 rondas más el mismo día, cada 30 min. Los permanentes (activo inexistente) no se reintentan.
+4. **Comprobación previa y fallos.** Antes de analizar, cada ronda comprueba que **Ollama responde y que el modelo activo (el de la UI de
+   Modelos, que puede no ser el de `LLM_MODEL`) está instalado** (`watchlist::llm_ready`, con `ModelService::list`). Si no, la ronda NO
+   empieza: queda `aborted`, sus activos `skipped` transitorios (`error_code = llm_unavailable` y el motivo, visible en la vista de
+   rendimiento) y se reintenta más tarde con las rondas de siempre (3 más cada 30 min mientras la ventana lo permita; una espera que
+   cruzaría la apertura no se hace). Un activo que falla no detiene la lista y queda registrado con código y mensaje. Son **transitorios**
+   (Ollama caído, **modelo no encontrado**, timeout del LLM, límites, red): se reintentan 3 veces con espera de 1 y 5 min y, con 2 activos
+   seguidos agotados, se aborta la pasada (el resto queda `skipped`, visible). Son **permanentes** solo los fallos del propio activo
+   (activo inexistente, entrada no válida). `NotFound` es ambiguo, así que se distingue el del modelo por su texto («modelo «X»: model 'X'
+   not found», que llega con el prefijo «no encontrado: » repetido por capa) y, si un `NotFound` no lo parece, se contrasta con el estado
+   real de Ollama antes de darlo por permanente (`is_transient` / `analyze_with_retries`). No se añadió un código de error nuevo: cambiaría el
+   contrato de la API. *Motivo (20-oct-2026)*: Ollama arrancó sin los modelos, `not_found` se trató como permanente y la primera pasada real
+   marcó los 20 activos como fallo definitivo de ese día sin reintento ni aborto.
+   **Datos antiguos**: los 20 resultados del 20-oct se guardaron con `transient = 0`. No se reescriben (el histórico queda tal cual), pero
+   `pending_assets` los **reinterpreta al leer**: si el último resultado de un activo ese día es un `failed` permanente cuyo texto es el de
+   un modelo ausente, el activo vuelve a estar pendiente. Así, reiniciar el servicio con el arreglo el mismo día de bolsa (mientras su
+   ventana siga abierta) los reanaliza; los `NotFound` de verdad de un activo no coinciden con ese texto y siguen cerrados. Solo cuenta
+   mientras la ventana de ese día esté abierta: pasada la apertura siguiente queda `missed`.
 5. **Batería**: si `/sys/class/power_supply` indica que el equipo va con batería (fuentes `Mains`/`USB*` desconectadas), la pasada
-   espera a que se enchufe, con tope `WATCHLIST_BATTERY_MAX_DELAY_HOURS` (3 h; 0 = no esperar). Con la GPU limitada a ~30 W cada
-   análisis tarda el doble. Se anota en `watchlist_runs.power` (`ac`/`battery`/`unknown`) y `power_wait_secs`. Sin dato de energía no espera.
+   espera a que se enchufe, con tope `WATCHLIST_BATTERY_MAX_DELAY_HOURS` (3 h; 0 = no esperar) y, además, nunca más allá de la apertura.
+   Con la GPU limitada a ~30 W cada análisis tarda el doble. Se anota en `watchlist_runs.power` (`ac`/`battery`/`unknown`) y
+   `power_wait_secs`. Sin dato de energía no espera.
 6. Con `INVEST_AI_FAKE=1` la lista y el ciclo de aprendizaje se desactivan (datos simulados no pueden entrar en el historial).
+
+**Cómo mide `learning` la entrada de la lista (resuelto el 23-oct-2026, regla v2).** La v1 tomaba como entrada «el cierre de la sesión del
+día UTC de `generated_at`» y no leía `local_date`: con la pasada de D hecha a las 07:15 UTC de D+1, el análisis vio el cierre de D pero se
+medía desde el de D+1. La v2 usa el último cierre disponible en el momento del análisis (sección 1) y **no hace falta leer `local_date`**:
+para cualquier instante de la ventana de D (cierre de D + 30 min hasta la apertura siguiente) da el cierre de D, incluidos los fines de semana,
+los festivos de EE. UU. y los cambios de hora de EE. UU. (8-mar y 1-nov de 2026), donde la ventana pasa de 21:00-14:30 UTC a 20:00-13:30 y al
+revés. Lo comprueba el test `watchlist_passes_enter_at_the_close_of_their_trading_day` (inicio, +1 h, mitad y último segundo de siete ventanas) y, de punta a punta con
+la BD, `analysis_before_the_open_is_measured_from_the_previous_close`. Casos que quedan:
+- *Análisis en curso al llegar la apertura*: `generated_at` cae después de abrir, pero `generated_at − durationMs` (el instante en que leyó los
+  datos) cae antes y la entrada sigue siendo el cierre de D (test `the_time_the_analysis_took_moves_the_reference_instant_before_the_open`). Solo
+  fallaría si los datos se leyeron en los segundos entre la comprobación de la apertura y la lectura del snapshot, o sin `durationMs`.
+- *Cripto de la lista* (ETH, SOL): su entrada es el cierre del día UTC del análisis, o sea D+1 en el pase de las 07:15 UTC, no D. Es lo
+  coherente con «el precio del momento» (la pasada la analiza a las 07:15 UTC de D+1, no a las 22:00 de D), y su benchmark (BTC) entra el mismo día.
+- No se une con `watchlist_results`: el crate `learning` no depende de las tablas de la lista (solo de `analyses` y `analysis_outcomes`).
 
 **Aprendizaje cableado** (`main.rs`): `activate_learned_weights` al arrancar (si falla, se registra y rigen los pesos por defecto: nunca
 impide arrancar) y `run_learning_loop`: primer `run_cycle` a los 2 min y luego cada 6 h; un fallo o un panic de un ciclo se registra y se
@@ -202,6 +305,9 @@ menos sería ajustar ruido.
   info pública que el mercado descuenta: esperar ICs de 0,02–0,05, no más.
 - **Cambio de modelo**: la confianza del LLM cambia de significado al cambiar de modelo; la calibración filtra por el activo.
 - **Dividendos/splits**: cierres sin ajustar por dividendos (efecto pequeño y común al índice).
+- **Entrada con velas diarias**: el precio exacto del momento no está en ellas. Con el mercado cerrado no importa (es el último cierre);
+  con el mercado abierto y en cripto la entrada es el primer cierre posterior (0-6,5 h en bolsa, 0-24 h en cripto después), sin sesgo
+  pero con algo menos de señal. Velas intradía solo para la entrada lo afinaría a costa de más peticiones.
 - **Comparaciones múltiples**: mitigadas, no anuladas (p-valores bootstrap aproximados; ver el 3 %/3,5 % medido).
 - Los p-valores bootstrap con pocos bloques son frágiles; por eso los mínimos de bloques.
 

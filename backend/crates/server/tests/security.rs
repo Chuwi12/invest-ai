@@ -276,6 +276,90 @@ async fn m1_websocket_with_foreign_origin_is_still_rejected_and_legit_ones_conne
     assert!(ws(addr, Some("localhost:5180"), Some("http://localhost:5180")).await.is_ok());
 }
 
+// ---------- N6: cabeceras duplicadas y h2c (re-auditoría del 20-oct) ----------
+
+/// Descripción, método, ruta y cabeceras (con repeticiones) de una petición ambigua.
+type DuplicateCase<'a> = (&'a str, Method, &'a str, Vec<(&'a str, &'a str)>);
+
+#[tokio::test]
+async fn n6_duplicate_host_origin_and_sec_fetch_site_are_rejected() {
+    let app = TestApp::new().await;
+    let r = &app.router;
+    let h = ("host", "127.0.0.1:8795");
+    let json = Some(("application/json", r#"{"title":"x"}"#));
+    // El primer valor es de confianza y el segundo no: antes solo se miraba el primero.
+    let cases: [DuplicateCase; 9] = [
+        ("Sec-Fetch-Site repetida (POST)", Method::POST, "/api/conversations", vec![h, ("sec-fetch-site", "same-origin"), ("sec-fetch-site", "cross-site")]),
+        ("Sec-Fetch-Site repetida (GET de /api)", Method::GET, "/api/health", vec![h, ("sec-fetch-site", "same-origin"), ("sec-fetch-site", "cross-site")]),
+        ("Sec-Fetch-Site repetida, el ajeno primero", Method::POST, "/api/conversations", vec![h, ("sec-fetch-site", "cross-site"), ("sec-fetch-site", "same-origin")]),
+        ("Sec-Fetch-Site como lista", Method::POST, "/api/conversations", vec![h, ("sec-fetch-site", "same-origin, cross-site")]),
+        ("dos Origin", Method::POST, "/api/conversations", vec![h, ("origin", "http://127.0.0.1:8795"), ("origin", "https://evil.example")]),
+        ("dos Origin, el ajeno primero", Method::POST, "/api/conversations", vec![h, ("origin", "https://evil.example"), ("origin", "http://127.0.0.1:8795")]),
+        ("Origin como lista", Method::POST, "/api/conversations", vec![h, ("origin", "http://127.0.0.1:8795, https://evil.example")]),
+        ("dos Host", Method::GET, "/api/health", vec![h, ("host", "evil.example:8795")]),
+        ("dos Host iguales", Method::GET, "/api/health", vec![h, ("host", "127.0.0.1:8795")]),
+    ];
+    for (what, method, uri, headers) in cases {
+        let (st, _, body) = call(r, method, uri, &headers, json).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{what}: {body}");
+        assert_eq!(code_of(&body), "forbidden", "{what}");
+    }
+    // También en un fichero estático (la comprobación de cabeceras ambiguas no depende de la ruta).
+    let (st, ..) = call(r, Method::GET, "/", &[h, ("host", "evil.example:8795")], None).await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    // Control: con un solo valor de cada una, lo legítimo sigue funcionando.
+    let ok = [h, ("origin", "http://127.0.0.1:8795"), ("sec-fetch-site", "same-origin")];
+    let (st, _, body) = call(r, Method::POST, "/api/conversations", &ok, json).await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn n6_requests_without_host_header_validate_the_uri_authority() {
+    // HTTP/2 en claro (h2c) manda `:authority` y no `Host`; hyper lo pone en el authority de la URI.
+    // Antes, sin `Host` no se validaba nada. Aquí la petición se construye a mano: URI absoluta y sin `Host`.
+    let app = TestApp::new().await;
+    let r = &app.router;
+    for bad in [
+        "http://evil.example:8795/api/health",
+        "http://evil.example/api/conversations",
+        "http://localhost.evil.example:8795/api/health",
+        "http://127.0.0.1.evil.example:8795/api/health",
+        "http://localhost:80@evil.example/api/health",
+        "http://evil.example:8795/",
+    ] {
+        let (st, _, body) = call(r, Method::GET, bad, &[], None).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{bad}: {body}");
+        assert_eq!(code_of(&body), "forbidden", "{bad}");
+    }
+    // El mismo ataque de rebinding con Origin propio de la web ajena.
+    let (st, ..) = call(r, Method::POST, "http://evil.example:8795/api/conversations", &[("origin", "http://evil.example:8795")], None).await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    // Con `Host` Y authority, los dos deben ser válidos.
+    let (st, ..) = call(r, Method::GET, "http://evil.example:8795/api/health", &[("host", "127.0.0.1:8795")], None).await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "authority ajeno aunque el Host sea de loopback");
+    let (st, ..) = call(r, Method::GET, "http://127.0.0.1:8795/api/health", &[("host", "evil.example:8795")], None).await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "Host ajeno aunque el authority sea de loopback");
+    // Legítimo: authority de loopback, sin Host.
+    for good in ["http://127.0.0.1:8795/api/health", "http://localhost:8795/api/health", "http://[::1]:8795/api/health", "http://localhost:5180/api/health"] {
+        let (st, _, body) = call(r, Method::GET, good, &[], None).await;
+        assert_eq!(st, StatusCode::OK, "{good}: {body}");
+    }
+    // El `Origin` propio se reconoce con el authority cuando no hay `Host` (h2c legítimo desde el frontend).
+    let json = Some(("application/json", r#"{"title":"x"}"#));
+    let (st, _, body) = call(r, Method::POST, "http://127.0.0.1:8795/api/conversations", &[("origin", "http://127.0.0.1:8795")], json).await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    // ... y uno ajeno o de otro puerto, no.
+    for origin in ["https://evil.example", "http://localhost:9999"] {
+        let (st, ..) = call(r, Method::POST, "http://127.0.0.1:8795/api/conversations", &[("origin", origin)], json).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{origin}");
+    }
+    let (st, ..) = call(r, Method::POST, "http://127.0.0.1:8795/api/conversations", &[("sec-fetch-site", "cross-site")], json).await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    // Sin Host ni authority (HTTP/1.0, pruebas en proceso, `curl --http1.0`) sigue funcionando.
+    let (st, ..) = call(r, Method::GET, "/api/health", &[], None).await;
+    assert_eq!(st, StatusCode::OK);
+}
+
 // ---------- S-03: cabeceras ----------
 
 /// `frontend/dist`, o la carpeta de `INVEST_AI_DIST_DIR` (para probar otra compilación, p. ej. una

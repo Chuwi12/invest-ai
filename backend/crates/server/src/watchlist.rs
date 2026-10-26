@@ -1,16 +1,30 @@
 //! Lista de seguimiento: análisis diarios, automáticos y de uno en uno de una lista fija de
 //! activos, para construir un historial de aciertos medido fuera de muestra (`docs/notes/learning.md`).
 //!
-//! - **Programador** ([`run_scheduler`]): una pasada al día a `WATCHLIST_TIME` (hora local). Si el
-//!   servidor arranca cuando ya pasó la hora y ese día aún faltan activos, la recupera de inmediato
-//!   (`trigger = recovery`; se anota la hora real de inicio junto a la prevista).
+//! - **Ventana** ([`window`]): la pasada del día de bolsa D se puede hacer en cualquier momento entre
+//!   el cierre de EE. UU. de D y la apertura siguiente (D+1, o el lunes si D es viernes): en ese
+//!   intervalo el análisis ve el cierre de D, que es lo que mide `learning`. El PC del usuario no está
+//!   encendido a una hora fija, así que no hay «hora de la pasada» sino una ventana de ~17 h (más el fin
+//!   de semana). `local_date` de `watchlist_runs` / `watchlist_results` es el día de bolsa D, no el de
+//!   ejecución.
+//! - **Programador** ([`run_scheduler`]): `WATCHLIST_TIME` es la hora *preferida* dentro de la ventana
+//!   (fuera de ella se ajusta con aviso). Si el servidor arranca con la ventana abierta y la hora
+//!   preferida ya pasó, hace la pasada de inmediato (`trigger = recovery`; se anota la hora real junto a
+//!   la prevista). Si llega la apertura sin haberla hecho, esa pasada se PIERDE: se registra como
+//!   `missed` y no se analiza con el mercado abierto. Una pasada en curso se corta a la apertura.
 //! - **Ejecución** ([`run_round`]): los activos de uno en uno (una sola GPU) por el mismo camino que
 //!   la API (`routes::analysis::run_to_completion`: single-flight, límite de generaciones, guardado
 //!   en BD con `origin = 'watchlist'`). Cada intento y cada fallo queda en `watchlist_results`.
-//! - **Fallos**: un activo que falla no detiene la lista. Los fallos transitorios (Ollama caído,
-//!   límites, red) se reintentan con espera; si fallan varios activos seguidos se aborta la pasada
-//!   (no tiene sentido recorrer 20 activos contra un Ollama muerto) y se reintenta el resto más tarde
-//!   el mismo día. Nada de esto bloquea el servidor: corre en su propia tarea.
+//! - **Comprobación previa** ([`llm_ready`]): antes de analizar nada, cada ronda comprueba que Ollama
+//!   responde y que el modelo activo está instalado. Si no, la ronda NO empieza: queda registrada como
+//!   `aborted`, sus activos como `skipped` transitorios (con el motivo) y se reintenta más tarde el
+//!   mismo día con las rondas y esperas de [`RetryPolicy`]. Nunca marca un activo como fallo permanente
+//!   por una avería de infraestructura (el 20-oct-2026 una pasada marcó así los 20 activos).
+//! - **Fallos**: un activo que falla no detiene la lista. Los fallos transitorios (Ollama caído o
+//!   sin el modelo, timeout del LLM, límites, red; ver [`is_transient`]) se reintentan con espera; si
+//!   fallan varios activos seguidos se aborta la pasada (no tiene sentido recorrer 20 activos contra un
+//!   Ollama muerto) y se reintenta el resto más tarde el mismo día. Solo son permanentes los fallos del
+//!   propio activo (no existe, entrada no válida). Nada de esto bloquea el servidor: corre en su propia tarea.
 //! - **Reloj** ([`Clock`]): inyectable. En producción [`SystemClock`] (zona local del sistema);
 //!   en pruebas [`ManualClock`].
 
@@ -18,10 +32,15 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
-use chrono::{DateTime, Days, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use domain::{AnalysisDepth, AssetId, DomainError};
 use futures::FutureExt;
 use tokio::sync::watch;
+
+pub mod window;
+
+pub use window::next_due;
+use window::{Phase, Window, phase_at, preferred_instant};
 
 use crate::{
     repo::watchlist::{self as repo, DayState, NewResult},
@@ -75,7 +94,8 @@ pub struct WatchlistConfig {
     pub assets: Vec<AssetId>,
     /// `true` si `WATCHLIST` estaba vacío y se usa la lista a priori.
     pub default_list: bool,
-    /// Hora local de la pasada diaria.
+    /// Hora local PREFERIDA de la pasada dentro de su ventana (entre el cierre de EE. UU. y la apertura
+    /// siguiente); si cae fuera, se ajusta con aviso. Ver [`window`].
     pub time: NaiveTime,
     pub depth: AnalysisDepth,
     pub retry: RetryPolicy,
@@ -344,9 +364,10 @@ impl PowerProbe for ManualPower {
     }
 }
 
-/// Espera (hasta `battery_max_delay`) a que el equipo se enchufe. Devuelve la etiqueta de energía
-/// con la que empezar y los segundos esperados; `None` = apagado.
-async fn wait_for_power(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Clock) -> Option<(&'static str, i64)> {
+/// Espera (hasta `battery_max_delay`, y nunca más allá de `deadline`, el fin de la ventana) a que el
+/// equipo se enchufe. Devuelve la etiqueta de energía con la que empezar y los segundos esperados;
+/// `None` = apagado.
+async fn wait_for_power(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Clock, deadline: DateTime<Utc>) -> Option<(&'static str, i64)> {
     let start = clock.now();
     let mut announced = false;
     loop {
@@ -357,7 +378,7 @@ async fn wait_for_power(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Clo
             Some(false) => "ac",
             None => "unknown",
         };
-        let max = chrono::Duration::from_std(cfg.battery_max_delay).unwrap_or_default();
+        let max = chrono::Duration::from_std(cfg.battery_max_delay).unwrap_or_default().min((deadline - start).max(chrono::Duration::zero()));
         if on_battery != Some(true) || waited >= max {
             if on_battery == Some(true) {
                 tracing::warn!(horas = waited.num_minutes() as f64 / 60.0, "lista de seguimiento: sigue con batería; se hace la pasada igualmente (tope de espera)");
@@ -378,29 +399,6 @@ async fn wait_for_power(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Clo
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Fechas
-// ---------------------------------------------------------------------------------------------
-
-fn local_day(clock: &dyn Clock, t: DateTime<Utc>) -> NaiveDate {
-    clock.utc_to_local(t).date()
-}
-
-fn due_of(clock: &dyn Clock, day: NaiveDate, time: NaiveTime) -> DateTime<Utc> {
-    clock.local_to_utc(day.and_time(time))
-}
-
-/// Próxima hora programada estrictamente posterior a `now` si hoy ya pasó, o la de hoy si no.
-pub fn next_due(clock: &dyn Clock, now: DateTime<Utc>, time: NaiveTime) -> DateTime<Utc> {
-    let day = local_day(clock, now);
-    let today = due_of(clock, day, time);
-    if now < today { today } else { due_of(clock, day + Days::new(1), time) }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Programador
-// ---------------------------------------------------------------------------------------------
-
 /// Espera cancelable por el apagado. `false` = hay que salir.
 async fn wait_until(state: &AppState, clock: &dyn Clock, t: DateTime<Utc>) -> bool {
     tokio::select! {
@@ -409,8 +407,11 @@ async fn wait_until(state: &AppState, clock: &dyn Clock, t: DateTime<Utc>) -> bo
     }
 }
 
-/// Pasada tardía: si empieza más de esto después de la hora prevista, cuenta como recuperación.
+/// Pasada tardía: si empieza más de esto después de la hora preferida, cuenta como recuperación.
 const LATE_AFTER: chrono::Duration = chrono::Duration::minutes(10);
+
+/// Espera tras un fallo al leer el registro.
+const DB_RETRY: chrono::Duration = chrono::Duration::minutes(5);
 
 pub async fn run_scheduler(state: AppState, cfg: Arc<WatchlistConfig>, clock: Arc<dyn Clock>) {
     if !cfg.enabled {
@@ -421,52 +422,83 @@ pub async fn run_scheduler(state: AppState, cfg: Arc<WatchlistConfig>, clock: Ar
         Ok(n) => tracing::warn!(n, "lista de seguimiento: había pasadas sin terminar de una ejecución anterior (marcadas como interrumpidas)"),
         Err(e) => tracing::error!(error = %e, "lista de seguimiento: no se pudo revisar el registro"),
     }
-    tracing::info!(activos = cfg.assets.len(), hora = %cfg.time, profundidad = ?cfg.depth, "lista de seguimiento activa");
-    let mut first = true;
-    // Día en el que ya se agotaron las rondas: no insistir hasta el siguiente.
-    let mut gave_up: Option<NaiveDate> = None;
+    tracing::info!(activos = cfg.assets.len(), hora_preferida = %cfg.time, profundidad = ?cfg.depth, "lista de seguimiento activa");
+    {
+        // Aviso temprano (aunque la pasada de hoy ya esté hecha): ¿cae WATCHLIST_TIME dentro de la ventana que viene?
+        let upcoming = match phase_at(clock.now()) {
+            Phase::Window(w) | Phase::MarketOpen { next: w, .. } => w,
+        };
+        let (at, adjusted) = preferred_instant(clock.as_ref(), &upcoming, cfg.time);
+        tracing::info!(dia_de_bolsa = %upcoming.day, desde = %upcoming.start, hasta = %upcoming.end, preferida = %at, "lista de seguimiento: ventana de la pasada");
+        if adjusted {
+            warn_time_adjusted(&cfg, clock.as_ref(), &upcoming, at);
+        }
+    }
+    // Día de bolsa en el que ya se agotaron las rondas: no insistir hasta la siguiente ventana.
+    let mut gave_up: Option<chrono::NaiveDate> = None;
+    // Día de bolsa del que ya se avisó de que la hora preferida cae fuera de su ventana.
+    let mut warned_time: Option<chrono::NaiveDate> = None;
     loop {
         if state.shutdown.is_cancelled() {
             return;
         }
         let now = clock.now();
-        let day = local_day(clock.as_ref(), now);
-        let due = due_of(clock.as_ref(), day, cfg.time);
-        if now < due {
-            if !wait_until(&state, clock.as_ref(), due).await {
-                return;
+        let w = match phase_at(now) {
+            Phase::MarketOpen { ended, next } => {
+                // La apertura cerró la ventana de `ended`: lo que no se hizo se pierde, y queda registrado.
+                if let Err(e) = record_missed(&state, &cfg, clock.as_ref(), &ended).await {
+                    tracing::error!(error = %e, "lista de seguimiento: no se pudo registrar la pasada perdida; se reintenta en 5 min");
+                    if !wait_until(&state, clock.as_ref(), now + DB_RETRY).await {
+                        return;
+                    }
+                    continue;
+                }
+                if !wait_until(&state, clock.as_ref(), next.start).await {
+                    return;
+                }
+                continue;
             }
-            first = false;
-            continue;
-        }
-        let date = day.to_string();
+            Phase::Window(w) => w,
+        };
+        let date = w.day.to_string();
         let pending = match pending_assets(&state, &cfg, &date).await {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!(error = %e, "lista de seguimiento: no se pudo leer el registro; se reintenta en 5 min");
-                if !wait_until(&state, clock.as_ref(), now + chrono::Duration::minutes(5)).await {
+                if !wait_until(&state, clock.as_ref(), now + DB_RETRY).await {
                     return;
                 }
                 continue;
             }
         };
-        if pending.is_empty() || gave_up == Some(day) {
-            first = false;
-            let tomorrow = due_of(clock.as_ref(), day + Days::new(1), cfg.time);
-            if !wait_until(&state, clock.as_ref(), tomorrow).await {
+        if pending.is_empty() || gave_up == Some(w.day) {
+            // Hecho (o sin remedio) por hoy: a esperar a que se cierre la ventana (la apertura).
+            if !wait_until(&state, clock.as_ref(), w.end).await {
                 return;
             }
             continue;
         }
-        let mut trigger = if (first && now > due) || now - due > LATE_AFTER { "recovery" } else { "schedule" };
-        first = false;
+        let (preferred, adjusted) = preferred_instant(clock.as_ref(), &w, cfg.time);
+        if adjusted && warned_time != Some(w.day) {
+            warned_time = Some(w.day);
+            warn_time_adjusted(&cfg, clock.as_ref(), &w, preferred);
+        }
+        if now < preferred {
+            if !wait_until(&state, clock.as_ref(), preferred).await {
+                return;
+            }
+            continue; // se vuelve a evaluar: el reloj pudo saltar (suspensión) más allá de la ventana
+        }
+        let mut trigger = if now - preferred > LATE_AFTER { "recovery" } else { "schedule" };
         let mut round = 1;
-        let mut power = match wait_for_power(&state, &cfg, clock.as_ref()).await {
-            Some(p) => p,
-            None => return,
+        let Some(mut power) = wait_for_power(&state, &cfg, clock.as_ref(), w.end).await else {
+            return;
         };
+        if clock.now() >= w.end {
+            continue; // la espera por la batería agotó la ventana
+        }
         loop {
-            let fut = run_round(&state, &cfg, clock.as_ref(), day, due, trigger, power);
+            let fut = run_round(&state, &cfg, clock.as_ref(), &w, preferred, trigger, power);
             match std::panic::AssertUnwindSafe(fut).catch_unwind().await {
                 Ok(Ok(RoundEnd::Shutdown)) => return,
                 Ok(Ok(RoundEnd::Finished)) => {}
@@ -481,17 +513,19 @@ pub async fn run_scheduler(state: AppState, cfg: Arc<WatchlistConfig>, clock: Ar
                 break;
             }
             if round >= cfg.retry.max_rounds {
-                tracing::warn!(left, "lista de seguimiento: se agotaron las rondas de hoy; quedan activos sin analizar");
-                gave_up = Some(day);
+                tracing::warn!(left, "lista de seguimiento: se agotaron las rondas de esta ventana; quedan activos sin analizar");
+                gave_up = Some(w.day);
+                break;
+            }
+            let resume = clock.now() + chrono::Duration::from_std(cfg.retry.round_cooldown).unwrap_or_default();
+            if resume >= w.end {
+                tracing::warn!(left, "lista de seguimiento: la ventana se cierra antes de la siguiente ronda; quedan activos sin analizar");
+                gave_up = Some(w.day);
                 break;
             }
             tracing::warn!(left, espera = ?cfg.retry.round_cooldown, "lista de seguimiento: quedan activos por analizar; otra ronda más tarde");
-            let resume = clock.now() + chrono::Duration::from_std(cfg.retry.round_cooldown).unwrap_or_default();
             if !wait_until(&state, clock.as_ref(), resume).await {
                 return;
-            }
-            if local_day(clock.as_ref(), clock.now()) != day {
-                break; // cambió el día: la pasada de mañana empieza de cero
             }
             round += 1;
             trigger = "retry";
@@ -504,15 +538,115 @@ pub async fn run_scheduler(state: AppState, cfg: Arc<WatchlistConfig>, clock: Ar
     }
 }
 
+fn warn_time_adjusted(cfg: &WatchlistConfig, clock: &dyn Clock, w: &Window, used: DateTime<Utc>) {
+    tracing::warn!(
+        hora = %cfg.time, usada = %clock.utc_to_local(used).time(), dia_de_bolsa = %w.day,
+        "lista de seguimiento: WATCHLIST_TIME cae fuera de la ventana de la pasada (entre el cierre de EE. UU. y la apertura siguiente, hora de Nueva York); se usa la primera hora válida"
+    );
+}
+
+/// La ventana de `w` se cerró (llegó la apertura): los activos que siguen sin análisis válido ese día de
+/// bolsa se dan por PERDIDOS. Se registra una pasada `missed` con un resultado `skipped` (permanente, así
+/// que no vuelven a estar pendientes ni se vuelve a registrar) por activo, con el último error si lo hubo.
+/// Es idempotente: sin activos pendientes no hace nada.
+async fn record_missed(state: &AppState, cfg: &WatchlistConfig, clock: &dyn Clock, w: &Window) -> Result<(), crate::error::ApiError> {
+    let date = w.day.to_string();
+    let pending = pending_assets(state, cfg, &date).await?;
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let last_errors = last_errors(&state.db, &date).await?;
+    let now = clock.now().timestamp_millis();
+    let depth = serde_json::to_value(cfg.depth).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+    let run_id = repo::start_run(
+        &state.db,
+        repo::NewRun {
+            local_date: &date,
+            scheduled_for: preferred_instant(clock, w, cfg.time).0.timestamp_millis(),
+            started_at: now,
+            trigger: "schedule",
+            depth: &depth,
+            planned: pending.len(),
+            power: "unknown",
+            power_wait_secs: 0,
+        },
+    )
+    .await?;
+    let opened = clock.utc_to_local(w.end);
+    for id in &pending {
+        let mut msg = format!(
+            "pasada del día de bolsa {} perdida: el mercado de EE. UU. abrió ({} UTC, {} locales) sin que este activo tuviera un análisis con el cierre; no se analiza con el mercado abierto",
+            w.day, w.end.format("%Y-%m-%d %H:%M"), opened.format("%Y-%m-%d %H:%M"),
+        );
+        if let Some(prev) = last_errors.get(&id.to_string()) {
+            msg.push_str(&format!(". Último intento: {prev}"));
+        }
+        repo::add_result(
+            &state.db,
+            NewResult {
+                run_id, local_date: &date, asset: id, status: "skipped", transient: false, attempts: 0,
+                analysis_id: None, verdict: None, error_code: Some("missed"), error: Some(&msg),
+                started_at: now, finished_at: now,
+            },
+        )
+        .await?;
+    }
+    repo::finish_run(&state.db, run_id, "missed", now).await?;
+    tracing::warn!(run_id, dia = %w.day, perdidos = pending.len(), "lista de seguimiento: llegó la apertura sin completar la pasada; se registra como perdida (missed)");
+    Ok(())
+}
+
+/// Último error registrado de cada activo ese día de bolsa (para el motivo de una pasada perdida).
+async fn last_errors(db: &sqlx::SqlitePool, date: &str) -> Result<std::collections::HashMap<String, String>, crate::error::ApiError> {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT asset_id, error FROM watchlist_results r
+          WHERE local_date = ?1 AND error IS NOT NULL
+            AND id = (SELECT MAX(id) FROM watchlist_results WHERE local_date = ?1 AND asset_id = r.asset_id)",
+    )
+    .bind(date)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().filter_map(|(a, e)| e.map(|e| (a, e))).collect())
+}
+
 /// Activos de la lista que ese día aún necesitan un análisis válido.
+///
+/// Reinterpreta los fallos antiguos: antes de distinguir «modelo no encontrado» de «activo no
+/// encontrado», una avería de Ollama dejaba `transient = 0` (permanente) en `watchlist_results`. Si el
+/// ÚLTIMO resultado de un activo ese día es uno de ésos (`failed`, permanente y con el texto del error
+/// de un modelo ausente), el activo vuelve a estar pendiente. No se modifica ninguna fila: es una
+/// lectura, así que es idempotente y el histórico queda tal cual. Un `NotFound` de verdad del activo
+/// («activo desconocido», «sin cotización»…) no coincide y sigue siendo permanente.
 async fn pending_assets(state: &AppState, cfg: &WatchlistConfig, date: &str) -> Result<Vec<AssetId>, crate::error::ApiError> {
     let states = repo::day_states(&state.db, date).await?;
+    let revived = legacy_model_failures(&state.db, date).await?;
     Ok(cfg
         .assets
         .iter()
-        .filter(|a| matches!(states.get(&a.to_string()).copied(), None | Some(DayState::Pending)))
+        .filter(|a| {
+            let id = a.to_string();
+            match states.get(&id).copied() {
+                None | Some(DayState::Pending) => true,
+                Some(DayState::GaveUp) => revived.contains(&id),
+                Some(DayState::Done) => false,
+            }
+        })
         .cloned()
         .collect())
+}
+
+/// Activos cuyo último resultado del día es un fallo guardado como permanente pero causado por la
+/// ausencia del modelo (ver [`pending_assets`]).
+async fn legacy_model_failures(db: &sqlx::SqlitePool, date: &str) -> Result<std::collections::HashSet<String>, crate::error::ApiError> {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT asset_id, error FROM watchlist_results r
+          WHERE local_date = ?1 AND status = 'failed' AND transient = 0
+            AND id = (SELECT MAX(id) FROM watchlist_results WHERE local_date = ?1 AND asset_id = r.asset_id)",
+    )
+    .bind(date)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().filter(|(_, e)| e.as_deref().is_some_and(is_model_missing)).map(|(a, _)| a).collect())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -521,14 +655,62 @@ pub enum RoundEnd {
     Shutdown,
 }
 
-/// Se considera transitorio cualquier fallo salvo «no existe» y «entrada no válida».
+/// Se considera transitorio cualquier fallo salvo «el activo no existe» y «entrada no válida».
+///
+/// `NotFound` es ambiguo: lo produce tanto un activo inexistente (permanente) como Ollama cuando no
+/// tiene el modelo (avería de infraestructura, transitoria: el modelo puede volver a estar, p. ej.
+/// cuando arranca el Ollama bueno). Se distingue por el texto ([`is_model_missing`]) porque el error
+/// llega al programador como evento `{code, message}` y pierde su tipo (`DomainError::from_code`);
+/// añadir un código nuevo cambiaría el contrato de la API. Además `analyze_with_retries` contrasta
+/// cualquier `NotFound` «permanente» con el estado real de Ollama (ver ahí).
 fn is_transient(e: &DomainError) -> bool {
-    !matches!(e, DomainError::NotFound(_) | DomainError::InvalidInput(_))
+    match e {
+        DomainError::NotFound(m) => is_model_missing(m),
+        DomainError::InvalidInput(_) => false,
+        _ => true,
+    }
+}
+
+/// ¿Dice este mensaje que falta el MODELO (y no el activo)? Cubre el formato de `ai`
+/// (`ollama::check_status`: «modelo «X»: model 'X' not found»; `ModelManager`: «modelo «X» no
+/// instalado»), que además se antepone «no encontrado: » en cada capa por la que pasa
+/// (`DomainError` -> `AnalysisEvent::Error` -> `from_code`), y el texto crudo de Ollama
+/// («model 'X' not found», «model \"X\" not found, try pulling it first»). Los `NotFound` de los
+/// activos («activo desconocido: …», «sin cotización», «HTTP 404»…) no lo contienen.
+fn is_model_missing(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("modelo «") || ((m.contains("model '") || m.contains("model \"")) && m.contains("not found"))
+}
+
+/// Tope de la comprobación previa: `ModelService::list` consulta a Ollama con sus propios plazos.
+const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Comprobación previa de una ronda: Ollama responde y el modelo ACTIVO (el de la UI de Modelos, que
+/// puede no ser el de `LLM_MODEL`) está instalado. `Err` lleva el motivo, en español, para el registro.
+pub(crate) async fn llm_ready(state: &AppState) -> Result<(), String> {
+    let list = tokio::time::timeout(PREFLIGHT_TIMEOUT, state.models.list())
+        .await
+        .map_err(|_| "la consulta de modelos a Ollama no respondió a tiempo".to_string())?;
+    let active = list.active.trim().to_string();
+    if !list.ollama_reachable {
+        return Err(format!("Ollama no responde: no se puede comprobar el modelo activo «{active}»"));
+    }
+    // Un id sin etiqueta («llama3») es «llama3:latest» en Ollama.
+    let latest = format!("{active}:latest");
+    let installed = list
+        .models
+        .iter()
+        .any(|m| m.installed && (m.id == active || (!active.contains(':') && m.id == latest)));
+    if installed {
+        Ok(())
+    } else {
+        Err(format!("el modelo activo «{active}» no está instalado en el Ollama que responde (Ajustes -> Modelos, o ./invest-ai pull)"))
+    }
 }
 
 enum Attempt {
     Ok(Box<domain::Analysis>, u32),
-    Failed { error: DomainError, attempts: u32 },
+    Failed { error: DomainError, attempts: u32, transient: bool },
     Shutdown,
 }
 
@@ -537,6 +719,7 @@ async fn analyze_with_retries(
     cfg: &WatchlistConfig,
     clock: &dyn Clock,
     id: &AssetId,
+    deadline: DateTime<Utc>,
 ) -> Attempt {
     let mut attempts = 0;
     loop {
@@ -550,12 +733,25 @@ async fn analyze_with_retries(
             Err(_) if state.shutdown.is_cancelled() => return Attempt::Shutdown,
             Err(error) => {
                 tracing::warn!(%id, attempts, %error, "lista de seguimiento: análisis fallido");
-                if !is_transient(&error) || attempts >= cfg.retry.attempts {
-                    return Attempt::Failed { error, attempts };
+                let mut transient = is_transient(&error);
+                if !transient && matches!(error, DomainError::NotFound(_)) {
+                    // Un «no encontrado» que no parece del modelo: antes de darlo por permanente,
+                    // se mira si Ollama está sin el modelo (o caído). Si lo está, fue la avería.
+                    if let Err(reason) = llm_ready(state).await {
+                        tracing::warn!(%id, %reason, "lista de seguimiento: el «no encontrado» era una avería del LLM; se trata como transitorio");
+                        transient = true;
+                    }
+                }
+                if !transient || attempts >= cfg.retry.attempts {
+                    return Attempt::Failed { error, attempts, transient };
                 }
                 let idx = (attempts as usize - 1).min(cfg.retry.backoff.len().saturating_sub(1));
                 let wait = cfg.retry.backoff.get(idx).copied().unwrap_or(Duration::from_secs(60));
                 let until = clock.now() + chrono::Duration::from_std(wait).unwrap_or_default();
+                if until >= deadline {
+                    // La espera cruzaría la apertura: no hay más intentos con el mercado cerrado.
+                    return Attempt::Failed { error, attempts, transient };
+                }
                 if !wait_until(state, clock, until).await {
                     return Attempt::Shutdown;
                 }
@@ -564,17 +760,19 @@ async fn analyze_with_retries(
     }
 }
 
-/// Una ronda: los activos pendientes del día, de uno en uno. Registra todo en BD.
+/// Una ronda: los activos pendientes del día de bolsa de `w`, de uno en uno. Registra todo en BD.
+/// `due` es la hora preferida de la pasada. A la apertura (`w.end`) se corta: no se empieza ningún
+/// análisis más y la ronda queda `aborted`; lo pendiente lo registra el programador como perdido.
 pub async fn run_round(
     state: &AppState,
     cfg: &WatchlistConfig,
     clock: &dyn Clock,
-    day: NaiveDate,
+    w: &Window,
     due: DateTime<Utc>,
     trigger: &str,
     power: (&str, i64),
 ) -> Result<RoundEnd, crate::error::ApiError> {
-    let date = day.to_string();
+    let date = w.day.to_string();
     let pending = pending_assets(state, cfg, &date).await?;
     let depth = serde_json::to_value(cfg.depth).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
     let run_id =
@@ -594,9 +792,36 @@ pub async fn run_round(
         .await?;
     tracing::info!(run_id, trigger, planned = pending.len(), "lista de seguimiento: empieza la pasada");
 
+    // Comprobación previa: sin Ollama o sin el modelo, ni se empieza. Los activos quedan `skipped`
+    // transitorios (se ve el motivo y siguen pendientes) y la ronda `aborted`; el programador reintenta.
+    if let Err(reason) = llm_ready(state).await {
+        tracing::warn!(run_id, %reason, "lista de seguimiento: el LLM no está listo; la pasada no empieza y se reintentará más tarde");
+        let now = clock.now().timestamp_millis();
+        for id in &pending {
+            repo::add_result(
+                &state.db,
+                NewResult {
+                    run_id, local_date: &date, asset: id, status: "skipped", transient: true, attempts: 0,
+                    analysis_id: None, verdict: None, error_code: Some("llm_unavailable"), error: Some(&reason),
+                    started_at: now, finished_at: now,
+                },
+            )
+            .await?;
+        }
+        repo::finish_run(&state.db, run_id, "aborted", now).await?;
+        return Ok(RoundEnd::Finished);
+    }
+
     let mut transient_streak = 0;
     let mut aborted = false;
+    let mut window_closed = false;
     for id in &pending {
+        if !aborted && clock.now() >= w.end {
+            // Llegó la apertura: ni un análisis más con el mercado abierto.
+            tracing::warn!(run_id, "lista de seguimiento: llegó la apertura de EE. UU.; se corta la pasada");
+            window_closed = true;
+            break;
+        }
         let started = clock.now().timestamp_millis();
         if aborted {
             repo::add_result(
@@ -611,7 +836,7 @@ pub async fn run_round(
             .await?;
             continue;
         }
-        match analyze_with_retries(state, cfg, clock, id).await {
+        match analyze_with_retries(state, cfg, clock, id, w.end).await {
             Attempt::Shutdown => {
                 repo::finish_run(&state.db, run_id, "interrupted", clock.now().timestamp_millis()).await?;
                 return Ok(RoundEnd::Shutdown);
@@ -630,8 +855,7 @@ pub async fn run_round(
                 )
                 .await?;
             }
-            Attempt::Failed { error, attempts } => {
-                let transient = is_transient(&error);
+            Attempt::Failed { error, attempts, transient } => {
                 transient_streak = if transient { transient_streak + 1 } else { 0 };
                 repo::add_result(
                     &state.db,
@@ -649,7 +873,7 @@ pub async fn run_round(
             }
         }
     }
-    let status = if aborted { "aborted" } else { "completed" };
+    let status = if aborted || window_closed { "aborted" } else { "completed" };
     repo::finish_run(&state.db, run_id, status, clock.now().timestamp_millis()).await?;
     tracing::info!(run_id, status, "lista de seguimiento: pasada terminada");
     Ok(RoundEnd::Finished)
@@ -708,7 +932,7 @@ pub async fn run_learning_loop(state: AppState, every: Duration, first_delay: Du
 
 #[cfg(test)]
 mod tests {
-    use chrono::LocalResult;
+    use chrono::{LocalResult, NaiveDate};
 
     use super::*;
 
@@ -785,6 +1009,39 @@ mod tests {
         NaiveTime::from_hms_opt(h, m, 0).unwrap()
     }
 
+    /// Texto real del registro del 20-oct-2026 (tres capas de «no encontrado: »).
+    const MODEL_MISSING_20_OCT: &str =
+        "no encontrado: no encontrado: no encontrado: modelo «qwen3.5:9b»: model 'qwen3.5:9b' not found";
+
+    #[test]
+    fn el_not_found_del_modelo_es_transitorio_y_el_del_activo_permanente() {
+        let nf = |m: &str| DomainError::NotFound(m.to_string());
+        // Del modelo: el formato de `ai` en cualquier capa, el crudo de Ollama y el de `ModelManager`.
+        assert!(is_transient(&nf(MODEL_MISSING_20_OCT)));
+        assert!(is_transient(&nf("modelo «qwen3.5:9b»: model 'qwen3.5:9b' not found")));
+        assert!(is_transient(&nf("model 'qwen3.5:9b' not found")));
+        assert!(is_transient(&nf("model \"qwen3.5:9b\" not found, try pulling it first")));
+        assert!(is_transient(&nf("modelo «qwen3.5:9b» no instalado")));
+        // Del activo: siguen siendo permanentes.
+        for m in ["activo desconocido: stock:ZZZZ", "no encontrado: sin cotización para stock:ZZZZ", "HTTP 404", "par no listado en Binance", "stock:MODEL no figura en la SEC"] {
+            assert!(!is_transient(&nf(m)), "{m}");
+        }
+        // El resto de errores de infraestructura (Ollama caído, timeout del LLM, límites) son transitorios;
+        // la entrada no válida, no.
+        assert!(is_transient(&DomainError::Unavailable("no se pudo conectar con Ollama (¿está en marcha?)".into())));
+        assert!(is_transient(&DomainError::Upstream { provider: "ollama".into(), message: "Ollama no respondió a tiempo".into() }));
+        assert!(is_transient(&DomainError::RateLimited { provider: "yahoo".into() }));
+        assert!(is_transient(&DomainError::Internal("x".into())));
+        assert!(!is_transient(&DomainError::InvalidInput("x".into())));
+    }
+
+    #[test]
+    fn la_reinterpretacion_de_fallos_antiguos_solo_reconoce_el_modelo() {
+        assert!(is_model_missing(MODEL_MISSING_20_OCT));
+        assert!(!is_model_missing("no encontrado: activo desconocido: stock:ZZZZ"));
+        assert!(!is_model_missing("fallo simulado del analista"));
+    }
+
     #[test]
     fn la_zona_de_prueba_modela_hueco_y_solape() {
         let tz = Madrid;
@@ -817,34 +1074,29 @@ mod tests {
     }
 
     #[test]
-    fn next_due_a_las_23_el_dia_del_cambio_de_primavera() {
+    fn next_due_el_lunes_tras_el_cambio_de_hora_de_madrid() {
         let c = MadridClock;
-        // Víspera (13:00 CET): hoy a las 23:00 CET = 22:00 UTC.
-        assert_eq!(next_due(&c, utc(2025, 3, 29, 12, 0), hm(23, 0)), utc(2025, 3, 29, 22, 0));
-        // Ya pasó: mañana (día del cambio) a las 23:00 CEST = 21:00 UTC, no 22:00.
-        assert_eq!(next_due(&c, utc(2025, 3, 29, 22, 30), hm(23, 0)), utc(2025, 3, 30, 21, 0));
-        // El propio día del cambio, por la tarde: hoy a las 23:00 CEST.
-        assert_eq!(next_due(&c, utc(2025, 3, 30, 12, 0), hm(23, 0)), utc(2025, 3, 30, 21, 0));
-        // Y el siguiente, ya en horario de verano.
-        assert_eq!(next_due(&c, utc(2025, 3, 30, 21, 30), hm(23, 0)), utc(2025, 3, 31, 21, 0));
+        // Sábado 29-mar-2025 (CET): la siguiente pasada preferida (23:00) es la del lunes 31, ya en CEST
+        // (21:00 UTC, no 22:00 UTC: el cambio de hora de Madrid ocurre el domingo, entre medias).
+        assert_eq!(next_due(&c, utc(2025, 3, 29, 12, 0), hm(23, 0)), utc(2025, 3, 31, 21, 0));
+        // Sábado 25-oct-2025 (CEST): el lunes 27 ya es CET (22:00 UTC).
+        assert_eq!(next_due(&c, utc(2025, 10, 25, 12, 0), hm(23, 0)), utc(2025, 10, 27, 22, 0));
+        // Entre semana: la de esa noche si no ha pasado, la de la siguiente si sí.
+        assert_eq!(next_due(&c, utc(2025, 3, 26, 12, 0), hm(23, 0)), utc(2025, 3, 26, 22, 0));
+        assert_eq!(next_due(&c, utc(2025, 3, 26, 22, 30), hm(23, 0)), utc(2025, 3, 27, 22, 0));
     }
 
     #[test]
-    fn next_due_a_las_23_el_dia_del_cambio_de_otono() {
+    fn hora_preferida_con_las_reglas_de_madrid_y_la_ventana_de_ee_uu() {
         let c = MadridClock;
-        // Víspera (14:00 CEST): 23:00 CEST = 21:00 UTC.
-        assert_eq!(next_due(&c, utc(2025, 10, 25, 12, 0), hm(23, 0)), utc(2025, 10, 25, 21, 0));
-        // Pasada la hora: el día del cambio las 23:00 ya son CET = 22:00 UTC.
-        assert_eq!(next_due(&c, utc(2025, 10, 25, 21, 30), hm(23, 0)), utc(2025, 10, 26, 22, 0));
-        // 00:30 CEST del día del cambio: sigue siendo hoy 23:00 CET.
-        assert_eq!(next_due(&c, utc(2025, 10, 25, 22, 30), hm(23, 0)), utc(2025, 10, 26, 22, 0));
-        assert_eq!(next_due(&c, utc(2025, 10, 26, 22, 30), hm(23, 0)), utc(2025, 10, 27, 22, 0));
-    }
-
-    #[test]
-    fn next_due_con_hora_en_el_hueco_o_el_solape() {
-        let c = MadridClock;
-        assert_eq!(next_due(&c, utc(2025, 3, 30, 0, 0), hm(2, 30)), utc(2025, 3, 30, 1, 30));
-        assert_eq!(next_due(&c, utc(2025, 10, 25, 23, 0), hm(2, 30)), utc(2025, 10, 26, 0, 30));
+        // Jueves 27-mar-2025: Madrid en CET (+1) y EE. UU. ya en EDT (desde el 9-mar): la ventana de ese
+        // día es 21:00-14:30 de Madrid. 21:45 locales (20:45 UTC) vale; las 14:45 del día siguiente no.
+        let w = window::window_of(NaiveDate::from_ymd_opt(2025, 3, 27).unwrap());
+        assert_eq!(window::preferred_instant(&c, &w, hm(21, 45)), (utc(2025, 3, 27, 20, 45), false));
+        assert_eq!(window::preferred_instant(&c, &w, hm(14, 45)), (utc(2025, 3, 27, 20, 30), true));
+        // Martes 1-jul-2025: Madrid en CEST (+2): 22:00-15:30. Las 15:00 valen (13:00 UTC) y las 15:45 no.
+        let w = window::window_of(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap());
+        assert_eq!(window::preferred_instant(&c, &w, hm(15, 0)), (utc(2025, 7, 2, 13, 0), false));
+        assert_eq!(window::preferred_instant(&c, &w, hm(15, 45)), (utc(2025, 7, 1, 20, 30), true));
     }
 }

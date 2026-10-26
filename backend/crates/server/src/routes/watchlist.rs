@@ -26,7 +26,8 @@ pub struct WatchlistStatus {
     pub enabled: bool,
     /// `true` = lista por defecto (decidida a priori); `false` = la del usuario en `WATCHLIST`.
     pub default_list: bool,
-    /// Hora local de la pasada diaria (`HH:MM`).
+    /// Hora local preferida de la pasada (`HH:MM`) dentro de su ventana (cierre de EE. UU. + 30 min →
+    /// apertura siguiente); fuera de ella se ajusta. Ver `watchlist::window`.
     pub time: String,
     pub depth: String,
     /// Próxima pasada programada; `None` si está desactivada.

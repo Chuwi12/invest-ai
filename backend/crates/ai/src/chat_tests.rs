@@ -327,8 +327,86 @@ mod rag_on {
         let cfg = AiConfig { base_url: mock.url.clone(), ..AiConfig::default() };
         let client = OllamaClient::new(&mock.url, Duration::from_secs(5)).unwrap();
         let models = Arc::new(ModelManager::new(client.clone(), cfg.clone(), Arc::new(MemSettings::default())));
-        let analysis = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()).with_knowledge(Some(kb)));
-        Env { engine: Arc::new(ChatEngine::new(client, models, analysis, cfg)), mock, market: Arc::new(FakeMarket::new()) }
+        let analysis = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()));
+        Env { engine: Arc::new(ChatEngine::new(client, models, analysis, cfg).with_knowledge(Some(kb))), mock, market: Arc::new(FakeMarket::new()) }
+    }
+
+    /// Como en `OllamaAnalyst::with_split_knowledge`: la búsqueda del análisis va al `AnalysisEngine` (que
+    /// usa también `analyze_asset`) y la del chat solo al `ChatEngine`.
+    async fn env_split(analysis_kb: Option<Arc<dyn knowledge::KnowledgeSearch>>, chat_kb: Option<Arc<dyn knowledge::KnowledgeSearch>>) -> Env {
+        let mock = MockOllama::start().await;
+        let cfg = AiConfig { base_url: mock.url.clone(), ..AiConfig::default() };
+        let client = OllamaClient::new(&mock.url, Duration::from_secs(5)).unwrap();
+        let models = Arc::new(ModelManager::new(client.clone(), cfg.clone(), Arc::new(MemSettings::default())));
+        let analysis = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()).with_knowledge(analysis_kb));
+        Env { engine: Arc::new(ChatEngine::new(client, models, analysis, cfg).with_knowledge(chat_kb)), mock, market: Arc::new(FakeMarket::new()) }
+    }
+
+    /// Archivo que no encuentra nada y cuenta cuántas búsquedas recibe.
+    #[derive(Default)]
+    struct Counting(std::sync::atomic::AtomicUsize);
+    impl Counting {
+        fn calls(&self) -> usize {
+            self.0.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+    #[async_trait::async_trait]
+    impl knowledge::KnowledgeSearch for Counting {
+        async fn search(&self, _: &knowledge::SearchRequest) -> knowledge::Result<SearchResults> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(SearchResults { hits: vec![], scanned: 0, model: "fake".into() })
+        }
+    }
+
+    /// Guion de un turno en que el modelo lanza `analyze_asset` (rápido) y luego responde.
+    fn script_analyze_asset(e: &Env) {
+        let stage = json!({"stance": "mixed", "confidence": 0.5, "findings": [], "missing": []}).to_string();
+        let judge = json!({"verdict": "wait", "confidence": 0.4, "horizon": "short", "summary": "Esperar.", "thesis": "Falta catalizador.",
+            "bull_case": [], "bear_case": [], "risks": [], "entry_strategy": "", "exit_strategy": "", "position_sizing": "",
+            "missing_data": [], "would_change_if": [], "uncertainty": ""}).to_string();
+        e.mock.push_chat(vec![tool_call_line("analyze_asset", json!({"id": "stock:AAPL"})), done_line()]);
+        e.mock.push_chat(reply(&stage));
+        e.mock.push_chat(reply(&judge));
+        e.mock.push_chat(reply(&judge)); // reintento por tesis genérica
+        e.mock.push_chat(reply("Mi recomendación: esperar."));
+    }
+
+    /// `RAG_ANALYSIS=1`, `RAG_CHAT=0`: el chat no ofrece `search_knowledge` ni sus reglas, pero el
+    /// análisis que lanza con `analyze_asset` sí recupera (sigue a `RAG_ANALYSIS`).
+    #[tokio::test]
+    async fn analysis_only_archive_does_not_reach_the_chat_but_does_reach_analyze_asset() {
+        let analysis_kb = Arc::new(Counting::default());
+        let e = env_split(Some(analysis_kb.clone()), None).await;
+        script_analyze_asset(&e);
+        let ev = collect(&e, request(&e, "¿invierto en Apple?", &["stock:AAPL"])).await;
+        assert!(ev.iter().any(|x| matches!(x, ChatEvent::Analysis { .. })), "el análisis se lanzó: {ev:?}");
+        let reqs = e.mock.chat_requests();
+        let tools = reqs[0]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 9);
+        assert!(!tools.iter().any(|t| t["function"]["name"] == "search_knowledge"));
+        assert!(!reqs[0]["messages"][0]["content"].as_str().unwrap().contains("Knowledge archive"));
+        assert_eq!(analysis_kb.calls(), 1, "el análisis lanzado desde el chat recupera con la búsqueda del análisis");
+    }
+
+    /// `RAG_ANALYSIS=0`, `RAG_CHAT=1`: el chat ofrece `search_knowledge`, pero el análisis que lanza con
+    /// `analyze_asset` es idéntico al de «sin RAG»: no toca la búsqueda del chat.
+    #[tokio::test]
+    async fn chat_only_archive_is_not_used_by_the_analysis_the_chat_launches() {
+        let chat_kb = Arc::new(Counting::default());
+        let e = env_split(None, Some(chat_kb.clone())).await;
+        script_analyze_asset(&e);
+        let ev = collect(&e, request(&e, "¿invierto en Apple?", &["stock:AAPL"])).await;
+        assert!(ev.iter().any(|x| matches!(x, ChatEvent::Analysis { .. })), "el análisis se lanzó: {ev:?}");
+        let reqs = e.mock.chat_requests();
+        let tools = reqs[0]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 10);
+        assert!(tools.iter().any(|t| t["function"]["name"] == "search_knowledge"));
+        assert_eq!(chat_kb.calls(), 0, "el análisis no usa la búsqueda del chat");
+        // Ni el juez ni las etapas reciben archivo ni sus reglas (reqs[1] = etapa, reqs[2] = juez).
+        for r in &reqs[1..4] {
+            let all = r["messages"].to_string();
+            assert!(!all.contains("knowledge_base") && !all.contains("Knowledge archive"), "{all}");
+        }
     }
 
     async fn kb() -> Arc<KnowledgeBase> {

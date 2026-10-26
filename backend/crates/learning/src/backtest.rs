@@ -201,8 +201,10 @@ pub fn signals_at(s: &Series, date_day: i64) -> Option<Signals> {
 }
 
 /// Exceso de rentabilidad total a `h` semanas con entrada en el primer cierre POSTERIOR a
-/// `date_day` (la señal usa el cierre de ese día, así que no se puede operar a él). Usa las
-/// mismas reglas que el resolutor de la app (`rules::compute`) sobre cierres ajustados.
+/// `date_day` (la señal usa el cierre de ese día, así que no se puede operar a él). Usa el mismo
+/// cálculo de salida y benchmark que el resolutor de la app (`rules::compute_from_day`) sobre cierres
+/// ajustados. La entrada NO es la de la regla v2 del resolutor (último cierre ya visto): la señal de
+/// un día de la serie usa su cierre y entrar en él sería mirar al futuro.
 pub fn forward_excess(
     asset_adj: &[Candle],
     bench_adj: &[Candle],
@@ -221,13 +223,7 @@ pub fn forward_returns(
     h: u32,
     now_s: i64,
 ) -> Option<(f64, f64)> {
-    match rules::compute(
-        asset_adj,
-        Some(bench_adj),
-        (date_day + 1) * DAY * 1000,
-        h,
-        now_s,
-    ) {
+    match rules::compute_from_day(asset_adj, Some(bench_adj), date_day + 1, h, now_s) {
         Computation::Resolved(r) => Some((r.asset_return, r.bench_return)),
         _ => None,
     }

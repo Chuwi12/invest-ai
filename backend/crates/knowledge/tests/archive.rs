@@ -90,6 +90,41 @@ async fn embedding_model_not_installed_behaves_the_same() {
 }
 
 #[tokio::test]
+async fn an_invalid_embeddings_response_is_paused_too() {
+    // N3: un 4xx que no es 404, un 200 que no es JSON o dimensiones que no cuadran con `RAG_EMBED_DIMS`
+    // llegan como `Bad`. Antes no había pausa: una llamada a Ollama por documento y por pasada, siempre inútil.
+    archive_while_down(|| EmbedError::Bad("el modelo da 768 dimensiones y se pidieron 1024".into())).await;
+}
+
+/// Embedder que responde bien (`Ok`) pero con un vector de menos: un servidor que no cumple el contrato.
+struct ShortAnswer(Arc<AtomicUsize>);
+
+#[async_trait]
+impl Embedder for ShortAnswer {
+    fn model_id(&self) -> String {
+        FakeEmbedder::default().model_id()
+    }
+    async fn embed(&self, texts: &[String], _: EmbedKind) -> Result<Vec<Vec<f32>>, EmbedError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![FakeEmbedder::default().vector("x"); texts.len().saturating_sub(1)])
+    }
+}
+
+#[tokio::test]
+async fn a_well_formed_but_incoherent_answer_pauses_the_embedder_as_well() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let kb = KnowledgeBase::open(testutil::memory_pool().await, Arc::new(ShortAnswer(calls.clone())), KnowledgeConfig::default()).await.unwrap();
+    for i in 0..10 {
+        let r = kb.ingest(news(&format!("s:{i}"), &format!("Headline {i} about nickel"), &format!("Headline {i} about nickel prices."), base())).await.unwrap();
+        assert_eq!((r.embedded, r.pending), (0, 1), "sin vector válido el fragmento queda pendiente");
+    }
+    for _ in 0..3 {
+        assert_eq!(kb.embed_pending(64).await.unwrap(), 0);
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "tras la primera respuesta incoherente no se vuelve a llamar");
+}
+
+#[tokio::test]
 async fn retention_and_cap_keep_the_database_file_bounded() {
     // 50 «días» de 20 noticias de ~0,9 KB con vectores de 768 dim; retención de 10 días y tope de 120 fragmentos.
     // Sin límites habría 1 000 fragmentos; con ellos el archivo debe estabilizarse (SQLite reutiliza las páginas libres).

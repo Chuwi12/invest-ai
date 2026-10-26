@@ -1553,7 +1553,9 @@ const PROFILE_TTL: Duration = Duration::from_secs(30 * 60);
 /// 10-40 KB; uno que supere el tope entero no se guarda.
 const PROFILE_CACHE_BYTES: u64 = 16 * 1024 * 1024;
 
-/// Escribe en un `Sha256` lo que serializa `serde_json`, sin construir el JSON en memoria.
+/// Escribe en un `Sha256` lo que serializa `serde_json`: solo evita materializar el TEXTO JSON final
+/// de la huella (una `String` del tamaño del folleto serializado). No evita la copia del folleto que
+/// hace `profile_key` con `serde_json::to_value` (ver allí).
 struct HashWriter<'a>(&'a mut Sha256);
 
 impl std::io::Write for HashWriter<'_> {
@@ -1574,6 +1576,11 @@ impl std::io::Write for HashWriter<'_> {
 /// nueva del mismo documento no debe invalidar el perfil ya calculado. Si el campo cambiara de
 /// nombre, el único efecto sería no reconocer esas descargas (más fallos de caché, nunca perfiles
 /// equivocados).
+///
+/// Coste: para quitar `fetchedAt`, `serde_json::to_value(p)` COPIA el folleto entero en un
+/// `serde_json::Value` temporal (proporcional al texto de sus secciones, unos MB en un folleto
+/// grande) en cada llamada, también con la caché caliente. Solo se evita el texto JSON intermedio,
+/// no esa copia.
 fn profile_key(input: &ProfileInput<'_>) -> Option<[u8; 32]> {
     let mut hasher = Sha256::new();
     let prospectus = match input.prospectus {

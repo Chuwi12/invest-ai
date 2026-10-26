@@ -892,7 +892,7 @@ export interface WatchlistRun {
   startedAt: string
   finishedAt: string | null
   trigger: 'schedule' | 'recovery' | 'retry'
-  status: 'running' | 'completed' | 'aborted' | 'interrupted'
+  status: 'running' | 'completed' | 'aborted' | 'interrupted' | 'missed'
   depth: string
   model: string | null
   planned: number

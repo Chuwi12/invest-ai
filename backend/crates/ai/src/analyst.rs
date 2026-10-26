@@ -47,11 +47,13 @@ impl OllamaAnalyst {
     /// Como `with_extras`, pero con el archivo de conocimiento por separado para el análisis y para el
     /// chat (`RAG_ANALYSIS` y `RAG_CHAT`): cada uno solo recupera si se le pasa el suyo.
     ///
-    /// - `None` en ambos: exactamente `new` (un solo motor, ninguna ruta del RAG).
-    /// - Si no, el chat usa su propio `AnalysisEngine` (mismo cliente y mismo `ModelManager`, que es
-    ///   donde vive el modelo activo; el motor en sí no guarda más estado), de modo que el interruptor
-    ///   de un lado nunca activa al otro. Consecuencia conocida: el análisis completo que el chat lanza
-    ///   con `analyze_asset` pasa por ese motor y sigue, por tanto, al interruptor del chat.
+    /// - `None` en ambos: exactamente `new` (ninguna ruta del RAG).
+    /// - Hay UN solo `AnalysisEngine`, con la búsqueda del análisis (`analysis_knowledge`): lo usan
+    ///   `analyze*` y también `analyze_asset`, la herramienta con la que el chat lanza un análisis
+    ///   completo (que se guarda y entra en el historial como cualquier otro). Por eso ese análisis
+    ///   sigue a `RAG_ANALYSIS` y nunca a `RAG_CHAT`.
+    /// - El `ChatEngine` guarda aparte la búsqueda del chat (`chat_knowledge`), que solo gobierna
+    ///   `search_knowledge` y sus reglas de prompt. El interruptor de un lado nunca activa al otro.
     pub fn with_split_knowledge(
         cfg: AiConfig,
         settings: Arc<dyn SettingsStore>,
@@ -61,13 +63,8 @@ impl OllamaAnalyst {
     ) -> Result<Self> {
         let client = OllamaClient::new(&cfg.base_url, cfg.timeout)?;
         let models = Arc::new(ModelManager::new(client.clone(), cfg.clone(), settings));
-        let engine_for = |knowledge: Option<Arc<dyn KnowledgeSearch>>| {
-            Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()).with_knowledge(knowledge).with_social(social.clone()))
-        };
-        let both_off = analysis_knowledge.is_none() && chat_knowledge.is_none();
-        let engine = engine_for(analysis_knowledge);
-        let chat_engine = if both_off { engine.clone() } else { engine_for(chat_knowledge) };
-        let chat = Arc::new(ChatEngine::new(client.clone(), models.clone(), chat_engine, cfg.clone()));
+        let engine = Arc::new(AnalysisEngine::new(client.clone(), models.clone(), cfg.clone()).with_knowledge(analysis_knowledge).with_social(social));
+        let chat = Arc::new(ChatEngine::new(client.clone(), models.clone(), engine.clone(), cfg.clone()).with_knowledge(chat_knowledge));
         Ok(Self { cfg, client, models, engine, chat })
     }
 

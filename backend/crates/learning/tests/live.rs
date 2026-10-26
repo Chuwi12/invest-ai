@@ -2,7 +2,7 @@
 //! Comprueba las convenciones de velas (hora, última vela parcial) sobre las que se apoya `rules::compute`.
 
 use domain::{AssetId, Interval, MarketData, Range};
-use learning::rules::{Computation, compute};
+use learning::rules::{Computation, Trading, compute};
 
 #[tokio::test]
 #[ignore = "usa red real"]
@@ -12,6 +12,7 @@ async fn real_daily_candles_resolve_a_four_week_outcome() {
     let t0_ms = (now - chrono::Duration::days(45)).timestamp_millis();
     for (asset, bench) in [("stock:AAPL", Some("etf:SPY")), ("crypto:BTC", None)] {
         let id: AssetId = asset.parse().unwrap();
+        let trading = Trading::of(id.class);
         let candles = market.history(&id, Range::M3, Interval::D1).await.unwrap();
         let b = match bench {
             Some(b) => Some(
@@ -31,7 +32,7 @@ async fn real_daily_candles_resolve_a_four_week_outcome() {
             last.c
         );
         for h in [1u32, 4] {
-            match compute(&candles, b.as_deref(), t0_ms, h, now.timestamp()) {
+            match compute(&candles, b.as_deref(), t0_ms, trading, h, now.timestamp()) {
                 Computation::Resolved(r) => println!(
                     "  {h} sem: entrada {} -> salida {} | activo {:+.2} % | índice {:+.2} % | exceso {:+.2} %",
                     r.entry_ts,

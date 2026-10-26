@@ -1,9 +1,10 @@
 //! Resolución de resultados: para cada análisis guardado y horizonte maduro, rentabilidad del
-//! activo, del índice, exceso y acierto. Idempotente (las filas `resolved`/`skipped` no se tocan),
-//! reanudable (tope de activos por pasada; lo que falta se hace en la siguiente) y barato (cero
-//! peticiones si nada ha madurado; una petición de histórico por activo y por benchmark).
+//! activo, del índice, exceso y acierto. Idempotente (las filas `resolved`/`skipped` de la versión
+//! vigente no se tocan), reanudable (tope de activos por pasada; lo que falta se hace en la siguiente) y
+//! barato (cero peticiones si nada ha madurado; una petición de histórico por activo y por benchmark).
+//! Las filas de una versión anterior de las reglas se vuelven a poner en cola (ver [`reopen_stale`]).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, hash_map::Entry};
 
 use chrono::{DateTime, Utc};
 use domain::{Analysis, AssetId, Candle, DomainError, Interval, MarketData, Range};
@@ -11,7 +12,7 @@ use sqlx::SqlitePool;
 
 use crate::{
     LearningError,
-    rules::{self, Computation, HORIZONS_WEEKS, RULE_VERSION},
+    rules::{self, Computation, HORIZONS_WEEKS, RULE_VERSION, Trading},
     store::factors_of,
 };
 
@@ -50,7 +51,12 @@ pub struct ResolveReport {
     pub history_calls: usize,
     /// Activos que quedan para la siguiente pasada por el tope.
     pub deferred_assets: usize,
+    /// Filas de una versión anterior de las reglas que esta pasada ha vuelto a poner en cola.
+    pub reopened: usize,
 }
+
+/// Tope de lo que puede haber tardado un análisis en generarse para fiarse de `durationMs` (3 h).
+const MAX_ANALYSIS_MS: u64 = 3 * 3_600_000;
 
 /// Rango diario mínimo que cubre `days` días hacia atrás.
 pub fn range_for_days(days: i64) -> Range {
@@ -106,9 +112,18 @@ pub async fn resolve_pending(
     let week_ms = 7 * 86_400_000i64;
     let cut = now_ms - (i64::from(min_h) * week_ms + cfg.buffer_secs * 1000);
 
+    report.reopened = reopen_stale(db).await?;
+    // Los análisis guardados y, además, los ya borrados que siguen pendientes (`retry`, p. ej. por una
+    // subida de versión): su fila conserva todo lo necesario y no deben quedarse fuera de la medición.
     let heads: Vec<AnalysisHead> = sqlx::query_as(
         "SELECT id, asset_id, verdict, confidence, model, generated_at FROM analyses
-          WHERE generated_at <= ?1 ORDER BY generated_at, id",
+          WHERE generated_at <= ?1
+         UNION
+         SELECT o.analysis_id, o.asset_id, o.verdict, o.confidence, o.model, o.generated_at
+           FROM analysis_outcomes o
+          WHERE o.status = 'retry' AND o.generated_at <= ?1
+            AND NOT EXISTS (SELECT 1 FROM analyses a WHERE a.id = o.analysis_id)
+         ORDER BY generated_at, id",
     )
     .bind(cut)
     .fetch_all(db)
@@ -192,6 +207,8 @@ pub async fn resolve_pending(
         cache.insert(a, res.map(sorted));
     }
 
+    // Lo que se lee del JSON de cada análisis (una sola vez por análisis, no por horizonte).
+    let mut meta: HashMap<usize, AnalysisMeta> = HashMap::new();
     for (aid, pairs) in assets {
         let parsed = aid.parse::<AssetId>();
         let bench = parsed.as_ref().ok().and_then(rules::benchmark_for);
@@ -262,12 +279,20 @@ pub async fn resolve_pending(
                 }
             },
         };
+        let trading = Trading::of(id.class);
         for p in &pairs {
             let h = &heads[p.head_idx];
+            if let Entry::Vacant(e) = meta.entry(p.head_idx) {
+                e.insert(analysis_meta(db, h).await);
+            }
+            let Some(m) = meta.get(&p.head_idx) else {
+                continue;
+            };
             match rules::compute(
                 candles,
                 bench_slice,
-                h.generated_at,
+                m.seen_ms,
+                trading,
                 p.horizon,
                 now.timestamp(),
             ) {
@@ -276,7 +301,7 @@ pub async fn resolve_pending(
                     count(&mut report, write_retry(db, h, p, &why, now_ms, cfg).await?)
                 }
                 Computation::Resolved(r) => {
-                    let (factors, overall) = analysis_factors(db, &h.id).await;
+                    let (factors, overall) = (m.factors.clone(), m.overall);
                     let verdict = rules::parse_verdict(&h.verdict);
                     let hit = verdict.map(|v| rules::is_hit(v, r.excess, p.horizon));
                     let class = id.class.as_str();
@@ -294,7 +319,8 @@ pub async fn resolve_pending(
                             exit_price=excluded.exit_price, bench_entry_price=excluded.bench_entry_price,
                             bench_exit_price=excluded.bench_exit_price, asset_return=excluded.asset_return,
                             bench_return=excluded.bench_return, excess_return=excluded.excess_return, hit=excluded.hit,
-                            factors=excluded.factors, overall=excluded.overall, resolved_at=excluded.resolved_at
+                            factors=COALESCE(excluded.factors, analysis_outcomes.factors),
+                            overall=COALESCE(excluded.overall, analysis_outcomes.overall), resolved_at=excluded.resolved_at
                          WHERE analysis_outcomes.status = 'retry'",
                     )
                     .bind(&h.id)
@@ -345,23 +371,81 @@ fn count(r: &mut ResolveReport, w: Written) {
     }
 }
 
-async fn analysis_factors(db: &SqlitePool, id: &str) -> (Option<String>, Option<f64>) {
+/// Lo que `resolve_pending` necesita del JSON de un análisis.
+struct AnalysisMeta {
+    /// Instante (ms UTC) en que el análisis vio los datos: `generated_at` menos lo que tardó en generarse.
+    seen_ms: i64,
+    factors: Option<String>,
+    overall: Option<f64>,
+}
+
+/// `generated_at` se fija al ACABAR el análisis, pero los datos (la cotización y el último cierre) se
+/// leyeron al empezar: con un LLM local la diferencia son minutos y, si cruza la apertura de EE. UU., la
+/// sesión que el análisis no vio parecería la última. `durationMs` (guardado en el JSON) la corrige.
+/// Sin él (análisis antiguos, JSON ilegible o borrado) o con un valor absurdo se usa `generated_at`.
+async fn analysis_meta(db: &SqlitePool, h: &AnalysisHead) -> AnalysisMeta {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Timing {
+        duration_ms: Option<u64>,
+    }
+    let mut meta = AnalysisMeta {
+        seen_ms: h.generated_at,
+        factors: None,
+        overall: None,
+    };
     let row: Option<(String,)> = sqlx::query_as("SELECT json FROM analyses WHERE id = ?1")
-        .bind(id)
+        .bind(&h.id)
         .fetch_optional(db)
         .await
         .ok()
         .flatten();
     let Some((json,)) = row else {
-        return (None, None);
+        return meta;
     };
-    match serde_json::from_str::<Analysis>(&json) {
-        Ok(a) => (
-            serde_json::to_string(&factors_of(&a.scores)).ok(),
-            Some(f64::from(a.scores.overall)).filter(|x| x.is_finite()),
-        ),
-        Err(_) => (None, None),
+    if let Ok(Timing {
+        duration_ms: Some(ms),
+    }) = serde_json::from_str::<Timing>(&json)
+        && ms <= MAX_ANALYSIS_MS
+    {
+        meta.seen_ms = h.generated_at - ms as i64;
     }
+    if let Ok(a) = serde_json::from_str::<Analysis>(&json) {
+        meta.factors = serde_json::to_string(&factors_of(&a.scores)).ok();
+        meta.overall = Some(f64::from(a.scores.overall)).filter(|x| x.is_finite());
+    }
+    meta
+}
+
+/// Subir `RULE_VERSION` cambia lo que significa una fila ya etiquetada (aquí, qué precio es la entrada):
+/// las `resolved` y `skipped` de una versión anterior pasan a `retry` con la versión vigente y se
+/// recalculan en esta pasada o en las siguientes (con el mismo tope de activos), así el historial
+/// medido con la regla antigua no se pierde ni se mezcla. Se borran sus cifras para que ninguna fila
+/// `skipped` conserve un resultado de la regla anterior. Las `retry` solo cambian de versión. Las
+/// estadísticas y el panel leen únicamente filas de la versión vigente, así que mientras dura el
+/// recálculo ven una muestra parcial pero nunca mezclada, y lo que falta cuenta como «pendiente».
+/// Idempotente. Devuelve cuántas filas se reabrieron.
+async fn reopen_stale(db: &SqlitePool) -> Result<usize, LearningError> {
+    let reopened = sqlx::query(
+        "UPDATE analysis_outcomes
+            SET status = 'retry', retry_after = NULL, attempts = 0, rule_version = ?1,
+                note = 'recalculando con la regla v' || ?1,
+                bench_id = NULL, bench_kind = NULL, entry_ts = NULL, exit_ts = NULL, entry_price = NULL,
+                exit_price = NULL, bench_entry_price = NULL, bench_exit_price = NULL, asset_return = NULL,
+                bench_return = NULL, excess_return = NULL, hit = NULL
+          WHERE rule_version < ?1 AND status IN ('resolved', 'skipped')",
+    )
+    .bind(RULE_VERSION)
+    .execute(db)
+    .await?
+    .rows_affected();
+    sqlx::query(
+        "UPDATE analysis_outcomes SET rule_version = ?1 WHERE rule_version < ?1 AND status = 'retry'",
+    )
+    .bind(RULE_VERSION)
+    .execute(db)
+    .await?;
+    Ok(usize::try_from(reopened).unwrap_or(usize::MAX))
 }
 
 /// Fila definitiva sin precios (`skipped`). No pisa una fila ya escrita salvo `retry`.
@@ -379,7 +463,7 @@ async fn write_final(
                                         generated_at, status, note, rule_version, resolved_at)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
          ON CONFLICT(analysis_id, horizon_weeks) DO UPDATE SET status=excluded.status, note=excluded.note,
-            retry_after=NULL, resolved_at=excluded.resolved_at
+            retry_after=NULL, rule_version=excluded.rule_version, resolved_at=excluded.resolved_at
          WHERE analysis_outcomes.status = 'retry'",
     )
     .bind(&h.id)
@@ -416,7 +500,8 @@ async fn write_retry(
                                             generated_at, status, note, attempts, rule_version, resolved_at)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'skipped',?9,?10,?11,?12)
              ON CONFLICT(analysis_id, horizon_weeks) DO UPDATE SET status='skipped', note=excluded.note,
-                attempts=excluded.attempts, retry_after=NULL, resolved_at=excluded.resolved_at
+                attempts=excluded.attempts, retry_after=NULL, rule_version=excluded.rule_version,
+                resolved_at=excluded.resolved_at
              WHERE analysis_outcomes.status = 'retry'",
         )
         .bind(&h.id)
@@ -441,7 +526,7 @@ async fn write_retry(
                                         generated_at, status, note, attempts, retry_after, rule_version, resolved_at)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'retry',?9,?10,?11,?12,?13)
          ON CONFLICT(analysis_id, horizon_weeks) DO UPDATE SET note=excluded.note, attempts=excluded.attempts,
-            retry_after=excluded.retry_after, resolved_at=excluded.resolved_at
+            retry_after=excluded.retry_after, rule_version=excluded.rule_version, resolved_at=excluded.resolved_at
          WHERE analysis_outcomes.status = 'retry'",
     )
     .bind(&h.id)

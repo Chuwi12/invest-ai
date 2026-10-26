@@ -31,6 +31,35 @@ const EMBED_BACKOFF: Duration = Duration::from_secs(30);
 /// Si el modelo de embeddings no está instalado no hay nada que reintentar hasta que el usuario lo descargue
 /// (`ollama pull`): pausa más larga, para que el archivado por defecto no llame a Ollama con cada documento.
 const EMBED_BACKOFF_MODEL_MISSING: Duration = Duration::from_secs(300);
+/// Una respuesta inválida (4xx que no es 404, un 200 que no es JSON, dimensiones que no cuadran con
+/// `RAG_EMBED_DIMS`, vectores con NaN) no se arregla sola: se repetiría con cada documento y en cada pasada
+/// de mantenimiento. Misma pausa larga que con el modelo ausente.
+const EMBED_BACKOFF_BAD: Duration = Duration::from_secs(300);
+
+/// Cuánto se deja en paz al embedder tras este error.
+fn embed_pause(e: &EmbedError) -> Duration {
+    match e {
+        EmbedError::Unavailable(_) => EMBED_BACKOFF,
+        EmbedError::ModelMissing(_) => EMBED_BACKOFF_MODEL_MISSING,
+        EmbedError::Bad(_) => EMBED_BACKOFF_BAD,
+    }
+}
+
+/// Valida lo que devolvió el embedder: un vector por texto, todos de la misma dimensión, finitos y
+/// normalizados a norma 1.
+fn checked_vectors(mut vs: Vec<Vec<f32>>, expected: usize) -> std::result::Result<Vec<Vec<f32>>, EmbedError> {
+    if vs.len() != expected {
+        return Err(EmbedError::Bad("número de vectores incorrecto".into()));
+    }
+    let dim = vs.first().map_or(0, Vec::len);
+    for v in &mut vs {
+        if v.len() != dim {
+            return Err(EmbedError::Bad("dimensiones desiguales".into()));
+        }
+        normalize_l2(v)?;
+    }
+    Ok(vs)
+}
 
 /// Búsqueda de conocimiento. Contrato mínimo que puede consumir `ai` (o moverse a `domain`).
 #[async_trait]
@@ -204,19 +233,14 @@ impl KnowledgeBase {
         if self.embedder_paused() {
             return Err(EmbedError::Unavailable("embedder en pausa tras un fallo reciente".into()));
         }
-        let res = self.embedder.embed(texts, kind).await;
+        // La validación va dentro del mismo `Result`: una respuesta incoherente cuenta como un fallo más
+        // (aviso único y pausa), no como un error que escapa sin más.
+        let res = match self.embedder.embed(texts, kind).await {
+            Ok(vs) => checked_vectors(vs, texts.len()),
+            Err(e) => Err(e),
+        };
         match res {
-            Ok(mut vs) => {
-                if vs.len() != texts.len() {
-                    return Err(EmbedError::Bad("número de vectores incorrecto".into()));
-                }
-                let dim = vs.first().map_or(0, Vec::len);
-                for v in &mut vs {
-                    if v.len() != dim {
-                        return Err(EmbedError::Bad("dimensiones desiguales".into()));
-                    }
-                    normalize_l2(v)?;
-                }
+            Ok(vs) => {
                 *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 if self.embedder_down.swap(false, Ordering::Relaxed) {
                     tracing::info!("embeddings disponibles otra vez: se completan los fragmentos pendientes");
@@ -228,14 +252,7 @@ impl KnowledgeBase {
                 if !self.embedder_down.swap(true, Ordering::Relaxed) {
                     tracing::warn!(error = %e, "embeddings no disponibles: el texto se sigue archivando y los vectores quedan pendientes (aviso único por caída)");
                 }
-                let pause = match &e {
-                    EmbedError::Unavailable(_) => Some(EMBED_BACKOFF),
-                    EmbedError::ModelMissing(_) => Some(EMBED_BACKOFF_MODEL_MISSING),
-                    EmbedError::Bad(_) => None,
-                };
-                if let Some(p) = pause {
-                    *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now() + p);
-                }
+                *self.backoff_until.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now() + embed_pause(&e));
                 Err(e)
             }
         }
@@ -734,5 +751,33 @@ impl KnowledgeBase {
 impl KnowledgeSearch for KnowledgeBase {
     async fn search(&self, req: &SearchRequest) -> Result<SearchResults> {
         KnowledgeBase::search(self, req).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_embedder_failure_pauses_it_and_the_permanent_ones_longer() {
+        // N3: `Bad` no pausaba (`None`): con el archivado por defecto, una llamada inútil por documento y por pasada.
+        let unavailable = embed_pause(&EmbedError::Unavailable("x".into()));
+        let missing = embed_pause(&EmbedError::ModelMissing("m".into()));
+        let bad = embed_pause(&EmbedError::Bad("respuesta".into()));
+        assert_eq!(unavailable, Duration::from_secs(30));
+        assert_eq!((missing, bad), (Duration::from_secs(300), Duration::from_secs(300)));
+        // Más larga que el intervalo del mantenimiento (120 s): al menos una pasada completa sin llamar.
+        assert!(bad > Duration::from_secs(120));
+    }
+
+    #[test]
+    fn incoherent_vectors_are_bad_responses_and_good_ones_come_out_normalised() {
+        assert!(matches!(checked_vectors(vec![vec![1.0, 0.0]], 2), Err(EmbedError::Bad(_))), "faltan vectores");
+        assert!(matches!(checked_vectors(vec![vec![1.0, 0.0], vec![1.0]], 2), Err(EmbedError::Bad(_))), "dimensiones desiguales");
+        assert!(matches!(checked_vectors(vec![vec![f32::NAN, 1.0]], 1), Err(EmbedError::Bad(_))), "NaN");
+        assert!(matches!(checked_vectors(vec![vec![0.0, 0.0]], 1), Err(EmbedError::Bad(_))), "norma cero");
+        let ok = checked_vectors(vec![vec![3.0, 4.0]], 1).unwrap();
+        assert!((ok[0][0] - 0.6).abs() < 1e-6 && (ok[0][1] - 0.8).abs() < 1e-6);
+        assert!(checked_vectors(vec![], 0).unwrap().is_empty());
     }
 }

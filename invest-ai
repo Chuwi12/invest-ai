@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 # invest-ai: un solo comando para levantar toda la aplicación (Ollama + backend + frontend).
-# Uso: ./invest-ai [--fake] [--no-browser] [run|dev|stop|status|logs|open|install|uninstall|help]
+# Uso: ./invest-ai [--fake] [--no-browser] [run|dev|stop|status|logs|open|pull|install|uninstall|help]
 set -Eeuo pipefail
 
-ROOT="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd -P)"
+SELF_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+SELF_DIR="$(cd -- "$(dirname -- "$SELF_PATH")" && pwd -P)"
+readonly SELF_PATH SELF_DIR
+ROOT="$SELF_DIR"
+# La copia que `install` deja en releases/<id>/invest-ai (lleva un fichero VERSION al lado) la ejecuta
+# el servicio como ExecStartPre. Su carpeta es solo de lectura y no contiene .env ni data/: trabaja
+# sobre el proyecto que le indica la unidad en INVEST_AI_ROOT. Un script suelto del repo lo ignora.
+if [[ -f $SELF_DIR/VERSION && -n ${INVEST_AI_ROOT-} ]]; then
+  ROOT="$(cd -- "$INVEST_AI_ROOT" && pwd -P)" || { printf 'error: INVEST_AI_ROOT no es una carpeta: %s\n' "$INVEST_AI_ROOT" >&2; exit 1; }
+fi
 readonly ROOT
 readonly ENV_FILE="$ROOT/.env"
 readonly ENV_EXAMPLE="$ROOT/.env.example"
@@ -18,6 +27,8 @@ readonly RUN_PID="$STATE_DIR/run.pid"
 readonly OLLAMA_PID="$STATE_DIR/ollama.pid"
 readonly LOCK_FILE="$STATE_DIR/run.lock"
 readonly UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+# Versiones instaladas del servicio (copias inmutables: binario, frontend/dist y este script).
+readonly RELEASES_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/invest-ai/releases"
 readonly APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 readonly ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
 readonly SERVICE="invest-ai.service"
@@ -138,10 +149,11 @@ kill_group() {
 
 exe_is() { [[ $(readlink -f "/proc/$1/exe" 2>/dev/null || true) == "$2" ]]; }
 
-server_pids() { # PIDs de binarios invest-ai (release o debug) de este repo
-  local p
+server_pids() { # PIDs de binarios invest-ai (release, debug o versión instalada) de este repo
+  local p exe
   for p in $(pgrep -u "$UID" -x invest-ai || true); do
-    if exe_is "$p" "$BIN" || exe_is "$p" "$BIN_DEBUG"; then printf '%s\n' "$p"; fi
+    exe=$(readlink -f "/proc/$p/exe" 2>/dev/null || true)
+    if [[ $exe == "$BIN" || $exe == "$BIN_DEBUG" || $exe == "$RELEASES_DIR"/*/bin/invest-ai ]]; then printf '%s\n' "$p"; fi
   done
 }
 
@@ -233,19 +245,61 @@ ensure_ollama() {
   ok "Ollama listo (arrancado por este script)"
 }
 
-ensure_model() {
-  if (( FAKE )); then return 0; fi
-  local model=$LLM_MODEL tags
+# ---------- modelos de Ollama: NUNCA se descarga nada sin consentimiento ----------
+# Un modelo pesa gigas y se descarga en el almacén del Ollama que responda en ese momento (que puede
+# no ser el que el usuario cree: ver docs/notes/ops.md, «carrera de los dos Ollama»). Por eso solo se
+# descarga si el usuario lo pide (`./invest-ai pull`, la UI de Modelos), si lo confirma en un arranque
+# interactivo o si activó AUTO_PULL_MODEL=1 en .env (desactivado por defecto).
+auto_pull() { [[ $(env_get AUTO_PULL_MODEL 0) =~ ^(1|true|TRUE|yes)$ ]]; }
+
+# ¿Hay un ollama.service del sistema habilitado? (lectura: no necesita sudo)
+system_ollama_enabled() { have systemctl && systemctl --system is-enabled --quiet ollama.service 2>/dev/null; }
+
+# model_state MODELO: 0 = instalado, 1 = falta, 2 = no se pudo consultar a Ollama.
+model_state() {
+  local model=$1 tags
   [[ $model == *:* ]] || model="$model:latest"
-  tags=$(curl -fsS --max-time 5 "$LLM_BASE_URL/api/tags" 2>/dev/null || true)
-  if grep -qF "\"name\":\"$model\"" <<<"$tags"; then
-    ok "modelo $model disponible"
+  tags=$(curl -fsS --max-time 5 "$LLM_BASE_URL/api/tags" 2>/dev/null) || return 2
+  grep -qF "\"name\":\"$model\"" <<<"$tags" || return 1
+  return 0
+}
+
+# Descarga con `ollama pull` contra el Ollama de LLM_BASE_URL. Devuelve 1 si falla.
+pull_model() {
+  local model=$1
+  info "Descargando el modelo $model en el Ollama de $LLM_BASE_URL"
+  if OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama pull "$model"; then
+    ok "modelo $model descargado"
     return 0
   fi
-  info "Descargando el modelo $model (solo la primera vez)"
-  if ! OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama pull "$LLM_MODEL"; then
-    warn "no se pudo descargar $LLM_MODEL: el análisis con IA no funcionará hasta que lo hagas (ollama pull $LLM_MODEL)"
+  warn "no se pudo descargar $model (reintenta con ./invest-ai pull $model)"
+  return 1
+}
+
+# ensure_model INTERACTIVO(1|0): comprueba LLM_MODEL. Si falta, avisa y SIGUE; solo descarga con
+# AUTO_PULL_MODEL=1 o, si es interactivo y hay terminal, tras preguntar. Nunca falla.
+ensure_model() {
+  if (( FAKE )); then return 0; fi
+  local interactive=${1:-0} rc=0 ans=""
+  model_state "$LLM_MODEL" || rc=$?
+  case $rc in
+    0) ok "modelo $LLM_MODEL disponible"; return 0 ;;
+    2) warn "no pude consultar los modelos de Ollama en $LLM_BASE_URL; sigo sin comprobar $LLM_MODEL"; return 0 ;;
+  esac
+  warn "el modelo $LLM_MODEL no está instalado en el Ollama de $LLM_BASE_URL"
+  if auto_pull; then
+    info "AUTO_PULL_MODEL=1: se descarga sin preguntar"
+    pull_model "$LLM_MODEL" || true
+    return 0
   fi
+  if (( interactive )) && [[ -t 0 && -t 1 ]]; then
+    read -r -t 120 -p "¿Descargar $LLM_MODEL ahora (varios GB)? [s/N] " ans || ans=""
+    if [[ $ans =~ ^([sSyY]|[sS][ií]|[yY]es)$ ]]; then
+      pull_model "$LLM_MODEL" || true
+      return 0
+    fi
+  fi
+  warn "sigo sin descargar: el análisis con IA no funcionará hasta que lo instales (./invest-ai pull, o Ajustes -> Modelos en la app)"
   return 0
 }
 
@@ -380,7 +434,7 @@ cmd_run() {
   install_traps
   printf '%s\n' "$$" >"$RUN_PID"
   ensure_ollama
-  ensure_model
+  ensure_model 1
   ensure_frontend 1
   ensure_backend release
   if (( FAKE )); then suffix=" (datos simulados)"; fi
@@ -404,7 +458,7 @@ cmd_dev() {
   printf '%s\n' "$$" >"$RUN_PID"
   if port_busy "$DEV_PORT"; then die "el puerto $DEV_PORT (Vite) está ocupado."; fi
   ensure_ollama
-  ensure_model
+  ensure_model 1
   ensure_frontend 0
   ensure_backend debug
   info "Arrancando el backend (debug) en $APP_URL"
@@ -475,6 +529,11 @@ cmd_status() {
     if pid_alive "$pid"; then mode=" (lo arrancó invest-ai, pid $pid)"; fi
     printf 'ollama:   %sresponde%s en %s%s\n' "$C_G" "$C_0" "$LLM_BASE_URL" "$mode"
     printf 'modelo:   %s\n' "$LLM_MODEL"
+    local mrc=0
+    model_state "$LLM_MODEL" || mrc=$?
+    if (( mrc == 1 )); then
+      printf '          %sno está instalado%s en este Ollama (./invest-ai pull)\n' "$C_Y" "$C_0"
+    fi
     if have ollama; then
       local ps_out
       ps_out=$(OLLAMA_HOST="$OLLAMA_HOSTPORT" ollama ps 2>/dev/null || true)
@@ -488,6 +547,16 @@ cmd_status() {
   fi
   if service_installed; then
     printf 'servicio: instalado, activo=%s, autoarranque=%s\n' "$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)" "$(systemctl --user is-enabled "$SERVICE" 2>/dev/null || true)"
+    local rel
+    rel=$(installed_release || true)
+    if [[ -n $rel ]]; then
+      printf '          versión instalada: %s (%s)\n' "$(basename -- "$rel")" "$(sed -n 's/^commit=//p' "$rel/VERSION" | head -n 1)"
+      if [[ -x $BIN && -f $ROOT/frontend/dist/index.html && $(basename -- "$rel") != "$(release_id)" ]]; then
+        printf '          %sel árbol de trabajo tiene otra build%s: ./invest-ai install la instala (y systemctl --user restart %s la aplica)\n' "$C_Y" "$C_0" "$SERVICE"
+      fi
+    else
+      printf '          %sla unidad ejecuta el árbol de trabajo (instalación antigua)%s: ./invest-ai install la pasa a una versión instalada\n' "$C_Y" "$C_0"
+    fi
   else
     printf 'servicio: no instalado (./invest-ai install)\n'
   fi
@@ -518,27 +587,113 @@ cmd_logs() {
 }
 
 # ---------- servicio systemd de usuario + lanzador de KDE ----------
-render() { # render PLANTILLA DESTINO : sustituye @ROOT@, @BIN@, @DATA@ y @OLLAMA@
+# El servicio NO ejecuta el árbol de trabajo: `install` hace una copia inmutable (binario, frontend/dist
+# y este script) en releases/<id>/ y las unidades apuntan allí. Así un cargo build, un npm run build o una
+# edición del script no cambian el servicio en marcha ni su próximo reinicio. Lo que sigue en el proyecto
+# es la configuración y los datos: .env y data/ (WorkingDirectory + ReadWritePaths).
+# Las migraciones y el catálogo de modelos van embebidos en el binario.
+REL_DIR="" REL_BIN="" REL_SCRIPT="" REL_DIST=""
+
+# ¿Se puede escribir esta ruta tal cual en una unidad systemd (y en el reemplazo de sed de render)?
+unit_safe() { [[ $1 != *[[:space:]%\$\"\'\\\|\&]* ]]; }
+
+# Huella de contenido de lo que se instala: binario + frontend/dist + este script.
+release_id() {
+  {
+    sha256sum <"$BIN"
+    sha256sum <"$SELF_PATH"
+    (cd -- "$ROOT/frontend/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+  } | sha256sum | cut -c1-12
+}
+
+# Carpeta de la versión a la que apunta la unidad instalada (vacío si apunta al árbol de trabajo).
+installed_release() {
+  local exe dir
+  exe=$(sed -n 's/^ExecStart=//p' "$UNIT_DIR/$SERVICE" 2>/dev/null | head -n 1 || true)
+  dir=${exe%/bin/invest-ai}
+  if [[ $exe == "$RELEASES_DIR"/*/bin/invest-ai && -f $dir/VERSION ]]; then printf '%s\n' "$dir"; fi
+}
+
+# Crea (o reutiliza, si el contenido es idéntico) releases/<id>/ y fija REL_*.
+snapshot_release() {
+  local id tmp commit dirty=""
+  [[ -x $BIN && -f $ROOT/frontend/dist/index.html ]] \
+    || die "falta la compilación (binario o frontend/dist): ejecuta ./invest-ai install sin --no-build."
+  id=$(release_id)
+  REL_DIR="$RELEASES_DIR/$id"
+  REL_BIN="$REL_DIR/bin/invest-ai"
+  REL_SCRIPT="$REL_DIR/invest-ai"
+  REL_DIST="$REL_DIR/frontend/dist"
+  if [[ -f $REL_DIR/VERSION ]]; then
+    ok "versión $id ya instalada (el contenido no cambió)"
+    return 0
+  fi
+  [[ ! -e $REL_DIR ]] || die "$REL_DIR existe pero está incompleto: bórralo (chmod -R u+w y rm -rf) y repite."
+  mkdir -p -m 700 -- "$RELEASES_DIR"
+  tmp=$(mktemp -d -- "$RELEASES_DIR/.tmp-XXXXXX")
+  info "Instalando la versión $id en $REL_DIR"
+  mkdir -p -- "$tmp/bin" "$tmp/frontend"
+  install -m 755 -- "$BIN" "$tmp/bin/invest-ai"
+  install -m 755 -- "$SELF_PATH" "$tmp/invest-ai"
+  cp -r -- "$ROOT/frontend/dist" "$tmp/frontend/dist"
+  commit=unknown
+  if have git && git -C "$ROOT" rev-parse --short HEAD >/dev/null 2>&1; then
+    commit=$(git -C "$ROOT" rev-parse --short HEAD)
+    if [[ -n $(git -C "$ROOT" status --porcelain 2>/dev/null | head -n 1) ]]; then dirty="+cambios-sin-commit"; fi
+  fi
+  {
+    printf 'id=%s\n' "$id"
+    printf 'commit=%s%s\n' "$commit" "$dirty"
+    printf 'instalada=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'proyecto=%s\n' "$ROOT"
+  } >"$tmp/VERSION"
+  mv -T -- "$tmp" "$REL_DIR" || { rm -rf -- "${tmp:?}"; die "no se pudo crear $REL_DIR"; }
+  chmod -R a-w -- "$REL_DIR" # inmutable
+}
+
+# Borra las versiones antiguas: se quedan la nueva, la que usaba la unidad hasta ahora y las 3 más recientes.
+prune_releases() { # prune_releases VERSION_ANTERIOR(puede ser vacía)
+  local prev=${1-} d n=0
+  [[ -d $RELEASES_DIR ]] || return 0
+  while IFS= read -r d; do
+    n=$((n + 1))
+    if (( n <= 3 )) || [[ $d == "$REL_DIR" || $d == "$prev" ]]; then continue; fi
+    [[ $(dirname -- "$d") == "$RELEASES_DIR" ]] || continue
+    if chmod -R u+w -- "$d" && rm -rf -- "${d:?}"; then
+      info "versión antigua borrada: $(basename -- "$d")"
+    else
+      warn "no se pudo borrar la versión antigua $d"
+    fi
+  done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -not -name '.tmp-*' -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+}
+
+render() { # render PLANTILLA DESTINO : sustituye @ROOT@, @BIN@, @SCRIPT@, @DIST@, @DATA@ y @OLLAMA@
   local ollama_bin
   ollama_bin="$(command -v ollama || printf /usr/bin/ollama)"
-  sed -e "s|@ROOT@|$ROOT|g" -e "s|@BIN@|$BIN|g" -e "s|@DATA@|$DATA_DIR|g" -e "s|@OLLAMA@|$ollama_bin|g" -- "$1" >"$2"
+  sed -e "s|@ROOT@|$ROOT|g" -e "s|@BIN@|${REL_BIN:-$BIN}|g" -e "s|@SCRIPT@|${REL_SCRIPT:-$SELF_PATH}|g" \
+    -e "s|@DIST@|${REL_DIST:-$ROOT/frontend/dist}|g" -e "s|@DATA@|$DATA_DIR|g" -e "s|@OLLAMA@|$ollama_bin|g" -- "$1" >"$2"
 }
 
 cmd_install() {
-  local autostart=0 a
+  local autostart=0 build=1 a prev
   for a in "$@"; do
     case $a in
       --autostart) autostart=1 ;;
-      *) die "uso: ./invest-ai install [--autostart]" ;;
+      --no-build) build=0 ;; # instala lo ya compilado (falla si falta)
+      *) die "uso: ./invest-ai install [--autostart] [--no-build]" ;;
     esac
   done
   have systemctl || die "no hay systemd"
   check_prereqs
   prepare_files
-  [[ $ROOT != *[[:space:]%\$\"\'\\\|]* && $DATA_DIR != *[[:space:]%\$\"\'\\\|]* && $BIN != *[[:space:]%\$\"\'\\\|]* ]] \
-    || die "la ruta del proyecto o de los datos tiene caracteres que los ficheros de unidad no admiten; muévelos."
-  ensure_frontend 1
-  ensure_backend release
+  unit_safe "$ROOT" && unit_safe "$DATA_DIR" && unit_safe "$BIN" && unit_safe "$RELEASES_DIR" \
+    || die "la ruta del proyecto, de los datos o de las versiones instaladas tiene caracteres que los ficheros de unidad no admiten; muévelos."
+  if (( build )); then
+    ensure_frontend 1
+    ensure_backend release
+  fi
+  prev=$(installed_release || true)
+  snapshot_release
   mkdir -p -- "$UNIT_DIR" "$APP_DIR" "$ICON_DIR"
   render "$ROOT/packaging/invest-ai.service" "$UNIT_DIR/$SERVICE"
   render "$ROOT/packaging/invest-ai-ollama.service" "$UNIT_DIR/$OLLAMA_SERVICE"
@@ -551,9 +706,18 @@ cmd_install() {
     ok "autoarranque activado (al iniciar sesión)"
   fi
   if have update-desktop-database; then update-desktop-database "$APP_DIR" 2>/dev/null || true; fi
-  ok "instalado: $UNIT_DIR/$SERVICE y entrada 'invest-ai' en el menú de KDE"
+  prune_releases "$prev"
+  ok "instalado: $UNIT_DIR/$SERVICE (versión $(basename -- "$REL_DIR")) y entrada 'invest-ai' en el menú de KDE"
+  if system_ollama_enabled; then
+    info "hay un ollama.service del sistema habilitado: el Ollama de respaldo ($OLLAMA_SERVICE) no arrancará nunca (su ExecCondition lo omite); los modelos viven en el del sistema"
+  fi
+  if [[ -n $prev && $prev != "$REL_DIR" ]] && service_active; then
+    info "el servicio en marcha sigue con la versión anterior ($(basename -- "$prev")); aplica la nueva con: systemctl --user restart $SERVICE"
+  fi
   printf '  iniciar:      systemctl --user start %s   (o el icono del menú)\n' "$SERVICE"
+  printf '  actualizar:   tras cambiar el código, ./invest-ai install y systemctl --user restart %s\n' "$SERVICE"
   printf '  autoarranque: ./invest-ai install --autostart\n'
+  printf '  modelo:       el servicio nunca descarga modelos solo; ./invest-ai pull (o AUTO_PULL_MODEL=1 en .env)\n'
   printf '  endurecimiento: systemd-analyze --user security %s\n' "$SERVICE"
 }
 
@@ -562,9 +726,13 @@ cmd_uninstall() {
   systemctl --user disable --now "$SERVICE" 2>/dev/null || true
   systemctl --user stop "$OLLAMA_SERVICE" 2>/dev/null || true
   rm -f -- "${UNIT_DIR:?}/$SERVICE" "${UNIT_DIR:?}/$OLLAMA_SERVICE" "${APP_DIR:?}/invest-ai.desktop" "${ICON_DIR:?}/invest-ai.svg"
+  if [[ -d $RELEASES_DIR ]]; then
+    chmod -R u+w -- "$RELEASES_DIR" && rm -rf -- "${RELEASES_DIR:?}"
+    rmdir --ignore-fail-on-non-empty -- "$(dirname -- "$RELEASES_DIR")" 2>/dev/null || true
+  fi
   systemctl --user daemon-reload
   if have update-desktop-database; then update-desktop-database "$APP_DIR" 2>/dev/null || true; fi
-  ok "desinstalado (los datos de data/ y .env no se tocan)"
+  ok "desinstalado, incluidas las versiones instaladas (los datos de data/ y .env no se tocan)"
 }
 
 # Abre la app: si no corre, arranca el servicio (si está instalado) o el modo normal. Lo usa el .desktop.
@@ -580,15 +748,43 @@ cmd_open() {
   fi
 }
 
-# Previo al servicio (ExecStartPre): valida, espera a Ollama y descarga el modelo si falta.
+# Segundos que _prestart espera a Ollama antes de dejar arrancar la app sin él (INVEST_AI_PRESTART_WAIT
+# lo cambia; lo usan las pruebas de packaging/test-invest-ai.sh).
+PRESTART_OLLAMA_WAIT="${INVEST_AI_PRESTART_WAIT:-30}"
+[[ $PRESTART_OLLAMA_WAIT =~ ^[0-9]{1,4}$ ]] || PRESTART_OLLAMA_WAIT=30
+readonly PRESTART_OLLAMA_WAIT
+
+# Previo al servicio (ExecStartPre): valida .env y, si Ollama responde, comprueba el modelo.
+# NUNCA bloquea el arranque por falta de Ollama (la UI y los datos funcionan sin LLM, los análisis
+# fallan con un error claro y la lista de seguimiento espera y reintenta) y NUNCA descarga un
+# modelo salvo con AUTO_PULL_MODEL=1 en .env.
 cmd_prestart() {
-  load_settings
+  load_settings # falla (y sí impide el arranque) si BIND_ADDR no es loopback
   if (( FAKE )); then return 0; fi
   if ! ollama_up; then
-    info "esperando a Ollama en $LLM_BASE_URL"
-    wait_for 90 ollama_up || die "Ollama no responde en $LLM_BASE_URL"
+    info "esperando hasta ${PRESTART_OLLAMA_WAIT} s a Ollama en $LLM_BASE_URL"
+    if ! wait_for "$PRESTART_OLLAMA_WAIT" ollama_up; then
+      warn "Ollama no responde en $LLM_BASE_URL: arranco la app igualmente; los análisis fallarán hasta que Ollama esté en marcha"
+      return 0
+    fi
   fi
-  ensure_model
+  ensure_model 0
+}
+
+# pull [MODELO]: descarga un modelo (por defecto LLM_MODEL) en el Ollama de LLM_BASE_URL.
+cmd_pull() {
+  local model=${1-} rc=0
+  load_settings
+  have ollama || die "falta ollama (sudo pacman -S ollama)."
+  model=${model:-$LLM_MODEL}
+  [[ $model =~ ^[A-Za-z0-9][A-Za-z0-9._/:-]*$ && ${#model} -le 200 ]] || die "nombre de modelo no válido: $model"
+  ollama_up || die "Ollama no responde en $LLM_BASE_URL: arráncalo (sudo systemctl start ollama) y repite."
+  model_state "$model" || rc=$?
+  if (( rc == 0 )); then
+    ok "el modelo $model ya está instalado en $LLM_BASE_URL"
+    return 0
+  fi
+  pull_model "$model" || exit 1
 }
 
 # selftest [--llm] [--url URL]: prueba de humo (health, cotizaciones reales, tick WS, /models,
@@ -646,7 +842,13 @@ Comandos:
   status            estado de app, Ollama, modelo, servicio y compilación
   logs [-f] [server|ollama|vite]
   open              abre el navegador; arranca la app si no corre (lo usa el icono de KDE)
-  install [--autostart]   servicio systemd de usuario + entrada en el menú de KDE
+  pull [MODELO]     descarga un modelo en el Ollama en uso (por defecto LLM_MODEL). Es la única vía
+                    por línea de comandos: ni el servicio ni run/dev descargan nada sin pedirlo
+                    (AUTO_PULL_MODEL=1 en .env lo permite sin preguntar)
+  install [--autostart] [--no-build]   compila, copia una versión inmutable a ~/.local/share/invest-ai/releases/
+                    y deja el servicio systemd de usuario + la entrada de KDE apuntando a ella (las
+                    builds posteriores del árbol de trabajo no la tocan; para actualizarla, repite install
+                    y reinicia el servicio). --no-build instala lo ya compilado
   uninstall         quita servicio y entrada del menú
   selftest [--llm]  prueba de humo contra la instancia (o una temporal): sale con 1 si algo falla
 
@@ -673,6 +875,7 @@ main() {
     status) cmd_status ;;
     logs) mkdir -p -- "$STATE_DIR"; load_settings; cmd_logs ${args[@]+"${args[@]}"} ;;
     open) cmd_open ;;
+    pull) cmd_pull ${args[@]+"${args[@]}"} ;;
     install) cmd_install ${args[@]+"${args[@]}"} ;;
     uninstall) cmd_uninstall ;;
     selftest) cmd_selftest ${args[@]+"${args[@]}"} ;;

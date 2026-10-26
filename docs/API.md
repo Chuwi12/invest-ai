@@ -214,7 +214,7 @@ type WeightVersion = { version: number; kind: "learned" | "rollback" | "decay" |
 
 type WatchlistStatus = {
   enabled: boolean; defaultList: boolean      // defaultList: la lista a priori (WATCHLIST vacío)
-  time: string; depth: AnalysisDepth          // hora local "HH:MM"
+  time: string; depth: AnalysisDepth          // hora local "HH:MM" PREFERIDA dentro de la ventana (cierre de EE. UU. de D + 30 min → apertura siguiente); localDate de runs/results = día de bolsa D
   nextRun: string | null                      // próxima pasada programada
   running: boolean                            // hay una pasada en marcha
   assets: { id: AssetId; last: WatchlistResult | null; lastOkAt: string | null }[]   // último intento de cada activo
@@ -224,7 +224,7 @@ type WatchlistStatus = {
 }
 type WatchlistRun = { id: number; localDate: string; scheduledFor: string; startedAt: string; finishedAt: string | null
   trigger: "schedule" | "recovery" | "retry"  // recovery: el servidor arrancó tarde; startedAt dice cuándo fue de verdad
-  status: "running" | "completed" | "aborted" | "interrupted"; depth: string; model: string | null
+  status: "running" | "completed" | "aborted" | "interrupted" | "missed"; depth: string; model: string | null
   planned: number; power: "ac" | "battery" | "unknown"; powerWaitSecs: number; ok: number; failed: number }
 type WatchlistResult = { id: number; runId: number; localDate: string; assetId: AssetId
   status: "ok" | "failed" | "skipped"         // skipped: no se intentó porque la pasada se abortó
@@ -397,7 +397,7 @@ OPINIÓN de usuarios anónimos, no hechos; solo mide atención y tono, no entra 
 
 | Método | Ruta | Respuesta |
 |--------|------|-----------|
-| GET | `/social/status` | Solo lectura, sin consultar a las redes. Apagado: `{ enabled: false, reddit: {enabled:false}, x: {enabled:false}, lastError: null, notes }` (`notes` explica por qué no se activó algo, p. ej. «X no se activa: X_MONTHLY_READ_BUDGET es obligatorio»). Encendido: `{ enabled: true, reddit: {enabled}, x: {enabled, month, monthlyReadBudget, used, remaining, costPerReadUsd, estimatedCostUsd, maxMonthlyCostUsd, exhausted, accounts, searchAll}, days, refreshMinutes, lastError: {at, source, message} \| null, notes }`. `exhausted` = quedan menos de 10 lecturas (mínimo de la API de X) y no se hacen más consultas ese mes. `estimatedCostUsd = used × costPerReadUsd`. |
+| GET | `/social/status` | Solo lectura, sin consultar a las redes. Apagado: `{ enabled: false, reddit: {enabled:false}, x: {enabled:false}, lastError: null, notes }` (`notes` explica por qué no se activó algo, p. ej. «X no se activa: X_MONTHLY_READ_BUDGET es obligatorio»). Encendido: `{ enabled: true, reddit: {enabled}, x: {enabled, month, monthlyReadBudget, used, remaining, costPerReadUsd, estimatedCostUsd, maxMonthlyCostUsd, exhausted, accounts, searchAll, assetsPerHour}, days, refreshMinutes, lastError: {at, source, message} \| null, notes }`. `exhausted` = quedan menos de 10 lecturas (mínimo de la API de X) y no se hacen más consultas ese mes. `estimatedCostUsd = used × costPerReadUsd`. `assetsPerHour` = tope de activos DISTINTOS consultados en X por hora (`X_MAX_ASSETS_PER_HOUR`): `{ limit, used, full, windowMinutes, exemptAssets, nextSlotAt }` (`used` = activos que ocupan hueco en la ventana de `windowMinutes` min; `exemptAssets` = activos de la lista de seguimiento, que no ocupan hueco; `nextSlotAt` = cuándo se libera uno, `null` si no está lleno). |
 | GET | `/assets/{id}/social` | `{ enabled, digest, disclaimer }`. Apagado: `enabled: false, digest: null`. Encendido consulta las redes solo si lo guardado tiene más de `SOCIAL_REFRESH_MINUTES` (esto puede gastar lecturas de X, siempre dentro del presupuesto). `digest`: `{ asset, metrics, excerpts }` o `null` si no hay publicaciones o las redes fallaron: **un fallo de redes nunca devuelve error**. `metrics`: `{ asOf, windowDays, mentions (24 h), authors, bullish, bearish, neutral, bullishShare, mentionsWindow, bullishWindow, bearishWindow, baselineMean, baselineDays, ratio, z, bySource[], truncated }`; `ratio`/`z`/`baselineMean` son `null` con menos de 5 bloques de 24 h observados. `excerpts` (≤ 5, mejor puntuación primero): `{ id, source: "reddit"\|"x", community, author (hash), title, text, score, comments, createdAt, url, stance: "bullish"\|"bearish"\|"neutral" }`. |
 
 `Analysis.dataWarnings` incluye un aviso si las redes estaban activadas pero fallaron durante el análisis. Con redes apagadas el análisis es idéntico al de siempre.

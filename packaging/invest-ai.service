@@ -1,16 +1,24 @@
 [Unit]
 Description=invest-ai (análisis de inversión con IA local)
 Documentation=file://@ROOT@/README.md
-# Ollama: el del sistema (ollama.service) o, si el puerto está libre, el de usuario.
+# Ollama: el del sistema (ollama.service, que una unidad de usuario no puede ordenar) o, solo si no hay
+# uno del sistema habilitado, el de respaldo de usuario. `_prestart` espera un poco a que responda,
+# pero la app arranca igualmente sin Ollama (la UI y los datos no lo necesitan).
 Wants=invest-ai-ollama.service network-online.target
 After=invest-ai-ollama.service network-online.target
 
 [Service]
 Type=simple
+# El proyecto solo aporta la configuración y los datos (.env y data/, relativos a este directorio). Lo que
+# se ejecuta es una copia inmutable hecha por `./invest-ai install` en ~/.local/share/invest-ai/releases/<id>/:
+# un cargo build, un npm run build o una edición del script en el repo no cambian el servicio.
 WorkingDirectory=@ROOT@
-# Valida .env (solo loopback), espera a Ollama y descarga el modelo si falta.
-ExecStartPre=@ROOT@/invest-ai _prestart
-# El binario que compiló `./invest-ai install` (respeta CARGO_TARGET_DIR).
+Environment=INVEST_AI_ROOT=@ROOT@
+Environment=STATIC_DIR=@DIST@
+# Valida .env (solo loopback), espera hasta 30 s a Ollama (si no responde, avisa y sigue) y avisa si
+# falta el modelo. NO descarga nada salvo AUTO_PULL_MODEL=1 en .env (./invest-ai pull lo hace a mano).
+ExecStartPre=@SCRIPT@ _prestart
+# El binario de la versión instalada (copiado por `./invest-ai install` desde la build, respeta CARGO_TARGET_DIR).
 ExecStart=@BIN@
 Restart=on-failure
 RestartSec=3

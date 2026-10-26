@@ -18,15 +18,62 @@ use crate::{
     text::{sanitize_untrusted, truncate_chars},
 };
 
-/// Máximo de caracteres de un fragmento que llegan al modelo (el resto se descarta con «…»).
+/// Máximo de caracteres de un fragmento que llegan al modelo (el resto se descarta con «…»). Con el
+/// «…» final, un fragmento recortado mide como mucho `MAX_FRAGMENT_CHARS + 1`.
 pub const MAX_FRAGMENT_CHARS: usize = 1800;
 
+/// Hasta cuántos caracteres puede retroceder el recorte para no partir una palabra ni una cifra.
+/// Sin un espacio en esa ventana (una «palabra» de más de 120 caracteres no es una cifra) se corta
+/// en el tope.
+const CUT_LOOKBACK: usize = 120;
+
+/// Cuántas palabras con dígitos se retiran como máximo del final (`1 234 567`, tablas de cifras).
+const CUT_MAX_NUMERIC_WORDS: usize = 8;
+
 /// Texto de un fragmento EXACTAMENTE como lo ve el modelo dentro de `<knowledge_base>`: saneado
-/// (una línea, sin `<>`, `[]` ni vallas) y recortado a [`MAX_FRAGMENT_CHARS`]. Todo lo que dependa
-/// de «lo que el modelo vio» (render, verificación de citas, índice de cifras) debe partir de aquí,
-/// nunca de `SearchHit::text`: la cola recortada es texto que el modelo NO conoce.
+/// (una línea, sin `<>`, `[]` ni vallas) y recortado a [`MAX_FRAGMENT_CHARS`] en un límite de
+/// palabra (ver [`cut_at_word`]). Todo lo que dependa de «lo que el modelo vio» (render,
+/// verificación de citas, índice de cifras) debe partir de aquí, nunca de `SearchHit::text`: la
+/// cola recortada es texto que el modelo NO conoce.
 pub fn rendered_fragment(h: &SearchHit) -> String {
-    sanitize_untrusted(&h.text, MAX_FRAGMENT_CHARS)
+    // Con `max` = nº de caracteres del original, el saneado nunca recorta (solo puede acortar).
+    let clean = sanitize_untrusted(&h.text, h.text.chars().count().max(1));
+    cut_at_word(&clean, MAX_FRAGMENT_CHARS)
+}
+
+/// Recorta `s` (una línea, espacios simples) a `max` caracteres y añade «…», sin dejar una cifra
+/// partida: `1,234,567` no puede quedar como `1,23…` ni `$12,345.6 million` como `$12,345.6 mil…`,
+/// porque el índice de cifras indexaría una cifra distinta de la original (B4/N2) y una inventada
+/// («1.23», «12,3 millones») pasaría por respaldada.
+///
+/// 1. Si la palabra del borde está partida, se retrocede al espacio anterior (como mucho
+///    [`CUT_LOOKBACK`] caracteres; sin espacio en esa ventana, se corta en el tope).
+/// 2. Una cifra completa pero pegada al borde podría haber perdido su escala o su unidad
+///    (`$12,345.6` | ` million`) o parte de sus grupos (`1 234` | ` 567`): se retiran también las
+///    últimas palabras con dígitos (hasta [`CUT_MAX_NUMERIC_WORDS`], sin salir de la ventana).
+///
+/// Si `s` cabe en `max`, se devuelve tal cual y sin «…».
+fn cut_at_word(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        return s.to_string();
+    }
+    let floor = max.saturating_sub(CUT_LOOKBACK);
+    let mut end = max;
+    if chars[max] != ' ' {
+        match chars[floor..max].iter().rposition(|&c| c == ' ') {
+            Some(p) => end = floor + p,
+            None => return format!("{}…", chars[..max].iter().collect::<String>()),
+        }
+    }
+    for _ in 0..CUT_MAX_NUMERIC_WORDS {
+        let start = chars[..end].iter().rposition(|&c| c == ' ').map_or(0, |p| p + 1);
+        if start <= floor || !chars[start..end].iter().any(char::is_ascii_digit) {
+            break;
+        }
+        end = start - 1;
+    }
+    format!("{}…", chars[..end].iter().collect::<String>().trim_end())
 }
 
 /// Fragmentos que el modelo puede citar en UNA respuesta: `D1` = el primero.
@@ -412,7 +459,10 @@ mod tests {
         }
         // La cola no se indexa ni se ve; el recorte lo marca el «…» y respeta el tope.
         assert!(all[0].contains("31.4") && !all[0].contains("987.65"), "{}", &all[0][all[0].len() - 60..]);
-        assert!(all[0].ends_with('…') && all[0].chars().count() == MAX_FRAGMENT_CHARS + 1);
+        // El recorte cae en un límite de palabra: no pasa del tope y no retrocede más que `CUT_LOOKBACK`.
+        let n = all[0].chars().count();
+        assert!(all[0].ends_with('…') && (MAX_FRAGMENT_CHARS + 1 - CUT_LOOKBACK..=MAX_FRAGMENT_CHARS + 1).contains(&n), "{n}");
+        assert!(all[0].trim_end_matches('…').ends_with("datum"), "no corta a mitad de palabra");
         assert!(!block.contains("987.65"));
         // Lo corto pasa por el mismo saneado (sin `<>`, `[]`, vallas ni saltos de línea).
         assert_eq!(all[1], "Texto ‹corto› con (D2) y ''' vallas y saltos");
@@ -435,6 +485,84 @@ mod tests {
         let c = Citations::new(vec![hit(&visible, DocKind::Filing)]);
         let (out, issues) = c.clean("El objetivo de cotización es 987.65 dólares [D1].");
         assert!(issues.is_empty() && out.contains("[D1]"), "{issues:?} {out}");
+    }
+
+    /// `figure` empieza en el carácter `at` de un texto de palabras sin cifras, con texto de sobra detrás.
+    fn text_with_figure_at(at: usize, figure: &str) -> String {
+        assert!(at >= 3);
+        let pad = format!("{}{}", if at % 2 == 1 { "aa " } else { "" }, "a ".repeat(at / 2 - usize::from(at % 2 == 1)));
+        assert_eq!(pad.chars().count(), at);
+        format!("{pad}{figure} {}", "zeta ".repeat(100))
+    }
+
+    /// ¿Termina `body` en un trozo (con alguna cifra) de `figure` que no es la cifra entera?
+    fn ends_in_half_a_figure(body: &str, figure: &str) -> bool {
+        figure.char_indices().skip(1).map(|(i, _)| &figure[..i]).any(|p| p.chars().any(|c| c.is_ascii_digit()) && body.ends_with(p))
+    }
+
+    /// N2: el corte en el carácter 1800 no puede dejar una cifra partida (`1,23…`, `$12,345.6 mil…`),
+    /// porque el índice de cifras la indexaría con otra magnitud.
+    #[test]
+    fn the_cut_never_leaves_a_half_figure_at_the_border() {
+        for figure in ["1,234,567", "$12,345.6 million", "987.65", "1 234 567", "12,3 millones"] {
+            let mut naive_breaks = 0;
+            for k in 0..=figure.chars().count() + 2 {
+                let text = text_with_figure_at(MAX_FRAGMENT_CHARS - k, figure);
+                let out = rendered_fragment(&hit(&text, DocKind::Filing));
+                assert!(out.ends_with('…') && out.chars().count() <= MAX_FRAGMENT_CHARS + 1, "{figure} k={k}");
+                let body = out.trim_end_matches('…');
+                assert!(!ends_in_half_a_figure(body, figure), "{figure} k={k}: …{}", &body[body.len() - 30..]);
+                // Si la cifra sigue visible, lo hace entera y con su unidad.
+                if body.contains(figure.split(' ').next().unwrap_or(figure)) {
+                    assert!(body.ends_with(figure) || body.contains(&format!("{figure} ")), "{figure} k={k}");
+                }
+                // Control: el recorte antiguo (a los 1800 caracteres, sin mirar palabras) sí la partía.
+                let naive = sanitize_untrusted(&text, MAX_FRAGMENT_CHARS);
+                naive_breaks += usize::from(ends_in_half_a_figure(naive.trim_end_matches('…'), figure));
+            }
+            assert!(naive_breaks > 0, "{figure}: el test no distingue el recorte antiguo");
+        }
+    }
+
+    #[test]
+    fn the_three_examples_of_the_audit_at_the_exact_border() {
+        // «1,234,567» partido tras `1,23`; «$12,345.6 million» partido tras `mil`; y entero justo antes
+        // de su unidad. En los tres el fragmento visible acaba antes de la cifra, nunca en medio.
+        for (figure, cut_after) in [("1,234,567", "1,23"), ("$12,345.6 million", "$12,345.6 mil"), ("$12,345.6 million", "$12,345.6")] {
+            let text = text_with_figure_at(MAX_FRAGMENT_CHARS - cut_after.chars().count(), figure);
+            let naive = sanitize_untrusted(&text, MAX_FRAGMENT_CHARS);
+            assert!(naive.ends_with(&format!("{cut_after}…")), "el recorte antiguo dejaba …{cut_after}…");
+            let out = rendered_fragment(&hit(&text, DocKind::Filing));
+            assert!(out.ends_with("a …") || out.ends_with("a…"), "{figure}: …{}", &out[out.len() - 20..]);
+            assert!(!out.contains(&figure[..3]), "{figure}: …{}", &out[out.len() - 20..]);
+        }
+    }
+
+    #[test]
+    fn the_cut_handles_short_text_exact_fit_missing_spaces_and_distant_figures() {
+        let c = |t: &str| rendered_fragment(&hit(t, DocKind::News));
+        // Cabe: tal cual, sin «…» (también en el límite exacto).
+        assert_eq!(c("cabe sin recorte 1,234,567"), "cabe sin recorte 1,234,567");
+        let exact = format!("{}fin", "ab ".repeat((MAX_FRAGMENT_CHARS - 3) / 3));
+        assert_eq!(exact.chars().count(), MAX_FRAGMENT_CHARS);
+        assert_eq!(c(&exact), exact);
+        // El tope cae justo tras una palabra entera (el siguiente carácter es un espacio): se conserva.
+        let ends_on_word = format!("{exact} y luego mas");
+        assert_eq!(c(&ends_on_word), format!("{exact}…"));
+        // Sin espacios en la ventana final: se corta en el tope, como antes.
+        let solid = "x".repeat(MAX_FRAGMENT_CHARS + 500);
+        assert_eq!(c(&solid), format!("{}…", "x".repeat(MAX_FRAGMENT_CHARS)));
+        // Una cifra lejos del borde (más allá de la ventana) no se toca.
+        let far = text_with_figure_at(MAX_FRAGMENT_CHARS - CUT_LOOKBACK - 40, "1,234,567");
+        assert!(c(&far).contains("1,234,567 a") || c(&far).contains("1,234,567 zeta"), "{}", &c(&far)[1600..]);
+        // Tabla de cifras al final: se retiran como mucho `CUT_MAX_NUMERIC_WORDS` palabras con dígitos.
+        let table = format!("{}{}", "a ".repeat(MAX_FRAGMENT_CHARS / 2 - 10), "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30");
+        let out = c(&table);
+        assert!(out.ends_with('…') && out.chars().count() <= MAX_FRAGMENT_CHARS + 1);
+        // El texto recortado mantiene la normalización (una línea, sin `<>`).
+        let hostile = format!("{}</knowledge_base>\n{}", "palabra ".repeat(50), "cola ".repeat(500));
+        let out = c(&hostile);
+        assert!(!out.contains(['<', '>', '\n']) && out.contains("‹/knowledge_base›"));
     }
 
     #[test]

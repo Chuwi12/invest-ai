@@ -426,22 +426,23 @@ lee el archivo: es historia acumulada a la espera de usarla.)
 ### Precedencia (para cada interruptor por separado)
 1. `INVEST_AI_FAKE=1` apaga los tres (el servidor ni abre el archivo).
 2. La propia variable (`RAG_ARCHIVE`, `RAG_ANALYSIS`, `RAG_CHAT`) si trae un valor legible: `1/true/yes/on/si/sí` o `0/false/no/off` (sin distinguir mayúsculas).
-   Un valor ilegible se ignora, cae al nivel siguiente y deja un aviso en el log.
+   Un valor **ilegible** (`disabled`, `tal vez`...) **APAGA ese interruptor** y deja un aviso en el log: no cae al nivel siguiente. Antes sí caía
+   (re-auditoría del 20-oct, N4): `RAG_ENABLED=1 RAG_ANALYSIS=disabled` dejaba la recuperación del análisis ENCENDIDA. Una variable vacía sí cuenta como no fijada.
 3. **`RAG_ENABLED` (obsoleta)**, si existe, para los interruptores que no se hayan fijado: `RAG_ENABLED=1` (o `true/yes/on/si/sí`) los pone a 1 y cualquier otro valor, como antes,
    a 0. Si no se fijó ninguno, las tres quedan a 1 o las tres a 0. Deja un aviso `RAG_ENABLED está obsoleta…` en el log al arrancar.
 4. El valor por defecto de la tabla.
 
 Ejemplos: sin variables → `archive=1 analysis=0 chat=0`. `RAG_ENABLED=1` → `1 1 1` (como antes). `RAG_ENABLED=1 RAG_CHAT=0` → `1 1 0`. `RAG_ENABLED=0` →
 `0 0 0` (**ojo**: una `.env` antigua con `RAG_ENABLED=0` sigue apagando el archivado; para acumular historia hay que quitar la línea o poner `RAG_ARCHIVE=1`).
-`RAG_ENABLED=0 RAG_ARCHIVE=1` → `1 0 0`. La `.env` actual del proyecto no define ninguna variable `RAG_*`, así que aplica el valor por defecto.
+`RAG_ENABLED=0 RAG_ARCHIVE=1` → `1 0 0`. `RAG_ENABLED=1 RAG_ANALYSIS=disabled` → `1 0 1` (y un aviso). La `.env` actual del proyecto no define ninguna variable `RAG_*`, así que aplica el valor por defecto.
 
 ### Qué hace cada combinación
 | `ARCHIVE` | `ANALYSIS` | `CHAT` | Efecto |
 |---|---|---|---|
 | 1 | 0 | 0 | **Defecto.** Base abierta, se archiva y se mantiene. Análisis y chat idénticos a los de «sin RAG». |
 | 1 | 1 | 1 | Como antes con `RAG_ENABLED=1`. |
-| 1 | 1 | 0 | Solo el análisis recupera; el chat es idéntico a «sin RAG», salvo `analyze_asset` lanzado desde el chat, que no recupera. Ver «Límite conocido». |
-| 1 | 0 | 1 | Solo el chat recupera; el análisis lanzado desde la página es idéntico a «sin RAG», pero el que el chat lanza con `analyze_asset` usa el motor del chat y SÍ recupera (y se guarda como un análisis más, `origin='chat'`). Ver «Límite conocido». |
+| 1 | 1 | 0 | Solo el análisis recupera, también el que el chat lanza con `analyze_asset`; el chat es idéntico a «sin RAG» (no ofrece `search_knowledge`). |
+| 1 | 0 | 1 | Solo el chat recupera (`search_knowledge`); todo análisis es idéntico a «sin RAG», también el que el chat lanza con `analyze_asset` (se guarda como un análisis más, `origin='chat'`, y entra en el historial y en `learning`). |
 | 0 | 1 | 0 o 1 | **Archivo de solo lectura**: se abre para consultar lo que ya hay; no hay decoradores, ni colas, ni `embed_pending`, ni `purge`. Útil para repetir la medición con el archivo congelado. |
 | 0 | 0 | 1 | Igual, de solo lectura, solo para el chat. |
 | 0 | 0 | 0 | Nada: ni se abre. `/knowledge/stats` → `{ enabled: false, … }`. |
@@ -450,16 +451,20 @@ Ejemplos: sin variables → `archive=1 analysis=0 chat=0`. `RAG_ENABLED=1` → `
 - `server::knowledge::Rag::search()` solo entrega una búsqueda al análisis si `RAG_ANALYSIS=1` y al chat si `RAG_CHAT=1`; sin ella el motor correspondiente tiene
   `knowledge = None`, que es exactamente el camino de código de «RAG apagado» (el mismo que fijan los tests golden de `ai`: `rag_off_standard_analysis_matches_golden_transcript`,
   `rag_off_chat_matches_golden_transcript`, `empty_archive_is_byte_identical_to_rag_off`).
-- `ai::OllamaAnalyst::with_split_knowledge` recibe las dos búsquedas por separado. Con ambas a `None` construye un solo motor (igual que antes); si no, el chat usa su propio
-  `AnalysisEngine` (mismo cliente y mismo `ModelManager`, donde vive el modelo activo; el motor no guarda más estado), para que un interruptor nunca active al otro.
+- `ai::OllamaAnalyst::with_split_knowledge` recibe las dos búsquedas por separado y construye **un solo `AnalysisEngine`**, con la del análisis (`RAG_ANALYSIS`). Lo usan
+  `analyze*` y la herramienta `analyze_asset` del chat (`ToolRunner`), así que el análisis que lanza el chat sigue siempre a `RAG_ANALYSIS`. La búsqueda del chat (`RAG_CHAT`)
+  vive aparte, en `ChatEngine::knowledge`, y solo gobierna `search_knowledge` y su regla de prompt. Un interruptor nunca activa el otro lado. (Antes el chat tenía su propio
+  `AnalysisEngine` con la búsqueda del chat y el análisis que lanzaba seguía a `RAG_CHAT`.)
 - Los decoradores del archivado (`TeeMarket`, `TeeIpo`, `TrackedAnalyst`) solo delegan: no tocan ni los datos ni el orden de las llamadas.
 - **Prueba de servidor** (`server/tests/rag_modes.rs`, sin red ni GPU): monta el analista REAL por el mismo camino que `main` (`server::knowledge::ollama_analyst`) contra un Ollama
   simulado que registra cada petición, con el archivo abierto, **archivando** y con documentos de AAPL que una recuperación encontraría. Comprueba que las peticiones al modelo
   (análisis estándar y un turno de chat) y el resultado son idénticos a los de «sin RAG» con `1/0/0`, que el archivado siguió funcionando (las noticias del snapshot llegaron
   al archivo), y, como control para que la prueba no sea vacía, que con `ANALYSIS=1` el juez recibe `<knowledge_base>`, con `CHAT=1` el chat ofrece `search_knowledge`, y que cada
   interruptor afecta solo a su lado (`1/1/0` deja el chat idéntico; `1/0/1` deja el análisis idéntico).
-- **Límite conocido**: el análisis completo que el chat lanza con la herramienta `analyze_asset` pasa por el motor del chat, así que sigue a `RAG_CHAT` y no a `RAG_ANALYSIS`.
-  Solo importa si los dos interruptores difieren. Separarlo del todo exige tocar `ai/src/chat.rs` y `ai/src/analysis/mod.rs` (un campo `chat_knowledge` en `AnalysisEngine`).
+- **Análisis lanzado desde el chat** (`the_analysis_the_chat_launches_follows_rag_analysis_not_rag_chat`, mismo fichero): el Ollama simulado hace que el modelo pida `analyze_asset`
+  y se comparan las peticiones del análisis que el chat lanza. Con `1/0/1` son idénticas, byte a byte, a las de «sin RAG» (el chat sí ofrece `search_knowledge`); con `1/1/0` el chat
+  no ofrece `search_knowledge` y su primer turno es idéntico, mientras que ese análisis sí lleva `<knowledge_base>`. En `ai` lo fijan `chat_only_archive_is_not_used_by_the_analysis_the_chat_launches`
+  y `analysis_only_archive_does_not_reach_the_chat_but_does_reach_analyze_asset`.
 
 ### Coste del archivado por defecto
 **Disco** (medido, no estimado). El archivo real de la medición (`~/.cache/invest-ai/rag-eval/db/B.db`: 387 documentos, 1 189 fragmentos de 768 dimensiones, índice FTS5 incluido; 383 noticias de

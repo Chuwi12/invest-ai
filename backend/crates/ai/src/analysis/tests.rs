@@ -712,7 +712,7 @@ async fn standard_run_transcript(e: &Env) -> String {
     format!("{}\n{}", serde_json::to_string(&e.mock.chat_requests()).unwrap(), v)
 }
 
-/// Huella del texto enviado al modelo y del análisis con `RAG_ENABLED=0` (`knowledge = None`), calculada
+/// Huella del texto enviado al modelo y del análisis con `RAG_ANALYSIS=0` (`knowledge = None`), calculada
 /// con el código anterior al RAG. Si cambia, el RAG apagado ya no es idéntico: no se «actualiza» sin entender por qué.
 const STANDARD_GOLDEN: u64 = 11500036738350269393;
 
