@@ -20,6 +20,18 @@ vi.mock('@/pages/FavoritesPage', async (importOriginal) => {
   return await importOriginal()
 })
 
+describe('Landing', () => {
+  it('«/» muestra la landing a página completa, fuera del Shell, y «Entrar al panel» lleva al panel', async () => {
+    renderApp(<App />, '/')
+    expect(await screen.findByRole('heading', { level: 1, name: 'invest-ai' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Principal' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Panel' })).toBeNull()
+    await userEvent.click(screen.getAllByRole('link', { name: 'Entrar al panel' })[0]!)
+    await screen.findByRole('heading', { name: 'Panel' })
+    expect(screen.queryByRole('heading', { level: 1, name: 'invest-ai' })).toBeNull()
+  })
+})
+
 describe('Shell', () => {
   it('espera por condición, no por reloj: una página perezosa lenta (1,5 s) acaba pintándose', async () => {
     renderApp(<App />, '/favorites')

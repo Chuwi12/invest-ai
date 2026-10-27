@@ -1,0 +1,775 @@
+/*
+ * Landing («/»): extracto suizo. Papel blanco, tinta negra, rojo señal solo en campos grandes,
+ * una sola familia (Archivo, anchura y peso), rejilla de 12 columnas, filetes de 3 px y de 1 px.
+ * Todo cuelga de `.lp` y de clases `lp-*`: no toca el resto de la app. La landing es solo clara por
+ * diseño (el mundo es papel), aunque la app tenga tema oscuro.
+ */
+html:has(.lp),
+body:has(.lp) {
+  background: #fff;
+  color-scheme: light;
+  scrollbar-color: #000 #fff;
+}
+
+.lp {
+  --lp-paper: #fff;
+  --lp-ink: #000;
+  --lp-ink-2: #4a4a4a; /* 8,9:1 sobre papel */
+  --lp-faint: #737373; /* 4,7:1: fuentes viejas, atenuadas pero legibles */
+  --lp-red: #e2001a; /* 4,9:1 con texto blanco */
+  --lp-rule: #d9d9d6;
+  --lp-up: #127a3e; /* 5,4:1 */
+  --lp-font: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+
+  /* Escala: 13 / 15 / 17 / 20 / 24 / 36 / 48 / 96 px. Cada paso se nota. */
+  --lp-t-note: 0.8125rem;
+  --lp-t-ui: 0.9375rem;
+  --lp-t-body: 1.0625rem;
+  --lp-t-lead: 1.25rem;
+  --lp-t-step: 1.5rem;
+  --lp-t-fig: 3.5rem; /* la columna de cifras manda: 56 px, ajustados a su columna con cqi */
+  --lp-t-h2: clamp(2rem, 3.6vw, 3rem);
+  --lp-t-mon: clamp(3.5rem, 11vw, 6rem); /* solo si el navegador no entiende cqi */
+
+  --lp-pad: clamp(1rem, 3vw, 2rem);
+  --lp-gutter: 1.5rem;
+  --lp-max: 90rem;
+  /* Celdas de la cinta: ancho fijo en rem (sin unidad aquí para calcular la duración) y velocidad en rem/s. */
+  --lp-cell-n: 13;
+  --lp-speed: 3.5;
+
+  color-scheme: light;
+  min-height: 100dvh;
+  background: var(--lp-paper);
+  color: var(--lp-ink);
+  font: 400 var(--lp-t-body) / 1.5 var(--lp-font);
+  font-stretch: 100%;
+  font-feature-settings: normal;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  scrollbar-color: #000 #fff;
+}
+
+/* Los reinicios van en :where() (especificidad 0): ninguna clase lp-* tiene que ganarles la batalla. */
+:where(.lp, .lp *, .lp *::before, .lp *::after) {
+  box-sizing: border-box;
+}
+:where(.lp) :is(h1, h2, h3, p, ul, ol, dl, dd) {
+  margin: 0;
+}
+:where(.lp) :is(ul, ol) {
+  padding: 0;
+  list-style: none;
+}
+:where(.lp) a {
+  color: inherit;
+  text-decoration: none;
+}
+.lp ::selection {
+  background: #000;
+  color: #fff;
+}
+.lp :focus-visible {
+  outline: 3px solid var(--lp-ink);
+  outline-offset: 3px;
+  border-radius: 0;
+}
+.lp-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.lp-skip {
+  position: absolute;
+  left: var(--lp-pad);
+  top: 0;
+  z-index: 10;
+  padding: 0.6rem 1rem;
+  background: var(--lp-ink);
+  color: var(--lp-paper);
+  font-weight: 600;
+  transform: translateY(-120%);
+}
+.lp-skip:focus-visible {
+  transform: none;
+  outline-color: var(--lp-red);
+}
+
+/* Bloque: filete de 3 px arriba y contenido centrado en 90 rem sin recortar el filete. */
+.lp-block {
+  border-top: 3px solid var(--lp-ink);
+  padding: 1.5rem max(var(--lp-pad), calc((100% - var(--lp-max)) / 2)) 3rem;
+}
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: var(--lp-gutter);
+  row-gap: 2rem;
+}
+.lp-col-lead { grid-column: 1 / 8; }
+.lp-col-side { grid-column: 9 / 13; }
+.lp-col-wide { grid-column: 1 / 9; }
+.lp-col-label { grid-column: 1 / 6; }
+.lp-col-body { grid-column: 6 / 13; }
+
+/* ------------------------------------------------------------------ cabecera */
+.lp-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 3rem;
+  border-top: 3px solid var(--lp-ink);
+  padding: 0.7rem max(var(--lp-pad), calc((100% - var(--lp-max)) / 2)) 0.75rem;
+}
+.lp-brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1.5rem;
+  min-width: 0;
+}
+.lp-mark {
+  font: 800 1.75rem / 1 var(--lp-font);
+  font-stretch: 88%;
+  letter-spacing: -0.03em;
+}
+.lp-tag {
+  max-width: 30rem;
+  font-size: var(--lp-t-ui);
+  line-height: 1.35;
+  color: var(--lp-ink-2);
+  text-wrap: pretty;
+}
+.lp-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2.5rem;
+}
+.lp-status > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.lp-status dt {
+  font-size: var(--lp-t-note);
+  font-weight: 600;
+  color: var(--lp-ink-2);
+}
+.lp-status dd {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--lp-t-ui);
+}
+/* Marcador cuadrado: lleno en verde = sí, hueco = no. Siempre acompañado de texto. */
+.lp-sq {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--lp-up);
+  border: 2px solid var(--lp-up);
+}
+.lp-sq[data-off='true'] {
+  background: transparent;
+  border-color: var(--lp-ink-2);
+}
+
+/* --------------------------------------------------------------------- cinta */
+.lp-tapeblock {
+  padding: 0;
+}
+.lp-tape {
+  display: flex;
+  align-items: stretch;
+  min-height: 4.25rem;
+}
+.lp-tape-ctl {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.4rem 1rem 0.4rem max(var(--lp-pad), calc((100% - var(--lp-max)) / 2));
+  background: var(--lp-paper);
+  border-right: 1px solid var(--lp-rule);
+}
+.lp-pause {
+  min-height: 2.4rem;
+  padding: 0 0.9rem;
+  border: 1px solid var(--lp-ink);
+  border-radius: 0;
+  background: transparent;
+  color: var(--lp-ink);
+  font: 600 var(--lp-t-ui) / 1 var(--lp-font);
+  cursor: pointer;
+}
+.lp-pause:hover {
+  background: var(--lp-rule);
+}
+.lp-pause[aria-pressed='true'] {
+  background: var(--lp-ink);
+  color: var(--lp-paper);
+}
+.lp-pause[aria-pressed='true']:hover {
+  background: var(--lp-ink-2);
+}
+.lp-live {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: var(--lp-t-note);
+  color: var(--lp-ink-2);
+}
+.lp-viewport {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Dos mitades idénticas, de ancho exacto (celdas fijas): de -50 % a 0 el bucle no tiene costura y la
+   cinta avanza de izquierda a derecha. Solo `transform`, sin layout en cada cuadro. */
+.lp-track {
+  display: flex;
+  width: max-content;
+  height: 100%;
+  animation: lp-run calc(var(--lp-cells) * var(--lp-cell-n) / var(--lp-speed) * 1s) linear infinite;
+  will-change: transform;
+}
+@keyframes lp-run {
+  from { transform: translate3d(-50%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+.lp-tape[data-paused='true'] .lp-track,
+.lp-viewport:hover .lp-track {
+  animation-play-state: paused;
+}
+/* Con el foco dentro la cinta no se congela fuera de la pantalla: se queda quieta y pasa a scroll, y la celda
+   enfocada siempre se ve (WCAG 2.4.7). Al salir el foco, TSX devuelve el scroll a 0 y el bucle vuelve a correr. */
+.lp-viewport:focus-within {
+  overflow-x: auto;
+  scrollbar-color: #000 #fff;
+}
+.lp-viewport:focus-within .lp-track {
+  animation: none;
+  transform: none;
+  will-change: auto;
+}
+.lp-viewport:focus-within .lp-dup {
+  display: none;
+}
+.lp-half {
+  display: flex;
+}
+.lp-cell {
+  flex: none;
+  width: calc(var(--lp-cell-n) * 1rem);
+  contain: layout style;
+}
+.lp-cell a {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: center;
+  align-items: baseline;
+  row-gap: 0.15rem;
+  height: 100%;
+  padding: 0.55rem 1rem 0.65rem;
+  border-right: 1px solid var(--lp-rule);
+}
+.lp-sym {
+  grid-area: 1 / 1;
+  font-weight: 700;
+}
+.lp-cell a:hover .lp-sym {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
+}
+.lp-chg {
+  grid-area: 1 / 2;
+  font-size: var(--lp-t-ui);
+  font-weight: 600;
+  text-align: right;
+}
+.lp-up { color: var(--lp-up); }
+.lp-down { color: var(--lp-red); }
+.lp-flat { color: var(--lp-ink-2); }
+.lp-px {
+  grid-area: 2 / 1 / 3 / 3;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.lp-nopx {
+  font-size: var(--lp-t-ui);
+  font-weight: 400;
+  color: var(--lp-ink-2);
+}
+.lp-notice,
+.lp-tape-msg {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  padding: 0.7rem max(var(--lp-pad), calc((100% - var(--lp-max)) / 2));
+  font-size: var(--lp-t-ui);
+}
+.lp-notice {
+  border-top: 1px solid var(--lp-rule);
+}
+.lp-tape-msg {
+  min-height: 4.5rem;
+  align-items: center;
+}
+.lp-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: 600 var(--lp-t-ui) / 1.4 var(--lp-font);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+/* El único movimiento continuo se queda quieto con «reducir movimiento»: la cinta se recorre con scroll. */
+@media (prefers-reduced-motion: reduce) {
+  .lp-track {
+    animation: none;
+    transform: none;
+    will-change: auto;
+  }
+  .lp-viewport {
+    overflow-x: auto;
+    scrollbar-color: #000 #fff;
+  }
+  .lp-dup,
+  .lp-rep,
+  .lp-pause {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------- primera pantalla */
+.lp-first {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.lp-main,
+.lp-first-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+.lp-main:focus {
+  outline: none;
+}
+.lp-analysis {
+  flex: 1 1 auto;
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+/* Las dos columnas de la primera pantalla son contenedores: el cuerpo monumental y las cifras se miden contra ellas. */
+.lp-analysis .lp-col-lead,
+.lp-analysis .lp-col-side {
+  container-type: inline-size;
+}
+.lp-mon {
+  font: 800 var(--lp-t-mon) / 0.84 var(--lp-font);
+  font-stretch: 74%;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+.lp-mon span {
+  display: block;
+}
+/* Símbolo: ~28 % de la columna (tope 14 rem); veredicto: ~60 % de eso. El tercer término encoge lo largo
+   (~0,6 em por letra a anchura 74 %) para que ni «Mantener» ni «^STOXX50E» desborden la columna. */
+.lp-mon-sym {
+  font-size: min(28cqi, 14rem, calc(100cqi / (var(--lp-len) * 0.6)));
+}
+.lp-verdict {
+  color: var(--lp-red);
+  font-size: min(17cqi, 8.4rem, calc(100cqi / (var(--lp-len) * 0.6)));
+}
+.lp-mon-empty {
+  font-size: clamp(2.25rem, 5vw, 4rem);
+  font-stretch: 86%;
+  line-height: 0.95;
+  text-wrap: balance;
+}
+.lp-sum {
+  max-width: 40rem;
+  margin-top: 1.25rem;
+  font-size: var(--lp-t-lead);
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+.lp-meta {
+  max-width: 24rem;
+  margin-top: 1rem;
+  font-size: var(--lp-t-ui);
+  color: var(--lp-ink-2);
+  text-wrap: pretty;
+}
+.lp-wait,
+.lp-quiet {
+  color: var(--lp-ink-2);
+}
+.lp-wait {
+  min-height: 12rem;
+  font-size: var(--lp-t-lead);
+}
+
+/* Cuatro cifras: etiqueta, valor y su procedencia. Señalar una resalta su fuente en el índice. */
+.lp-fig {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 1rem;
+  padding: 0.6rem 0.75rem 0.65rem;
+  margin-inline: -0.75rem;
+  border-top: 1px solid var(--lp-rule);
+}
+.lp-fig:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.lp-fig dt {
+  font-size: var(--lp-t-ui);
+  font-weight: 600;
+}
+.lp-fig-v {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: end;
+  /* 56 px como tope; un importe largo («119.304,67 $») se encoge para no pasar del ~60 % de la columna. */
+  font-size: min(var(--lp-t-fig), 13cqi, calc(60cqi / (var(--lp-len) * 0.56)));
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.lp-fig-u {
+  font-size: var(--lp-t-ui);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--lp-ink-2);
+}
+.lp-fig-o {
+  font-size: var(--lp-t-note);
+  color: var(--lp-ink-2);
+}
+.lp-fig sup {
+  margin-left: 0.15em;
+  font-size: var(--lp-t-note);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 0;
+}
+/* Zona de toque de la referencia: más grande que el número, sin mover nada. */
+.lp-fig sup a {
+  display: inline-block;
+  padding: 0.35rem 0.3rem;
+  margin: -0.35rem -0.3rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.lp-fig[data-active='true'],
+.lp-src[data-active='true'],
+.lp-src:target {
+  background: var(--lp-ink);
+  color: var(--lp-paper);
+  --lp-ink-2: var(--lp-paper);
+  --lp-faint: var(--lp-rule);
+}
+.lp-fig[data-active='true'] :focus-visible,
+.lp-src[data-active='true'] :focus-visible {
+  outline-color: var(--lp-paper);
+}
+
+/* ---------------------------------------------------- índice de fuentes + acción */
+.lp-foot {
+  padding-bottom: 0;
+}
+.lp-foot .lp-grid {
+  align-items: start;
+  row-gap: 1.5rem;
+}
+/* Escritorio: índice a la izquierda y acción a la derecha, en la misma fila aunque en el DOM vaya primero la acción. */
+.lp-foot .lp-col-wide {
+  grid-column: 1 / 9;
+  grid-row: 1;
+}
+.lp-foot .lp-cta {
+  grid-column: 9 / 13;
+  grid-row: 1;
+  align-self: end;
+  height: 9rem;
+  min-height: 0;
+}
+.lp-h3 {
+  font: 700 var(--lp-t-lead) / 1.2 var(--lp-font);
+  letter-spacing: -0.01em;
+}
+.lp-foot {
+  padding-top: 1rem;
+}
+/* Índice en dos columnas que se leen de arriba abajo (1–5, 6–9): la mitad de alto. */
+.lp-srcs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(var(--lp-rows, 5), auto);
+  column-gap: 1.5rem;
+  margin-top: 0.6rem;
+}
+.lp-src {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  column-gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.25rem 0.5rem 0.3rem;
+  margin-inline: -0.5rem;
+  border-top: 1px solid var(--lp-rule);
+  font-size: var(--lp-t-ui);
+  line-height: 1.35;
+  scroll-margin-top: 1rem;
+}
+.lp-src-n {
+  font-weight: 700;
+}
+.lp-src-t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lp-src-t a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.lp-src-m {
+  grid-column: 2;
+  display: flex;
+  gap: 1rem;
+  font-size: var(--lp-t-note);
+  color: var(--lp-ink-2);
+}
+.lp-src[data-old='true'] {
+  color: var(--lp-faint);
+}
+.lp-src[data-old='true'] .lp-src-m {
+  color: inherit;
+}
+.lp-quiet {
+  margin-top: 0.75rem;
+}
+
+/* Campo rojo: el bloque de acción. Texto blanco (4,9:1); al señalarlo pasa a tinta. */
+.lp-cta {
+  display: flex;
+  align-items: flex-start;
+  min-height: 9rem;
+  padding: 1.25rem;
+  background: var(--lp-red);
+  color: #fff;
+  font: 700 clamp(1.75rem, 2.6vw, 2.25rem) / 1 var(--lp-font);
+  letter-spacing: -0.02em;
+}
+.lp-cta:hover {
+  background: var(--lp-ink);
+}
+.lp-cta:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: -0.6rem;
+}
+.lp-cta-big {
+  min-height: 14rem;
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  letter-spacing: -0.03em;
+}
+
+/* ------------------------------------------------------------ bajo el pliegue */
+.lp-h2 {
+  font: 800 var(--lp-t-h2) / 1 var(--lp-font);
+  font-stretch: 92%;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.lp-how,
+.lp-record,
+.lp-close {
+  padding-top: 2rem;
+}
+/* El titular de la sección acompaña a sus filas mientras se lee. */
+.lp-how .lp-col-label {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+}
+.lp-steps li {
+  padding: 1rem 0 1.5rem;
+  border-top: 1px solid var(--lp-rule);
+}
+.lp-steps li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.lp-steps h3 {
+  margin-bottom: 0.4rem;
+  font: 700 var(--lp-t-step) / 1.15 var(--lp-font);
+  letter-spacing: -0.01em;
+}
+.lp-steps p,
+.lp-backtest p,
+.lp-proof {
+  max-width: 38rem;
+  text-wrap: pretty;
+}
+.lp-proof {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--lp-rule);
+  font-size: var(--lp-t-ui);
+}
+.lp-proof-h {
+  color: var(--lp-ink-2);
+}
+.lp-proof li {
+  margin-top: 0.5rem;
+  font-size: var(--lp-t-body);
+}
+
+.lp-statement {
+  max-width: 34rem;
+  margin-top: 1.5rem;
+  font: 600 clamp(1.5rem, 2.6vw, 2.25rem) / 1.15 var(--lp-font);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.lp-record .lp-quiet {
+  max-width: 34rem;
+  font-size: var(--lp-t-ui);
+}
+.lp-horizons {
+  align-self: end;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--lp-t-ui);
+}
+.lp-horizons th,
+.lp-horizons td {
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--lp-rule);
+  text-align: left;
+  vertical-align: baseline;
+}
+.lp-horizons thead th {
+  font-size: var(--lp-t-note);
+  font-weight: 600;
+  color: var(--lp-ink-2);
+  border-top: 0;
+}
+.lp-horizons tbody th {
+  font-weight: 700;
+  padding-right: 1rem;
+  white-space: nowrap;
+}
+.lp-horizons tbody tr:last-child > * {
+  border-bottom: 1px solid var(--lp-rule);
+}
+.lp-backtest {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--lp-rule);
+}
+.lp-disclaimer {
+  align-self: end;
+  max-width: 22rem;
+  font-size: var(--lp-t-body);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------- anchos medios y móvil */
+@media (max-width: 72rem) {
+  .lp-srcs {
+    grid-auto-flow: row;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+  /* Con el índice a una columna es alto: la acción se queda arriba, a la vista, no al final. */
+  .lp-foot .lp-cta {
+    align-self: start;
+  }
+}
+@media (max-width: 56rem) {
+  .lp-grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 1.75rem;
+  }
+  .lp-col-lead,
+  .lp-col-side,
+  .lp-col-wide,
+  .lp-col-label,
+  .lp-col-body {
+    grid-column: 1 / -1;
+  }
+  .lp-top {
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .lp-brand {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+  }
+  .lp-tag {
+    font-size: var(--lp-t-note);
+  }
+  /* Estado compacto: etiqueta y valor en la misma línea. */
+  .lp-status {
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+  .lp-status > div {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.1rem 0.5rem;
+  }
+  .lp-status dd {
+    font-size: var(--lp-t-note);
+  }
+  .lp-tape-ctl {
+    padding: 0.4rem 0.75rem 0.4rem var(--lp-pad);
+  }
+  .lp-foot .lp-col-wide,
+  .lp-foot .lp-cta {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+  .lp-foot .lp-cta {
+    height: auto;
+    min-height: 6rem;
+  }
+  .lp-src-t {
+    white-space: normal;
+  }
+  .lp-sum {
+    font-size: var(--lp-t-body);
+  }
+  .lp-cta-big {
+    min-height: 10rem;
+  }
+  .lp-disclaimer {
+    max-width: none;
+  }
+}

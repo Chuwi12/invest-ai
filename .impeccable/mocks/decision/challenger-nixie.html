@@ -1,0 +1,22 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><title>Nixie</title>
+<style>
+*{box-sizing:border-box;margin:0}body{width:1440px;height:900px;background:#232527;color:#c9ccce;font-family:"Eurostile","DIN Alternate","Arial Narrow",sans-serif}
+.panel{margin:40px;height:820px;border:2px solid #3b3f43;background:linear-gradient(#2a2d30,#1d1f21);padding:40px;display:grid;grid-template-rows:auto 1fr auto;gap:28px}
+.lbl{font-size:16px;letter-spacing:.08em;color:#8a9096}
+.top{display:flex;justify-content:space-between}.top b{font-size:28px;color:#c9ccce}
+.banks{display:grid;grid-template-columns:repeat(4,1fr);gap:28px;align-content:center}
+.bank{display:flex;flex-direction:column;gap:12px}
+.tubes{display:flex;gap:6px}.tube{width:56px;height:110px;border-radius:26px 26px 6px 6px;background:radial-gradient(circle at 50% 40%,#3a2a1e,#151617 70%);border:1px solid #4b5055;display:flex;align-items:center;justify-content:center;font-size:76px;color:#ff7a1a;text-shadow:0 0 18px #ff7a1a}
+.plate{border-top:1px solid #4b5055;padding-top:22px;display:flex;justify-content:space-between;align-items:end}
+.plate p{font-size:22px;max-width:60ch;color:#c9ccce}.plate a{background:#ff7a1a;color:#1d1f21;font-size:26px;padding:20px 30px;text-decoration:none;font-weight:700}
+</style>
+<div class="panel">
+<div class="top"><b>invest-ai · NVDA</b><span class="lbl">Medido en local · 25-oct-2026 11:13 UTC</span></div>
+<div class="banks">
+<div class="bank"><div class="tubes"><div class="tube">2</div><div class="tube">1</div><div class="tube">0</div><div class="tube">9</div><div class="tube">6</div></div><span class="lbl">Precio USD</span></div>
+<div class="bank"><div class="tubes"><div class="tube">1</div><div class="tube">3</div><div class="tube">2</div><div class="tube">6</div></div><span class="lbl">PER forward</span></div>
+<div class="bank"><div class="tubes"><div class="tube">6</div><div class="tube">6</div><div class="tube">2</div></div><span class="lbl">Margen operativo %</span></div>
+<div class="bank"><div class="tubes"><div class="tube">3</div><div class="tube">8</div><div class="tube">1</div></div><span class="lbl">RSI 14</span></div>
+</div>
+<div class="plate"><p>Acumular. El código mide las cifras; el modelo local solo las explica, y cada una cita su fuente.</p><a href="#">Entrar al panel</a></div>
+</div></html>

@@ -18,7 +18,7 @@ import { genAnalysis, genMacro, genNews, genSnapshot } from './content'
 import { getDb, nextId, saveDb } from './db'
 import { entryFor, genCandles, genFundamentals, genIndicators, genQuote } from './market'
 import { mockIpoBaseRate, mockIpoCalendar, mockIpoPerformance, mockIpoProspectus, mockIpoRiskProfile } from './ipo'
-import { mockCalibrated, mockPerformance, mockRollback, mockWatchlist, mockWeights } from './learning'
+import { mockCalibrated, mockPerformance, mockRollback, mockWatchlist, mockWatchlistAnalysis, mockWeights } from './learning'
 import { activeModelId, installedModelIds, mockDelete, mockModels, mockPull, mockSetActive, mockSetForceGpu } from './models'
 import { sleep } from './rng'
 import { mockAssetSocial, mockSocialStatus } from './social'
@@ -183,7 +183,7 @@ export const mockApi: Api = {
 
   async latestAnalysis(id, signal) {
     await lag(signal)
-    return getDb().analyses[id]?.[0] ?? null
+    return getDb().analyses[id]?.[0] ?? mockWatchlistAnalysis(id)
   },
 
   async generateAnalysis(id, depth, signal) {

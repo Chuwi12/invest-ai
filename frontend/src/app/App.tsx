@@ -1,5 +1,6 @@
 import { lazy } from 'react'
 import { Link, Navigate, Route, Routes } from 'react-router'
+import LandingPage from '@/pages/LandingPage'
 import { Shell } from './Shell'
 
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
@@ -27,8 +28,9 @@ function NotFound() {
 export function App() {
   return (
     <Routes>
+        {/* La landing va a página completa, fuera del Shell y con su propia cabecera. */}
+        <Route path="/" element={<LandingPage />} />
         <Route element={<Shell />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="asset/:id" element={<AssetPage />} />
           

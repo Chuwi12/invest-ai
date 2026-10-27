@@ -1,5 +1,6 @@
 import { ApiError } from '@/api/client'
 import type {
+  Analysis,
   AssetId,
   CalibratedConfidence,
   HorizonReport,
@@ -14,6 +15,7 @@ import type {
   WeightVersion,
 } from '@/api/types'
 import { VERDICTS } from '@/api/types'
+import { genAnalysis } from './content'
 
 /**
  * Rendimiento simulado. Por defecto, un historial «maduro» (14 meses de pasadas diarias) para ver
@@ -244,10 +246,16 @@ export function mockWatchlist(): WatchlistStatus {
   })
   return {
     ...base,
-    assets: WATCHLIST.map((id, i) => ({ id, last: results[i]!, lastOkAt: results[i]!.status === 'ok' ? results[i]!.finishedAt : new Date(now - 2 * DAY).toISOString() })),
+    assets: WATCHLIST.map((id, i) => ({ id, last: results[i]!, lastOkAt: results[i]!.status === 'ok' ? results[i]!.finishedAt : new Date(yesterday.getTime() - 2 * DAY).toISOString() })),
     lastRun: last,
     lastRunResults: results,
     recentRuns: [last, run(424, 1), run(423, 2, { trigger: 'recovery', startedAt: new Date(yesterday.getTime() - 2 * DAY + 3 * 3_600_000).toISOString(), power: 'battery', powerWaitSecs: 10_800 }), run(422, 3), run(421, 4, { status: 'aborted', ok: 6, failed: 14 }), run(420, 5), run(419, 6)],
     analysesTotal: 20 * 425 - 3,
   }
+}
+
+/** Último análisis de un activo de la lista: la pasada diaria los guarda todos, pero el mock solo siembra unos pocos. */
+export function mockWatchlistAnalysis(id: AssetId): Analysis | null {
+  const at = mockWatchlist().assets.find((a) => a.id === id)?.lastOkAt
+  return at ? genAnalysis(id, 0, new Date(at)) : null
 }

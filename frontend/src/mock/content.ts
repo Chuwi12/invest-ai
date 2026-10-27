@@ -204,7 +204,9 @@ export function genAnalysis(id: AssetId, serial = 0, generatedAt: Date = new Dat
   if (cls === 'crypto') catalysts.push({ date: null, description: 'Flujos de los ETF al contado', impact: 0.5 })
 
   const sources: SourceRef[] = [
-    { title: 'Cotización e histórico', url: null, provider: cls === 'crypto' ? 'binance' : 'yahoo', publishedAt: generatedAt.toISOString() },
+    { title: `Cotización ${id}`, url: null, provider: cls === 'crypto' ? 'binance' : 'yahoo', publishedAt: generatedAt.toISOString() },
+    // Como el backend real, la puntuación calculada en Rust figura entre las fuentes con proveedor «invest-ai».
+    { title: `Puntuación cuantitativa determinista ${id}`, url: null, provider: 'invest-ai', publishedAt: generatedAt.toISOString() },
     ...news.slice(0, 3).map((n) => ({ title: n.title, url: n.url, provider: n.provider, publishedAt: n.publishedAt })),
   ]
 

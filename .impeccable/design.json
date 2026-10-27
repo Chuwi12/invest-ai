@@ -1,0 +1,333 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-27T14:52:56+01:00",
+  "title": "Design System: invest-ai",
+  "extensions": {
+    "colorMeta": {
+      "red": {
+        "role": "primary",
+        "displayName": "Rojo señal",
+        "canonical": "#e2001a",
+        "tonalRamp": [
+          "#1f0001",
+          "#4c0305",
+          "#7f050c",
+          "#b51219",
+          "#e92e2f",
+          "#fd756a",
+          "#feb3aa",
+          "#ffe9e6"
+        ]
+      },
+      "up": {
+        "role": "secondary",
+        "displayName": "Verde subida",
+        "canonical": "#127a3e",
+        "tonalRamp": [
+          "#001004",
+          "#022e13",
+          "#065026",
+          "#0f743b",
+          "#4b9561",
+          "#7cb58a",
+          "#acd5b5",
+          "#dcf6e2"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Papel",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Tinta",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Tinta segunda",
+        "canonical": "#4a4a4a",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "faint": {
+        "role": "neutral",
+        "displayName": "Tinta tenue",
+        "canonical": "#737373",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Gris filete",
+        "canonical": "#d9d9d6",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252524",
+          "#424241",
+          "#616160",
+          "#828280",
+          "#a5a5a3",
+          "#c9c9c6",
+          "#efefec"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "El nombre «invest-ai» en la cabecera; único logotipo."
+      },
+      "display": {
+        "displayName": "Display",
+        "purpose": "Símbolo del activo a cuerpo monumental, medido contra su columna y su número de letras."
+      },
+      "display-verdict": {
+        "displayName": "Display verdict",
+        "purpose": "Palabra del veredicto en rojo señal, ~60 % del símbolo."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Titulares de sección bajo el pliegue."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "Las cuatro cifras del análisis, tabulares, alineadas a la derecha."
+      },
+      "cta": {
+        "displayName": "CTA",
+        "purpose": "Texto del bloque de acción del pie."
+      },
+      "cta-large": {
+        "displayName": "CTA large",
+        "purpose": "Texto del bloque de acción de cierre."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Títulos de los pasos."
+      },
+      "title-small": {
+        "displayName": "Title small",
+        "purpose": "Títulos de bloque menores."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "Resumen del análisis, máximo 40rem."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Texto de lectura, máximo 38rem."
+      },
+      "ui": {
+        "displayName": "UI",
+        "purpose": "Lema, valores de estado, índice de fuentes, tablas."
+      },
+      "ui-strong": {
+        "displayName": "UI strong",
+        "purpose": "Botones, enlaces de acción y etiquetas de cifra."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Términos de estado y cabeceras de tabla; nunca antetítulo."
+      },
+      "note": {
+        "displayName": "Note",
+        "purpose": "Procedencias y metadatos de fuentes."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "tape-run",
+        "value": "linear infinite; translate3d(-50%) → 0; 3.5rem/s (duración = celdas × 13 / 3.5 s)",
+        "purpose": "Avance de la cinta de cotizaciones de izquierda a derecha; único movimiento continuo. Pausa al señalarla, con su botón y con el foco dentro; parada con prefers-reduced-motion."
+      },
+      {
+        "name": "state-change",
+        "value": "none",
+        "purpose": "Hover, pulsado y resalte cambian al instante: no hay transiciones."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sources-single",
+        "value": "72rem"
+      },
+      {
+        "name": "single-column",
+        "value": "56rem"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Bloque de acción",
+      "kind": "button",
+      "refersTo": "cta-field",
+      "description": "Campo rojo que lleva al panel; la acción principal, al pie de la primera pantalla y al cierre.",
+      "html": "<a class=\"ds-cta\" href=\"#\">Entrar al panel</a>",
+      "css": ".ds-cta { display: flex; align-items: flex-start; min-height: 9rem; width: 18rem; padding: 1.25rem; background: #e2001a; color: #fff; font: 700 2rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; letter-spacing: -0.02em; text-decoration: none; border-radius: 0; } .ds-cta:hover { background: #000; } .ds-cta:focus-visible { outline: 3px solid #fff; outline-offset: -0.6rem; }"
+    },
+    {
+      "name": "Botón de contorno",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Control secundario conmutable (pausar la cinta); pulsado se invierte.",
+      "html": "<button type=\"button\" class=\"ds-btn-outline\" aria-pressed=\"false\" onclick=\"this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') !== 'true')\">Pausar cinta</button>",
+      "css": ".ds-btn-outline { min-height: 2.4rem; padding: 0 0.9rem; border: 1px solid #000; border-radius: 0; background: transparent; color: #000; font: 600 0.9375rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; cursor: pointer; } .ds-btn-outline:hover { background: #d9d9d6; } .ds-btn-outline[aria-pressed='true'] { background: #000; color: #fff; } .ds-btn-outline[aria-pressed='true']:hover { background: #4a4a4a; } .ds-btn-outline:focus-visible { outline: 3px solid #000; outline-offset: 3px; }"
+    },
+    {
+      "name": "Enlace de acción",
+      "kind": "button",
+      "refersTo": "ui-strong",
+      "description": "Acción terciaria sin caja (reintentar una carga).",
+      "html": "<p class=\"ds-notice\"><strong>No se pudieron cargar las cotizaciones.</strong> <button type=\"button\" class=\"ds-link\">Reintentar</button></p>",
+      "css": ".ds-notice { margin: 0; padding: 0.7rem 0; border-top: 1px solid #d9d9d6; font: 400 0.9375rem/1.4 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; } .ds-link { padding: 0; border: 0; background: none; color: inherit; font: 600 0.9375rem/1.4 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; } .ds-link:focus-visible { outline: 3px solid #000; outline-offset: 3px; }"
+    },
+    {
+      "name": "Estado local",
+      "kind": "custom",
+      "refersTo": "status-square",
+      "description": "Pares término y valor de la cabecera; el cuadrado lleno en verde es «sí», hueco es «no», siempre con texto.",
+      "html": "<dl class=\"ds-status\"><div><dt>Modelo local</dt><dd><span class=\"ds-sq\"></span>qwen3.5:9b, cargado en memoria</dd></div><div><dt>Ticks</dt><dd><span class=\"ds-sq\" data-off=\"true\"></span>Sin ticks en vivo</dd></div></dl>",
+      "css": ".ds-status { display: flex; gap: 0.5rem 2.5rem; margin: 0; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; } .ds-status > div { display: flex; flex-direction: column; gap: 0.1rem; } .ds-status dt { font-size: 0.8125rem; font-weight: 600; color: #4a4a4a; } .ds-status dd { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 0.9375rem; } .ds-sq { flex: none; width: 0.5rem; height: 0.5rem; background: #127a3e; border: 2px solid #127a3e; } .ds-sq[data-off='true'] { background: transparent; border-color: #4a4a4a; }"
+    },
+    {
+      "name": "Celda de cinta",
+      "kind": "custom",
+      "refersTo": "tape-cell",
+      "description": "Celda de ancho fijo de la cinta de cotizaciones: símbolo, variación coloreada por signo y precio.",
+      "html": "<ul class=\"ds-tape\"><li><a href=\"#\"><span class=\"ds-sym\">AAPL</span><span class=\"ds-chg ds-down\">-1,10 %</span><span class=\"ds-px\">343,91 $</span></a></li><li><a href=\"#\"><span class=\"ds-sym\">MSFT</span><span class=\"ds-chg ds-up\">+1,54 %</span><span class=\"ds-px\">532,60 $</span></a></li></ul>",
+      "css": ".ds-tape { display: flex; margin: 0; padding: 0; list-style: none; border-top: 3px solid #000; border-bottom: 3px solid #000; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; } .ds-tape li { flex: none; width: 13rem; } .ds-tape a { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; row-gap: 0.15rem; min-height: 4.25rem; align-content: center; padding: 0.55rem 1rem 0.65rem; border-right: 1px solid #d9d9d6; color: #000; text-decoration: none; } .ds-sym { font-weight: 700; font-size: 1.0625rem; } .ds-tape a:hover .ds-sym { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.2em; } .ds-tape a:focus-visible { outline: 3px solid #000; outline-offset: -3px; } .ds-chg { font-size: 0.9375rem; font-weight: 600; text-align: right; } .ds-up { color: #127a3e; } .ds-down { color: #e2001a; } .ds-px { grid-column: 1 / 3; font-size: 1.25rem; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; white-space: nowrap; }"
+    },
+    {
+      "name": "Fila de cifra",
+      "kind": "card",
+      "refersTo": "figure-row",
+      "description": "Cifra estructurada con etiqueta, procedencia y referencia en superíndice; señalada se invierte junto a su fuente.",
+      "html": "<dl class=\"ds-figs\"><div class=\"ds-fig\"><dt>Precio en el análisis</dt><dd class=\"ds-fig-v\">692,13 $<sup><a href=\"#\">3</a></sup></dd><dd class=\"ds-fig-o\">Yahoo Finance</dd></div><div class=\"ds-fig\"><dt>Puntuación global</dt><dd class=\"ds-fig-v\">50<span class=\"ds-fig-u\">&nbsp;de 100</span></dd><dd class=\"ds-fig-o\">calculado por invest-ai</dd></div></dl>",
+      "css": ".ds-figs { width: 24rem; margin: 0; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; color: #000; } .ds-fig { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; padding: 0.6rem 0.75rem 0.65rem; border-top: 1px solid #d9d9d6; } .ds-fig:first-child { border-top: 0; } .ds-fig dt { font-size: 0.9375rem; font-weight: 600; } .ds-fig dd { margin: 0; } .ds-fig-v { grid-column: 2; grid-row: 1 / 3; align-self: end; font-size: 3.5rem; font-weight: 600; line-height: 1; letter-spacing: -0.02em; white-space: nowrap; } .ds-fig-u { font-size: 0.9375rem; font-weight: 400; letter-spacing: 0; color: #4a4a4a; } .ds-fig-o { font-size: 0.8125rem; color: #4a4a4a; } .ds-fig sup { margin-left: 0.15em; font-size: 0.8125rem; font-weight: 700; line-height: 0; } .ds-fig sup a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; } .ds-fig:hover { background: #000; color: #fff; } .ds-fig:hover .ds-fig-u, .ds-fig:hover .ds-fig-o { color: #fff; } .ds-fig :focus-visible { outline: 3px solid #000; outline-offset: 3px; } .ds-fig:hover :focus-visible { outline-color: #fff; }"
+    },
+    {
+      "name": "Fila de fuente",
+      "kind": "custom",
+      "refersTo": "source-row",
+      "description": "Entrada numerada del índice de fuentes con proveedor y antigüedad; atenuada si tiene más de dos días, invertida si está activa.",
+      "html": "<ol class=\"ds-srcs\"><li class=\"ds-src\"><span class=\"ds-src-n\">3</span><span><a href=\"#\">Cotización</a></span><span class=\"ds-src-m\"><span>Yahoo Finance</span><span>hace 12 horas</span></span></li><li class=\"ds-src\" data-old=\"true\"><span class=\"ds-src-n\">4</span><span><a href=\"#\">Fundamentales</a></span><span class=\"ds-src-m\"><span>Yahoo Finance</span><span>hace 3 días</span></span></li></ol>",
+      "css": ".ds-srcs { width: 26rem; margin: 0; padding: 0; list-style: none; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; } .ds-src { display: grid; grid-template-columns: 1.75rem minmax(0, 1fr); column-gap: 0.5rem; align-items: baseline; padding: 0.25rem 0.5rem 0.3rem; border-top: 1px solid #d9d9d6; font-size: 0.9375rem; line-height: 1.35; } .ds-src-n { font-weight: 700; } .ds-src a { color: inherit; text-decoration: none; } .ds-src a:hover { text-decoration: underline; text-underline-offset: 0.2em; } .ds-src a:focus-visible { outline: 3px solid #000; outline-offset: 3px; } .ds-src-m { grid-column: 2; display: flex; gap: 1rem; font-size: 0.8125rem; color: #4a4a4a; } .ds-src[data-old='true'], .ds-src[data-old='true'] .ds-src-m { color: #737373; } .ds-src:hover { background: #000; color: #fff; } .ds-src:hover .ds-src-m { color: #fff; } .ds-src:hover a:focus-visible { outline-color: #fff; }"
+    },
+    {
+      "name": "Bloque con filete",
+      "kind": "custom",
+      "refersTo": "headline",
+      "description": "Unidad de sección: filete de tinta de 3 px a todo el ancho, titular en la columna de etiqueta y cuerpo en la de lectura.",
+      "html": "<section class=\"ds-block\"><h2 class=\"ds-h2\">Cómo llega a cada cifra</h2><div class=\"ds-step\"><h3>Cifras calculadas en Rust</h3><p>La puntuación global y los indicadores los calcula el código de invest-ai. El modelo no los inventa.</p></div></section>",
+      "css": ".ds-block { display: grid; grid-template-columns: 5fr 7fr; column-gap: 1.5rem; border-top: 3px solid #000; padding: 2rem 0 3rem; font: 400 1.0625rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; background: #fff; } .ds-h2 { margin: 0; font: 800 2.5rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-stretch: 92%; letter-spacing: -0.025em; text-wrap: balance; } .ds-step h3 { margin: 0 0 0.4rem; font: 700 1.5rem/1.15 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; letter-spacing: -0.01em; } .ds-step p { margin: 0; max-width: 38rem; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "El extracto suizo",
+    "overview": "El análisis se presenta como un extracto de banca privada suiza leído con los ojos del estilo tipográfico internacional: papel blanco, tinta negra, cada cifra en su columna con su referencia, y nada que adorne. La autoridad no sale de efectos sino de la disciplina: una rejilla de 12 columnas, una sola familia tipográfica que cambia de anchura y de peso, filetes de 3 px entre bloques y de 1 px entre filas. El rojo señal aparece poco y en grande, como en un sello: el veredicto y el bloque de acción.\n\nLa densidad es la de un documento financiero, no la de una landing: la primera pantalla ocupa todo el alto y ya trae datos reales (estado del modelo local, cinta de cotizaciones, el último análisis con sus cuatro cifras y su índice de fuentes). Lo monumental (símbolo y veredicto) convive con texto de 13 a 17 px sin escalones intermedios decorativos. El único movimiento continuo es la cinta; todo lo demás es estático y los cambios de estado son instantáneos, sin transiciones.\n\n**Alcance.** Este mundo rige hoy solo la landing (ruta `/`, `frontend/src/pages/LandingPage.tsx` y `frontend/src/styles/landing.css`, todo bajo `.lp` y clases `lp-*`). Las superficies de la app (panel, ficha de activo, chat y demás, en `frontend/src/styles/app.css`) siguen con su identidad anterior y aún no usan este sistema; si lo heredan es una decisión pendiente del usuario. Este documento no describe ese sistema anterior. El mundo es solo claro: es papel, y no tiene tema oscuro aunque la app lo tenga.",
+    "keyCharacteristics": [
+      "Papel blanco y tinta negra; rojo señal solo en campos grandes y en cifras de bajada.",
+      "Una sola familia, Archivo variable, con la jerarquía hecha de anchura (74 % a 100 %) y peso (400 a 800); cifras tabulares en todo.",
+      "Rejilla de 12 columnas con bandera a la izquierda; filetes de 3 px entre bloques y de 1 px entre filas.",
+      "Esquinas rectas, sin sombras, sin degradados, sin iconos decorativos.",
+      "Resaltar es invertir: fondo tinta, texto papel.",
+      "La cinta de cotizaciones, de izquierda a derecha y con pausa, es el único movimiento continuo."
+    ],
+    "rules": [
+      {
+        "name": "La regla del campo rojo",
+        "body": "El rojo señal ocupa superficies grandes (el bloque de acción, la palabra del veredicto) o tiñe cifras de bajada. No es color de texto corriente, de filetes, de bordes ni de adornos.",
+        "section": "colors"
+      },
+      {
+        "name": "La regla de la tinta invertida",
+        "body": "Resaltar es invertir: fondo tinta, texto papel. Así se marcan la cifra y la fuente activas, la fuente enlazada (`:target`), el botón pulsado y la selección de texto. No existe un color de resalte propio; dentro de una zona invertida, la tinta segunda pasa a papel y la tenue a gris filete.",
+        "section": "colors"
+      },
+      {
+        "name": "La regla del verde que dice sí",
+        "body": "El verde solo significa «sube» o «sí», y siempre acompañado de texto o de cifra.",
+        "section": "colors"
+      },
+      {
+        "name": "La regla de una sola familia",
+        "body": "Todo es Archivo variable. La jerarquía sale de la anchura y del peso, nunca de una segunda familia.",
+        "section": "typography"
+      },
+      {
+        "name": "La regla de la columna de cifras",
+        "body": "Toda cifra va en tabulares y alineada a la derecha de su columna. Lo monumental y las cifras se dimensionan contra su columna y su número de caracteres: ningún símbolo, veredicto ni importe desborda.",
+        "section": "typography"
+      },
+      {
+        "name": "La regla del papel plano",
+        "body": "Nada flota. Si algo tiene que destacar, se invierte o se agranda; no se eleva.",
+        "section": "elevation"
+      },
+      {
+        "name": "La regla del ángulo recto",
+        "body": "Ninguna esquina se redondea, ni siquiera la del foco.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "**Do** empezar cada bloque con un filete de tinta de 3 px de borde a borde y separar cada fila con un filete gris de 1 px (#d9d9d6).",
+      "**Do** poner cada cifra en tabulares, alineada a la derecha de su columna, con su procedencia bajo la etiqueta y su referencia en superíndice cuando tenga fuente.",
+      "**Do** resaltar invirtiendo tinta y papel, nunca con un color nuevo.",
+      "**Do** acompañar siempre el cuadrado de estado con texto: lleno en verde para «sí», hueco para «no».",
+      "**Do** dar a todo lo enfocable un anillo de tinta de 3 px separado 3 px y con esquinas rectas; sobre rojo, blanco y hacia dentro.",
+      "**Do** dimensionar lo monumental y las cifras contra su columna y su número de caracteres, para que nada desborde.",
+      "**Do** detener la cinta con «reducir movimiento», al señalarla, al enfocarla y con su botón de pausa."
+    ],
+    "donts": [
+      "**Don't** usar el rojo señal para texto corriente, filetes, bordes o adornos: solo campos grandes y cifras de bajada.",
+      "**Don't** añadir sombras, degradados, desenfoques ni esquinas redondeadas.",
+      "**Don't** introducir una segunda familia tipográfica, tampoco las de las superficies de la app (Geist, Newsreader), ni su acento azul.",
+      "**Don't** añadir iconos decorativos: el único signo gráfico es el cuadrado de estado, y siempre lleva texto.",
+      "**Don't** usar el estilo de etiqueta (13 px, 600) como antetítulo sobre un titular: solo nombra un dato (término de estado, cabecera de tabla).",
+      "**Don't** centrar titulares ni bloques de texto.",
+      "**Don't** añadir un segundo movimiento continuo: la cinta es el único.",
+      "**Don't** dar a este mundo un tema oscuro: es papel."
+    ]
+  }
+}
