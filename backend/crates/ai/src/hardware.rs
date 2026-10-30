@@ -208,7 +208,7 @@ pub(crate) fn parse_meminfo(s: &str) -> (u64, u64) {
     (kb("MemTotal"), kb("MemAvailable"))
 }
 
-/// `nvidia-smi --format=csv,noheader,nounits`: `NVIDIA GeForce RTX 4070 Laptop GPU, 8188, 1927` (MiB).
+/// `nvidia-smi --format=csv,noheader,nounits`: `NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1927` (MiB).
 pub(crate) fn parse_nvidia_csv(s: &str) -> Vec<GpuInfo> {
     s.lines()
         .filter_map(|l| {
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn parses_nvidia_smi() {
-        let g = parse_nvidia_csv("NVIDIA GeForce RTX 4070 Laptop GPU, 8188, 1927\n");
+        let g = parse_nvidia_csv("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1927\n");
         assert_eq!(g.len(), 1);
         assert_eq!(g[0].vendor, "NVIDIA");
         assert!((g[0].vram_total_gb - 8.0).abs() < 0.01);
@@ -293,11 +293,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ai-hw-{}", std::process::id()));
         let gpu = dir.join("0000:01:00.0");
         std::fs::create_dir_all(&gpu).unwrap();
-        std::fs::write(gpu.join("information"), "Model: \t\t NVIDIA GeForce RTX 4070 Laptop GPU\nIRQ:   \t\t 185\n").unwrap();
+        std::fs::write(gpu.join("information"), "Model: \t\t NVIDIA GeForce RTX 4060 Laptop GPU\nIRQ:   \t\t 185\n").unwrap();
         let g = nvidia_proc_gpus(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(g.len(), 1);
-        assert_eq!(g[0].name, "NVIDIA GeForce RTX 4070 Laptop GPU");
+        assert_eq!(g[0].name, "NVIDIA GeForce RTX 4060 Laptop GPU");
         assert_eq!((g[0].vram_total_gb, g[0].vram_free_gb), (0.0, None));
         // Directorio inexistente (sin driver NVIDIA): lista vacía, sin error.
         assert!(nvidia_proc_gpus(Path::new("/no/existe")).await.is_empty());

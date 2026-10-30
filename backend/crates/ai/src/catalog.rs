@@ -23,7 +23,7 @@
 //!
 //! El `overhead` de 0.6 GiB es una constante prudente. Medido con nvidia-smi (VRAM del modelo ya cargado
 //! entero en GPU, restando la línea base sin modelo; `num_ctx` 16384, caché KV q8_0, Ollama 0.40.4/0.40.6,
-//! RTX 4070 Laptop 8 GB, 16 y 19-oct-2026, `docs/notes/model-eval.md`) el overhead real fue
+//! GPU NVIDIA de portátil con 8 GB, 16 y 19-oct-2026, `docs/notes/model-eval.md`) el overhead real fue
 //! qwen2.5:7b 0.02, qwen3:8b −0.04, qwen3.5:9b 0.05 y qwen3.5:4b 0.63 GiB: la constante sobreestimaba
 //! 0.55–0.68 GiB en tres de ellos y acertaba en el cuarto. Para esos CUATRO modelos se usa el valor medido
 //! (redondeado hacia arriba a 0.05, ver `MEASURED_OVERHEAD_GIB`); el resto sigue con 0.6: no se extrapola
@@ -356,7 +356,7 @@ mod tests {
             let (a, b) = (vram(w[0], 16_384, 1.0), vram(w[1], 16_384, 1.0));
             assert!(a.recommended_vram_gb < b.recommended_vram_gb && a.disk_gb < b.disk_gb, "{} < {}", w[0], w[1]);
         }
-        // 8 GB de VRAM (RTX 4070): el 9B con 16k cabe entero; el 27B no.
+        // 8 GB de VRAM: el 9B con 16k cabe entero; el 27B no.
         assert!(vram("qwen3.5:9b", 16_384, 1.0).recommended_vram_gb < 8.0);
         assert!(vram("qwen3.5:27b", 16_384, 1.0).recommended_vram_gb > 16.0);
     }

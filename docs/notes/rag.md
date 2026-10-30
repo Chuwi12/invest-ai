@@ -188,7 +188,7 @@ Criterio: la app mezcla **consultas en español** con **folletos y noticias en i
 español (Google News `es`), así que hace falta recuperación **entre idiomas**. Eso descarta `nomic-embed-text`,
 `all-minilm`, `mxbai` y `granite` (inglés). Contexto de 2048 sobra para fragmentos de ≤ 600 tokens.
 
-VRAM (RTX 4070 de 8 GB con el LLM cargado: `nvidia-smi` marcaba 5623/8188 MiB en el momento de consultar, con más carga
+VRAM (GPU de 8 GB con el LLM cargado: `nvidia-smi` marcaba 5623/8188 MiB en el momento de consultar, con más carga
 de otros agentes): caché KV por token calculada de la cabecera GGUF = `2·capas·kv_heads·head_dim·2 B`:
 embeddinggemma 24·1·256 → 24 576 B/token (~48 MiB a 2048); Qwen3-0.6B 28·8·128 → 114 688 B/token (~448 MiB a 4096
 tokens; el `num_ctx` real que usa Ollama para embeddings **no lo he verificado**). Pesos: 338 MB frente a 639 MB.
@@ -346,7 +346,7 @@ con el RAG apagado se rechaza como «herramienta desconocida»; (4) el servidor 
 archivando, `server/tests/rag_modes.rs` compara las peticiones al modelo y el resultado con los de «sin RAG» (ver abajo).
 
 ### Medición real (19–20 oct 2026) y recomendación
-**Entorno**: RTX 4070 Laptop 8 GB, enchufado, Ollama 0.40.6 con `OLLAMA_FLASH_ATTENTION=1` y caché KV `q8_0`; LLM `qwen2.5:7b`
+**Entorno**: GPU NVIDIA de portátil con 8 GB, enchufado, Ollama 0.40.6 con `OLLAMA_FLASH_ATTENTION=1` y caché KV `q8_0`; LLM `qwen2.5:7b`
 con `num_ctx` 16384 (4,9–5,0 GB en VRAM); embedder `embeddinggemma:300m-qat-q8_0` (el único; no se descargó ningún modelo
 nuevo, `qwen3-embedding` no se probó). Servidor real (`target/release`, BD temporal fuera del repo, `WATCHLIST_ENABLED=0`) con un
 proxy de registro entre la app y Ollama y un muestreador de `nvidia-smi` + `/api/ps` cada segundo. Scripts y datos en

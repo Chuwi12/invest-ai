@@ -17,7 +17,7 @@ code computes, never figures the model makes up.
 [![Demo video: landing, panel, a live analysis by the local model, chat and dark mode](docs/media/demo-poster.webp)](docs/media/demo.mp4)
 
 **[▶ Watch the demo video (MP4)](docs/media/demo.mp4)**: real app, real market data and a real analysis generated
-by the local model on an RTX 4070 Laptop (model waits are sped up and labelled as such). There is no public hosted
+by the local model (model waits are sped up and labelled as such). There is no public hosted
 demo: the app is designed to run on your own machine (see [Requirements](#requirements)).
 
 | Landing (light) | Landing (dark) |
@@ -74,23 +74,23 @@ are marked `#[ignore]`. Security notes and audits: [docs/notes/security.md](docs
 
 ## Requirements
 
-| | Minimum | Tested on |
-|---|---|---|
-| OS | Linux (systemd optional, for the background service) | CachyOS (Arch), KDE |
-| Rust | stable ≥ 1.85 (edition 2024) | 1.98 |
-| Node.js | ≥ 22 (Vite 8) | 24 and 26 |
-| Ollama | recent version + one chat model (`qwen2.5:7b` ≈ 4.7 GB) | 0.40 |
-| GPU | optional; NVIDIA with ≥ 8 GB VRAM recommended (CPU-only works, minutes per analysis) | RTX 4070 Laptop, 8 GB |
-| RAM | 16 GB (32 GB recommended) | 32 GB |
-| Disk | ~10 GB (models + build) | |
-| API keys | **none required** (Yahoo, Binance and others work without a key). Optional: Finnhub, Twelve Data, FRED, Alpha Vantage, FMP, NewsAPI, Marketaux, CryptoPanic, Reddit, X | |
+| Requirement | Minimum |
+|---|---|
+| OS | Linux (systemd optional, for the background service) |
+| Rust | stable ≥ 1.85 (edition 2024) |
+| Node.js | ≥ 22 (Vite 8) |
+| Ollama | recent version + one chat model (`qwen2.5:7b` ≈ 4.7 GB) |
+| GPU | optional; NVIDIA with ≥ 8 GB VRAM recommended (CPU-only works, minutes per analysis) |
+| RAM | 16 GB (32 GB recommended) |
+| Disk | ~10 GB (models + build) |
+| API keys | **none required** (Yahoo, Binance and others work without a key). Optional: Finnhub, Twelve Data, FRED, Alpha Vantage, FMP, NewsAPI, Marketaux, CryptoPanic, Reddit, X |
 
 macOS and Windows are not tested.
 
 ## Quick start
 
 ```bash
-# Arch / CachyOS (no automatic sudo): sudo pacman -S rust nodejs npm ollama   (ollama-cuda with an NVIDIA GPU)
+# Install Rust, Node.js and Ollama with your package manager, e.g. on Arch: sudo pacman -S rust nodejs npm ollama
 git clone https://github.com/Chuwi12/invest-ai && cd invest-ai
 ./invest-ai pull          # downloads the default model (LLM_MODEL) if it is missing
 ./invest-ai               # builds what changed, starts on 127.0.0.1:8787 and opens the browser

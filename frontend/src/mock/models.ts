@@ -8,7 +8,7 @@ export const MOCK_HARDWARE: HardwareInfo = {
   cpuThreads: 16,
   ramTotalGb: 32,
   ramAvailableGb: 21.4,
-  gpus: [{ name: 'NVIDIA GeForce RTX 4070 Laptop (simulada)', vendor: 'nvidia', vramTotalGb: 8, vramFreeGb: 7.1 }],
+  gpus: [{ name: 'NVIDIA GeForce RTX 4060 Laptop (simulada)', vendor: 'nvidia', vramTotalGb: 8, vramFreeGb: 7.1 }],
   diskFreeGb: 412,
 }
 

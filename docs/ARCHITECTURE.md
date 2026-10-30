@@ -62,7 +62,7 @@ en tiempo real** el diseño es:
 5. **Honestidad obligatoria en el prompt**: solo cifras presentes en el contexto, decir qué datos
    faltan y explicar la incertidumbre. No es asesoramiento financiero.
 
-Modelo: configurable (`LLM_MODEL`). Con 8 GB de VRAM (RTX 4070 Laptop) caben bien modelos de
+Modelo: configurable (`LLM_MODEL`). Con 8 GB de VRAM caben bien modelos de
 7–9 B en Q4 con tools; los MoE de unos 3 B activos (30 B en total) también funcionan bien si se
 descargan parcialmente a RAM. Por defecto `qwen2.5:7b`, que ya está instalado. Comparativa en
 `docs/LLM.md`.

@@ -17,7 +17,7 @@ calcula el código, nunca con cifras que se inventa el modelo.
 [![Vídeo: landing, panel, un análisis en vivo del modelo local, chat y modo noche](docs/media/demo-poster.webp)](docs/media/demo.mp4)
 
 **[▶ Ver el vídeo de demostración (MP4)](docs/media/demo.mp4)**: la app real, datos de mercado reales y un análisis
-generado por el modelo local en una RTX 4070 Laptop (las esperas del modelo van aceleradas y lo indica el vídeo). No hay
+generado por el modelo local (las esperas del modelo van aceleradas y lo indica el vídeo). No hay
 una demo pública alojada: la app está pensada para ejecutarse en tu propio equipo (ver [Requisitos](#requisitos)).
 
 | Landing (claro) | Landing (oscuro) |
@@ -80,23 +80,23 @@ GPU están marcados con `#[ignore]`. Notas de seguridad y auditorías: [docs/not
 
 ## Requisitos
 
-| | Mínimo | Probado en |
-|---|---|---|
-| Sistema | Linux (systemd opcional, para el servicio en segundo plano) | CachyOS (Arch), KDE |
-| Rust | estable ≥ 1.85 (edición 2024) | 1.98 |
-| Node.js | ≥ 22 (Vite 8) | 24 y 26 |
-| Ollama | versión reciente y un modelo de chat (`qwen2.5:7b` ≈ 4,7 GB) | 0.40 |
-| GPU | opcional; NVIDIA con ≥ 8 GB de VRAM recomendada (solo CPU funciona, con minutos por análisis) | RTX 4070 Laptop, 8 GB |
-| RAM | 16 GB (32 GB recomendados) | 32 GB |
-| Disco | ~10 GB (modelos y compilación) | |
-| Claves de API | **ninguna obligatoria** (Yahoo, Binance y otras fuentes funcionan sin clave). Opcionales: Finnhub, Twelve Data, FRED, Alpha Vantage, FMP, NewsAPI, Marketaux, CryptoPanic, Reddit, X | |
+| Requisito | Mínimo |
+|---|---|
+| Sistema | Linux (systemd opcional, para el servicio en segundo plano) |
+| Rust | estable ≥ 1.85 (edición 2024) |
+| Node.js | ≥ 22 (Vite 8) |
+| Ollama | versión reciente y un modelo de chat (`qwen2.5:7b` ≈ 4,7 GB) |
+| GPU | opcional; NVIDIA con ≥ 8 GB de VRAM recomendada (solo CPU funciona, con minutos por análisis) |
+| RAM | 16 GB (32 GB recomendados) |
+| Disco | ~10 GB (modelos y compilación) |
+| Claves de API | **ninguna obligatoria** (Yahoo, Binance y otras fuentes funcionan sin clave). Opcionales: Finnhub, Twelve Data, FRED, Alpha Vantage, FMP, NewsAPI, Marketaux, CryptoPanic, Reddit, X |
 
 macOS y Windows no están probados.
 
 ## Puesta en marcha
 
 ```bash
-# Arch / CachyOS (sin sudo automático): sudo pacman -S rust nodejs npm ollama   (ollama-cuda con GPU NVIDIA)
+# Instala Rust, Node.js y Ollama con el gestor de paquetes de tu sistema; por ejemplo, en Arch: sudo pacman -S rust nodejs npm ollama
 git clone https://github.com/Chuwi12/invest-ai && cd invest-ai
 ./invest-ai pull          # descarga el modelo por defecto (LLM_MODEL) si falta
 ./invest-ai               # compila lo que cambió, arranca en 127.0.0.1:8787 y abre el navegador

@@ -98,7 +98,7 @@ Diseño (estimado, **pendiente de medir** en la ablación):
 - Cableado: nada nuevo en `main.rs`. `routes/mod.rs`: una línea (`/assets/{id}/analysis/stream` en el grupo streaming).
 - `AnalysisEvent::Stage.index` empieza en 1 y `total` depende de la profundidad (5/7/8).
 
-## Prueba real (RTX 4070 8 GB, qwen2.5:7b, Ollama compartido con otros agentes: los tiempos tienen ruido)
+## Prueba real (GPU de 8 GB, qwen2.5:7b, Ollama compartido con otros agentes: los tiempos tienen ruido)
 
 Servidor real en `127.0.0.1:8798`, BD temporal. «Antes» = pipeline anterior medido hoy; «después» = última pasada.
 
@@ -265,7 +265,7 @@ Resultado corto: **mecánicamente sí, con ganancia sin medir en esta máquina; 
   13,9–21,6 tok/s con `--spec-draft-n-max 3` (9 prompts: 201 s → 83,8 s, ≈2,4×; aceptación 72 %, mejor en código y peor en traducción).
   Esa máquina está limitada por ancho de banda de memoria, y el propio PR avisa de que **el prefill empeora con MTP**. En esta app hay más
   tokens de entrada que de salida (≈6–14k frente a 1,4–2,8k), pero el **tiempo** lo domina la generación (corrección del coordinador, con datos
-  medidos en la RTX 4070 y qwen2.5:7b: ~38 tok/s de generación frente a miles de tok/s de prefill; un `standard` de ~9,2k/1,7k tokens son ~3–9 s
+  medidos en una GPU de 8 GB y qwen2.5:7b: ~38 tok/s de generación frente a miles de tok/s de prefill; un `standard` de ~9,2k/1,7k tokens son ~3–9 s
   de prefill y ~45 s de generación). MTP acelera justo el término dominante, así que podría ayudar más de lo que sugiere el recuento de tokens; la
   penalización del prefill y la tasa de aceptación en análisis financiero en español son desconocidas: hay que medirlo antes de afirmar nada.
   Coste en memoria: en `qwen3.5:4b/9b` MTP exige la variante `-mtp-` (capa `draft` aparte: +0,81 / +2,43 GB), y con +2,43 GB el 9b deja de caber

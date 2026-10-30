@@ -1,6 +1,6 @@
 # Evaluación de modelos: `qwen2.5:7b` frente a `qwen3:8b`
 
-Fecha: 2026-10-14. Hardware: RTX 4070 Laptop (8188 MiB de VRAM), Ollama local con `-np 1`. Este documento compara; **no
+Fecha: 2026-10-14. Hardware: GPU NVIDIA de portátil (8188 MiB de VRAM), Ollama local con `-np 1`. Este documento compara; **no
 elige**. La decisión es del usuario (el modelo activo se cambia en Ajustes o con `PUT /api/models/active`).
 
 ## Metodología
@@ -485,7 +485,7 @@ Con `think:false` (lo que envía la app a los modelos con capacidad «thinking»
 - Fiabilidad de forma: veredicto = umbral de puntuación en 12/12 salvo 1 ejecución por modelo en `crypto:BTC` standard (en qwen2.5:7b, qwen3.5:4b y qwen3.5:9b; es la aproximación por umbrales sin los ajustes de riesgo, ver `ablation.md`). Confianza similar (0,66–0,69 en standard).
 - **Qué no mide esto:** corrección financiera, utilidad ni calidad de redacción; más cifras no es mejor análisis, y cifras descartadas no son errores que lleguen al usuario (el verificador las quita). Un único evaluador automático, 4 activos, un snapshot por activo.
 
-### Recomendación para este equipo (RTX 4070 Laptop 8 GB, q8_0, `num_ctx` 16384)
+### Recomendación para este equipo (GPU NVIDIA de portátil con 8 GB, q8_0, `num_ctx` 16384)
 
 No hay un ganador claro con esta muestra; esto es lo que sostienen los datos:
 

@@ -36,7 +36,7 @@ describe('modelFit', () => {
     expect(modelFit(model({ diskGb: 40 }, true), hw).note).toBeNull()
   })
   describe('cabe justo (puede ir parcialmente en CPU)', () => {
-    // Medido (RTX 4070 Laptop 8 GB, num_ctx 16384, KV q8_0): con el escritorio ocupando ~1 GB, qwen3:8b (6,1 GB
+    // Medido (GPU NVIDIA de portátil con 8 GB, num_ctx 16384, KV q8_0): con el escritorio ocupando ~1 GB, qwen3:8b (6,1 GB
     // recomendados tras la corrección del catálogo) quedó al 89 % en GPU y qwen3.5:9b (6,5 GB) al 81 %;
     // qwen2.5:7b (4,9 GB) y qwen3.5:4b (4,0 GB) iban enteros.
     const hw8: HardwareInfo = { ...hw, gpus: [{ name: 'g', vendor: 'nvidia', vramTotalGb: 7.99, vramFreeGb: 7 }] }

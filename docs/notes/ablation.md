@@ -27,7 +27,7 @@ Resumen en cinco líneas (detalle y cautelas más abajo):
   `stock_aapl.json`, `stock_msft.json`, `crypto_btc.json`, `etf_spy.json`. Se comprobó con `grep -F` que ninguna clave del `.env` aparece en ellos.
   Todas las variantes analizan exactamente estos ficheros.
 - **Modelo y configuración.** `qwen2.5:7b` (Ollama), `LLM_NUM_CTX=16384` (como el `.env` de la app), temperatura 0,2, timeout 180 s, idioma `es`,
-  `think` apagado. RTX 4070 Laptop 8 GB, 100 % en GPU. Una ejecución a la vez. Modelo precargado.
+  `think` apagado. GPU NVIDIA de portátil con 8 GB, 100 % en GPU. Una ejecución a la vez. Modelo precargado.
 - **Variantes** (cada una compilada como `cargo build --release -p ai --example compare_models` en su `git worktree`, con el MISMO
   `compare_models.rs` de medición copiado dentro):
 

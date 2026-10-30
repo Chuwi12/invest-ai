@@ -16,7 +16,7 @@ export const vramReserveGb = (total: number) => Math.max(1, total * 0.08)
 
 /**
  * Margen (GB) que debe quedar entre lo que el catálogo recomienda y la VRAM TOTAL para que Ollama cargue el
- * modelo entero en la GPU con seguridad. Sale de las mediciones del 16 y 19-oct-2026 en una RTX 4070 Laptop de
+ * modelo entero en la GPU con seguridad. Sale de las mediciones del 16 y 19-oct-2026 en una GPU NVIDIA de portátil de
  * 8 GB (num_ctx 16384, KV q8_0; `docs/notes/model-eval.md`, «Forzar todas las capas en GPU»):
  *  - Con el escritorio ocupando ~0,95 GB de VRAM, Ollama necesitó ~1,0–1,5 GB libres por encima de lo que
  *    ocupa el modelo: qwen3:8b (ocupa 6,0 GB) y qwen3.5:9b (6,4 GB) quedaron al 89 % y 81 % en GPU, mientras
@@ -39,7 +39,7 @@ const gb = (n: number) => `${n.toLocaleString('es-ES', { maximumFractionDigits: 
  * ni oculta nada por ti. La VRAM se suma entre GPUs (Ollama puede repartir capas).
  *
  * No se cuenta con la VRAM entera: el driver, el contexto de CUDA y el escritorio se quedan una
- * parte. Medido el 14-oct-2026 en una RTX 4070 Laptop de 8 GB: qwen3:8b con 16k de contexto
+ * parte. Medido el 14-oct-2026 en una GPU NVIDIA de portátil de 8 GB: qwen3:8b con 16k de contexto
  * (7,7 GB estimados) se desbordó un 12 % a la CPU, mientras que qwen2.5:7b (5,8 GB) cabía entero.
  */
 export function modelFit(model: LlmModel, hw: HardwareInfo): Fit {
