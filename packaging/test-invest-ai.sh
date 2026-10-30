@@ -218,11 +218,12 @@ check "las versiones legítimas se podan como siempre (quedan 3)" test "$(n_vers
 echo "== poda: conserva la versión que usa el servicio en marcha (#6) =="
 RUN="$(unit_rel)"
 chmod u+w "$RUN/bin" "$RUN/bin/invest-ai" # el «binario» corre desde la copia
-cp "$(command -v sleep)" "$RUN/bin/invest-ai" || fail "no se pudo simular el proceso del servicio"
+# Una copia de bash que espera bloqueada en una FIFO: /proc/<pid>/exe es la copia de la versión, que es lo que
+# comprueba la poda. (Una copia de `sleep` no sirve en todas partes: con coreutils multillamada sale al instante.)
+cp "$(command -v bash)" "$RUN/bin/invest-ai" || fail "no se pudo simular el proceso del servicio"
 chmod a-w "$RUN/bin" "$RUN/bin/invest-ai"
-# exec -a sleep: con coreutils multillamada (uutils, p. ej. Ubuntu 26.04) el nombre decide la utilidad;
-# /proc/<pid>/exe sigue siendo la copia de la versión, que es lo que comprueba la poda.
-(exec -a sleep "$RUN/bin/invest-ai" 600) &
+mkfifo "$TMP/hold"
+"$RUN/bin/invest-ai" -c "read -r _ < '$TMP/hold'" &
 SVC_PID=$!
 echo "$SVC_PID" >"$TMP/mainpid"
 for v in v7 v8 v9 v10; do install_new $v; done
