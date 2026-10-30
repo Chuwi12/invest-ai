@@ -220,7 +220,9 @@ RUN="$(unit_rel)"
 chmod u+w "$RUN/bin" "$RUN/bin/invest-ai" # el «binario» corre desde la copia
 cp "$(command -v sleep)" "$RUN/bin/invest-ai" || fail "no se pudo simular el proceso del servicio"
 chmod a-w "$RUN/bin" "$RUN/bin/invest-ai"
-"$RUN/bin/invest-ai" 600 &
+# exec -a sleep: con coreutils multillamada (uutils, p. ej. Ubuntu 26.04) el nombre decide la utilidad;
+# /proc/<pid>/exe sigue siendo la copia de la versión, que es lo que comprueba la poda.
+(exec -a sleep "$RUN/bin/invest-ai" 600) &
 SVC_PID=$!
 echo "$SVC_PID" >"$TMP/mainpid"
 for v in v7 v8 v9 v10; do install_new $v; done
