@@ -226,6 +226,7 @@ chmod a-w "$RUN/bin" "$RUN/bin/invest-ai"
 SVC_PID=$!
 echo "$SVC_PID" >"$TMP/mainpid"
 for v in v7 v8 v9 v10; do install_new $v; done
+[[ -f $RUN/frontend/dist/index.html ]] || echo "  (diag) pid=$SVC_PID vivo=$(kill -0 "$SVC_PID" 2>/dev/null && echo sí || echo no) exe=$(readlink -f "/proc/$SVC_PID/exe" 2>/dev/null) releases=$(realpath -m "$RELS")"
 check "4 instalaciones sin reiniciar: la versión en marcha sigue en releases/ con su frontend" test -f "$RUN/frontend/dist/index.html"
 check "se conservan las 3 recientes y la de en marcha" test "$(n_versions)" -eq 4
 kill "$SVC_PID" 2>/dev/null || true

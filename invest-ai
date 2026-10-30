@@ -680,11 +680,12 @@ drop_release() { # drop_release RUTA
 # Versión instalada que ejecuta el proceso principal del servicio (vacío si no corre ninguna): su
 # STATIC_DIR vive ahí y borrarla deja la UI en 404 hasta el siguiente reinicio.
 running_release() {
-  local pid exe
+  local pid exe rel
   pid=$(systemctl --user show -p MainPID --value "$SERVICE" 2>/dev/null || true)
   [[ $pid =~ ^[1-9][0-9]*$ ]] || return 0
   exe=$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)
-  if [[ $exe == "$RELEASES_DIR"/*/bin/invest-ai ]]; then printf '%s\n' "${exe%/bin/invest-ai}"; fi
+  rel=$(realpath -m -- "$RELEASES_DIR") # /proc/<pid>/exe es canónica: con un enlace en la ruta no coincidiría
+  if [[ $exe == "$rel"/*/bin/invest-ai ]]; then printf '%s\n' "${exe%/bin/invest-ai}"; fi
 }
 
 # Borra las versiones antiguas: se quedan la nueva, la que usaba la unidad hasta ahora, la del proceso en
