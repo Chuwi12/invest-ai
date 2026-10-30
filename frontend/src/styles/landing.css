@@ -1,25 +1,28 @@
 /*
- * Landing («/»): extracto suizo. Papel blanco, tinta negra, rojo señal solo en campos grandes,
- * una sola familia (Archivo, anchura y peso), rejilla de 12 columnas, filetes de 3 px y de 1 px.
- * Todo cuelga de `.lp` y de clases `lp-*`: no toca el resto de la app. La landing es solo clara por
- * diseño (el mundo es papel), aunque la app tenga tema oscuro.
+ * Landing («/»): extracto suizo. Papel, tinta, rojo señal solo en campos grandes, una sola familia
+ * (Archivo, anchura y peso), rejilla de 12 columnas, filetes de 3 px y de 1 px.
+ * Todo cuelga de `.lp` y de clases `lp-*`: no toca el resto de la app. Sigue el tema de la app: en claro,
+ * papel blanco y tinta negra; en oscuro, suelo negro y texto blanco. Los `--lp-*` son alias de los tokens
+ * compartidos (tokens.css), que ya cambian con `prefers-color-scheme` y con `data-theme`; ningún color va fijo.
  */
 html:has(.lp),
 body:has(.lp) {
-  background: #fff;
-  color-scheme: light;
-  scrollbar-color: #000 #fff;
+  background: var(--bg);
+  scrollbar-color: var(--ink) var(--bg); /* se hereda: también la de la cinta con foco y la de «reducir movimiento» */
 }
 
 .lp {
-  --lp-paper: #fff;
-  --lp-ink: #000;
-  --lp-ink-2: #4a4a4a; /* 8,9:1 sobre papel */
-  --lp-faint: #737373; /* 4,7:1: fuentes viejas, atenuadas pero legibles */
-  --lp-red: #e2001a; /* 4,9:1 con texto blanco */
-  --lp-rule: #d9d9d6;
-  --lp-up: #127a3e; /* 5,4:1 */
-  --lp-font: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --lp-paper: var(--bg);
+  --lp-ink: var(--ink);
+  --lp-ink-2: var(--ink-2);
+  --lp-faint: var(--muted); /* fuentes viejas: atenuadas pero legibles */
+  --lp-red: var(--signal); /* igual en los dos temas: campo grande con texto --signal-ink (4,9:1) */
+  --lp-on-red: var(--signal-ink);
+  --lp-rule: var(--line);
+  --lp-up: var(--up);
+  --lp-down: var(--down); /* el rojo de dato: más claro en oscuro */
+  --lp-focus: var(--focus);
+  --lp-font: var(--font-ui);
 
   /* Escala: 13 / 15 / 17 / 20 / 24 / 36 / 48 / 96 px. Cada paso se nota. */
   --lp-t-note: 0.8125rem;
@@ -38,7 +41,6 @@ body:has(.lp) {
   --lp-cell-n: 13;
   --lp-speed: 3.5;
 
-  color-scheme: light;
   min-height: 100dvh;
   background: var(--lp-paper);
   color: var(--lp-ink);
@@ -47,7 +49,6 @@ body:has(.lp) {
   font-feature-settings: normal;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
-  scrollbar-color: #000 #fff;
 }
 
 /* Los reinicios van en :where() (especificidad 0): ninguna clase lp-* tiene que ganarles la batalla. */
@@ -66,11 +67,11 @@ body:has(.lp) {
   text-decoration: none;
 }
 .lp ::selection {
-  background: #000;
-  color: #fff;
+  background: var(--lp-ink);
+  color: var(--lp-paper);
 }
 .lp :focus-visible {
-  outline: 3px solid var(--lp-ink);
+  outline: 3px solid var(--lp-focus);
   outline-offset: 3px;
   border-radius: 0;
 }
@@ -145,6 +146,13 @@ body:has(.lp) {
   color: var(--lp-ink-2);
   text-wrap: pretty;
 }
+/* El estado y el conmutador de tema forman el extremo derecho de la cabecera. */
+.lp-top-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 2.5rem;
+}
 .lp-status {
   display: flex;
   flex-wrap: wrap;
@@ -200,7 +208,8 @@ body:has(.lp) {
   background: var(--lp-paper);
   border-right: 1px solid var(--lp-rule);
 }
-.lp-pause {
+.lp-pause,
+.lp-theme {
   min-height: 2.4rem;
   padding: 0 0.9rem;
   border: 1px solid var(--lp-ink);
@@ -210,7 +219,8 @@ body:has(.lp) {
   font: 600 var(--lp-t-ui) / 1 var(--lp-font);
   cursor: pointer;
 }
-.lp-pause:hover {
+.lp-pause:hover,
+.lp-theme:hover {
   background: var(--lp-rule);
 }
 .lp-pause[aria-pressed='true'] {
@@ -219,6 +229,10 @@ body:has(.lp) {
 }
 .lp-pause[aria-pressed='true']:hover {
   background: var(--lp-ink-2);
+}
+/* El conmutador de tema es el mismo contorno que la pausa, solo con texto. */
+.lp-theme {
+  white-space: nowrap;
 }
 .lp-live {
   display: flex;
@@ -253,7 +267,6 @@ body:has(.lp) {
    enfocada siempre se ve (WCAG 2.4.7). Al salir el foco, TSX devuelve el scroll a 0 y el bucle vuelve a correr. */
 .lp-viewport:focus-within {
   overflow-x: auto;
-  scrollbar-color: #000 #fff;
 }
 .lp-viewport:focus-within .lp-track {
   animation: none;
@@ -297,7 +310,7 @@ body:has(.lp) {
   text-align: right;
 }
 .lp-up { color: var(--lp-up); }
-.lp-down { color: var(--lp-red); }
+.lp-down { color: var(--lp-down); }
 .lp-flat { color: var(--lp-ink-2); }
 .lp-px {
   grid-area: 2 / 1 / 3 / 3;
@@ -348,7 +361,6 @@ body:has(.lp) {
   }
   .lp-viewport {
     overflow-x: auto;
-    scrollbar-color: #000 #fff;
   }
   .lp-dup,
   .lp-rep,
@@ -397,8 +409,18 @@ body:has(.lp) {
   font-size: min(28cqi, 14rem, calc(100cqi / (var(--lp-len) * 0.6)));
 }
 .lp-verdict {
-  color: var(--lp-red);
+  /* Mismo color direccional que en el panel: verde comprar y acumular, rojo reducir y evitar, tinta el resto.
+     El rojo señal queda para el bloque de acción y la marca. */
+  color: var(--lp-ink);
   font-size: min(17cqi, 8.4rem, calc(100cqi / (var(--lp-len) * 0.6)));
+}
+.lp-verdict[data-verdict='buy'],
+.lp-verdict[data-verdict='accumulate'] {
+  color: var(--lp-up);
+}
+.lp-verdict[data-verdict='reduce'],
+.lp-verdict[data-verdict='avoid'] {
+  color: var(--lp-down);
 }
 .lp-mon-empty {
   font-size: clamp(2.25rem, 5vw, 4rem);
@@ -495,6 +517,13 @@ body:has(.lp) {
 .lp-src[data-active='true'] :focus-visible {
   outline-color: var(--lp-paper);
 }
+/* Dentro de lo invertido, la selección también se invierte: si no, tinta sobre tinta. */
+.lp-fig[data-active='true'] ::selection,
+.lp-src[data-active='true'] ::selection,
+.lp-src:target ::selection {
+  background: var(--lp-paper);
+  color: var(--lp-ink);
+}
 
 /* ---------------------------------------------------- índice de fuentes + acción */
 .lp-foot {
@@ -580,16 +609,21 @@ body:has(.lp) {
   min-height: 9rem;
   padding: 1.25rem;
   background: var(--lp-red);
-  color: #fff;
+  color: var(--lp-on-red);
   font: 700 clamp(1.75rem, 2.6vw, 2.25rem) / 1 var(--lp-font);
   letter-spacing: -0.02em;
 }
+/* Se invierte como el resto: tinta de fondo y papel de texto (blanco sobre negro en claro, negro sobre blanco en oscuro). */
 .lp-cta:hover {
   background: var(--lp-ink);
+  color: var(--lp-paper);
 }
 .lp-cta:focus-visible {
-  outline: 3px solid #fff;
+  outline: 3px solid var(--lp-on-red);
   outline-offset: -0.6rem;
+}
+.lp-cta:hover:focus-visible {
+  outline-color: var(--lp-paper);
 }
 .lp-cta-big {
   min-height: 14rem;

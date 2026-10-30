@@ -1,11 +1,11 @@
 import { memo, useMemo, useState, type CSSProperties } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
-import '@fontsource-variable/archivo/wdth.css'
 import '@/styles/landing.css'
 import { api } from '@/api'
 import { STALE, qk, useModels, usePerformance, useQuotes } from '@/api/hooks'
 import type { Analysis, AssetId, HorizonReport, PerformanceReport, Quote, SourceRef, WatchlistRun, WatchlistStatus } from '@/api/types'
+import { THEME_LABEL, nextTheme, useTheme } from '@/app/theme'
 import { ExternalLink } from '@/components/ExternalLink'
 import { useClock } from '@/hooks/useClock'
 import { useTitle } from '@/hooks/useTitle'
@@ -152,6 +152,16 @@ type Watchlist = ReturnType<typeof useLandingWatchlist>
 
 // --- Cabecera --------------------------------------------------------------------------------
 
+/** Cicla sistema, claro y oscuro como el del panel (mismas etiquetas). Solo texto: el mundo no lleva iconos decorativos. */
+function ThemeToggle() {
+  const [theme, setTheme] = useTheme()
+  return (
+    <button type="button" className="lp-theme" onClick={() => setTheme(nextTheme(theme))}>
+      {THEME_LABEL[theme]}
+    </button>
+  )
+}
+
 function Header({ watchlist }: { watchlist: Watchlist }) {
   const models = useModels()
   const model = modelStatus(models)
@@ -162,37 +172,40 @@ function Header({ watchlist }: { watchlist: Watchlist }) {
         <h1 className="lp-mark">invest-ai</h1>
         <p className="lp-tag">Análisis de inversión con un modelo de IA local: cada cifra con su fuente; el modelo y tus datos no salen de este equipo.</p>
       </div>
-      <dl className="lp-status">
-        {IS_MOCK ? (
+      <div className="lp-top-end">
+        <dl className="lp-status">
+          {IS_MOCK ? (
+            <div>
+              <dt>Datos</dt>
+              <dd>simulados, modo demostración</dd>
+            </div>
+          ) : null}
           <div>
-            <dt>Datos</dt>
-            <dd>simulados, modo demostración</dd>
+            <dt>Modelo local</dt>
+            <dd>
+              <span className="lp-sq" data-off={!model.on} aria-hidden="true" />
+              {model.text}
+            </dd>
           </div>
-        ) : null}
-        <div>
-          <dt>Modelo local</dt>
-          <dd>
-            <span className="lp-sq" data-off={!model.on} aria-hidden="true" />
-            {model.text}
-          </dd>
-        </div>
-        <div>
-          <dt>Última pasada de la lista</dt>
-          <dd>
-            {watchlist.isPending ? (
-              'comprobando'
-            ) : watchlist.isError ? (
-              'sin respuesta del servidor'
-            ) : run ? (
-              <span>
-                <time dateTime={run.localDate}>{formatDate(run.localDate)}</time>, {runText(run)}
-              </span>
-            ) : (
-              'todavía no se ha hecho ninguna'
-            )}
-          </dd>
-        </div>
-      </dl>
+          <div>
+            <dt>Última pasada de la lista</dt>
+            <dd>
+              {watchlist.isPending ? (
+                'comprobando'
+              ) : watchlist.isError ? (
+                'sin respuesta del servidor'
+              ) : run ? (
+                <span>
+                  <time dateTime={run.localDate}>{formatDate(run.localDate)}</time>, {runText(run)}
+                </span>
+              ) : (
+                'todavía no se ha hecho ninguna'
+              )}
+            </dd>
+          </div>
+        </dl>
+        <ThemeToggle />
+      </div>
     </header>
   )
 }
@@ -387,7 +400,7 @@ function Statement({ state }: { state: StatementState }) {
                 {/* El tamaño sale de la columna (cqi) y del número de letras (--lp-len): ningún símbolo ni veredicto desborda. */}
                 <h2 className="lp-mon">
                   <span className="lp-mon-sym" style={{ '--lp-len': symbolOf(a.asset).length } as CSSProperties}>{symbolOf(a.asset)}</span>{' '}
-                  <span className="lp-verdict" style={{ '--lp-len': VERDICT_LABEL[a.verdict].length } as CSSProperties}>{VERDICT_LABEL[a.verdict]}</span>
+                  <span className="lp-verdict" data-verdict={a.verdict} style={{ '--lp-len': VERDICT_LABEL[a.verdict].length } as CSSProperties}>{VERDICT_LABEL[a.verdict]}</span>
                 </h2>
                 <p className="lp-sum">{a.summary}</p>
               </div>

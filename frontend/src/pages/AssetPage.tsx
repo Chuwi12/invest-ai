@@ -44,9 +44,16 @@ function AssetView({ id }: { id: AssetId }) {
     window.scrollTo({ top: 0 })
   }, [id])
 
-  // La pestaña activa siempre visible cuando la barra desborda (móvil).
+  // La pestaña activa siempre visible cuando la barra desborda (móvil). Solo se desplaza la barra: `scrollIntoView`
+  // también movía la ventana y la cabecera de la ficha quedaba tapada al abrirla.
   useEffect(() => {
-    document.getElementById(`tab-${tab}`)?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+    const el = document.getElementById(`tab-${tab}`)
+    const bar = el?.parentElement
+    if (!el || !bar) return
+    const r = el.getBoundingClientRect()
+    const b = bar.getBoundingClientRect()
+    if (r.left < b.left) bar.scrollLeft += r.left - b.left
+    else if (r.right > b.right) bar.scrollLeft += r.right - b.right
   }, [tab, detail.isSuccess])
 
   if (detail.isPending) {

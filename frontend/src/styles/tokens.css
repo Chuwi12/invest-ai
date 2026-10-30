@@ -1,0 +1,80 @@
+/* Tokens del mundo «Extracto suizo» (DESIGN.md), compartidos por la landing y el panel.
+   Mismos nombres que usaba app.css: el panel cambia de mundo sin tocar su marcado.
+   Claro por defecto; oscuro con prefers-color-scheme o con data-theme="dark" (app/theme.ts). */
+:root {
+  --font-ui: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f2f2f0;
+  --ink: #000000;
+  --ink-2: #4a4a4a;
+  --muted: #6b6b6b;
+  --line: #d9d9d6;
+  --line-strong: #000000;
+  /* Acciones y selección en tinta: el rojo del panel ya significa «baja». */
+  --accent: #000000;
+  --accent-ink: #ffffff;
+  --accent-soft: #e6e6e3;
+  /* Rojo señal: solo campos grandes (la marca y la acción de la landing), siempre con texto blanco.
+     El veredicto es direccional (--up / --down / tinta) en toda la app. */
+  --signal: #e2001a;
+  --signal-ink: #ffffff;
+  --up: #127a3e;
+  --up-soft: #e3f1e8;
+  --down: #e2001a;
+  --down-soft: #fff3f4;
+  --warn: #8a5a00;
+  --warn-soft: #f5e8c8;
+  --focus: #000000;
+  --radius: 0;
+  /* Sin sombras: lo que flota se separa con un filete de tinta. */
+  --shadow-pop: 0 0 0 1px var(--ink);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #000000;
+    --surface: #000000;
+    --surface-2: #161616;
+    --ink: #ffffff;
+    --ink-2: #bdbdbd;
+    --muted: #8c8c8c;
+    --line: #333333;
+    --line-strong: #ffffff;
+    --accent: #ffffff;
+    --accent-ink: #000000;
+    --accent-soft: #262626;
+    --up: #3fbf72;
+    --up-soft: #0f2a1b;
+    --down: #ff4d5a;
+    --down-soft: #3a0d12;
+    --warn: #e6b450;
+    --warn-soft: #3a2f12;
+    --focus: #ffffff;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #000000;
+  --surface: #000000;
+  --surface-2: #161616;
+  --ink: #ffffff;
+  --ink-2: #bdbdbd;
+  --muted: #8c8c8c;
+  --line: #333333;
+  --line-strong: #ffffff;
+  --accent: #ffffff;
+  --accent-ink: #000000;
+  --accent-soft: #262626;
+  --up: #3fbf72;
+  --up-soft: #0f2a1b;
+  --down: #ff4d5a;
+  --down-soft: #3a0d12;
+  --warn: #e6b450;
+  --warn-soft: #3a2f12;
+  --focus: #ffffff;
+  color-scheme: dark;
+}

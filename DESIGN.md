@@ -1,18 +1,60 @@
 ---
 name: invest-ai
-description: "Extracto suizo: análisis de inversión con IA local, cada cifra en su columna y con su fuente (hoy solo la landing)."
+description: "Extracto suizo: análisis de inversión con IA local, cada cifra en su columna y con su fuente. Un solo mundo para la landing y el panel, en claro y en oscuro."
 colors:
-  paper: "#ffffff"
+  # Tema claro (por defecto). Mismos nombres que frontend/src/styles/tokens.css.
+  bg: "#ffffff"
+  surface: "#ffffff"
+  surface-2: "#f2f2f0"
+  hover: "color-mix(in srgb, #f2f2f0 70%, #ffffff)"
   ink: "#000000"
   ink-2: "#4a4a4a"
-  faint: "#737373"
-  rule: "#d9d9d6"
-  red: "#e2001a"
+  muted: "#6b6b6b"
+  line: "#d9d9d6"
+  line-strong: "#000000"
+  accent: "#000000"
+  accent-ink: "#ffffff"
+  accent-soft: "#e6e6e3"
+  focus: "#000000"
+  signal: "#e2001a"
+  signal-ink: "#ffffff"
   up: "#127a3e"
+  up-soft: "#e3f1e8"
+  down: "#e2001a"
+  down-soft: "#fff3f4"
+  warn: "#8a5a00"
+  warn-soft: "#f5e8c8"
+  # Tema oscuro (prefers-color-scheme: dark o data-theme="dark"). signal y signal-ink no cambian.
+  bg-dark: "#000000"
+  surface-dark: "#000000"
+  surface-2-dark: "#161616"
+  hover-dark: "#262626"
+  ink-dark: "#ffffff"
+  ink-2-dark: "#bdbdbd"
+  muted-dark: "#8c8c8c"
+  line-dark: "#333333"
+  line-strong-dark: "#ffffff"
+  accent-dark: "#ffffff"
+  accent-ink-dark: "#000000"
+  accent-soft-dark: "#262626"
+  focus-dark: "#ffffff"
+  up-dark: "#3fbf72"
+  up-soft-dark: "#0f2a1b"
+  down-dark: "#ff4d5a"
+  down-soft-dark: "#3a0d12"
+  warn-dark: "#e6b450"
+  warn-soft-dark: "#3a2f12"
 typography:
   wordmark:
     fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
     fontSize: "1.75rem"
+    fontWeight: 800
+    lineHeight: 1
+    letterSpacing: "-0.03em"
+    fontVariation: "'wdth' 88"
+  wordmark-rail:
+    fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    fontSize: "1.25rem"
     fontWeight: 800
     lineHeight: 1
     letterSpacing: "-0.03em"
@@ -38,9 +80,30 @@ typography:
     lineHeight: 1
     letterSpacing: "-0.025em"
     fontVariation: "'wdth' 92"
+  page-title:
+    fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    fontSize: "1.75rem"
+    fontWeight: 800
+    lineHeight: 1.1
+    letterSpacing: "-0.025em"
+    fontVariation: "'wdth' 92"
+  verdict:
+    fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    fontSize: "2.6rem"
+    fontWeight: 800
+    lineHeight: 1
+    letterSpacing: "-0.035em"
+    fontVariation: "'wdth' 74"
   figure:
     fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
     fontSize: "min(3.5rem, 13cqi)"
+    fontWeight: 600
+    lineHeight: 1
+    letterSpacing: "-0.02em"
+    fontFeature: "'tnum' 1"
+  price:
+    fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    fontSize: "2.6rem"
     fontWeight: 600
     lineHeight: 1
     letterSpacing: "-0.02em"
@@ -69,6 +132,13 @@ typography:
     fontWeight: 700
     lineHeight: 1.2
     letterSpacing: "-0.01em"
+  section-title:
+    fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 700
+    lineHeight: 1.5
+    letterSpacing: "-0.01em"
+    fontVariation: "'wdth' 92"
   lead:
     fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
     fontSize: "1.25rem"
@@ -84,7 +154,8 @@ typography:
     fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
     fontSize: "0.9375rem"
     fontWeight: 400
-    lineHeight: 1.35
+    lineHeight: 1.5
+    fontFeature: "'tnum' 1"
   ui-strong:
     fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
     fontSize: "0.9375rem"
@@ -100,6 +171,16 @@ typography:
     fontSize: "0.8125rem"
     fontWeight: 400
     lineHeight: 1.5
+  meta:
+    fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 400
+    lineHeight: 1.5
+  meta-strong:
+    fontFamily: "'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 600
+    lineHeight: 1.5
 rounded:
   none: "0px"
 spacing:
@@ -108,39 +189,165 @@ spacing:
   row: "2rem"
   block-start: "1.5rem"
   block-end: "3rem"
+  panel-pad: "1.25rem"
+  panel-stack: "1.5rem"
+  panel-grid: "1.25rem"
 components:
   cta-field:
-    backgroundColor: "{colors.red}"
-    textColor: "{colors.paper}"
+    backgroundColor: "{colors.signal}"
+    textColor: "{colors.signal-ink}"
     typography: "{typography.cta}"
     rounded: "{rounded.none}"
     padding: "1.25rem"
     height: "9rem"
   cta-field-hover:
     backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
+    textColor: "{colors.bg}"
   cta-field-large:
-    backgroundColor: "{colors.red}"
-    textColor: "{colors.paper}"
+    backgroundColor: "{colors.signal}"
+    textColor: "{colors.signal-ink}"
     typography: "{typography.cta-large}"
     rounded: "{rounded.none}"
     padding: "1.25rem"
     height: "14rem"
+  brand-field:
+    backgroundColor: "{colors.signal}"
+    textColor: "{colors.signal-ink}"
+    typography: "{typography.wordmark-rail}"
+    rounded: "{rounded.none}"
+    padding: "0.7rem 0.75rem"
+  nav-item:
+    textColor: "{colors.ink-2}"
+    typography: "{typography.ui-strong}"
+    rounded: "{rounded.none}"
+    padding: "0.5rem 0.6rem"
+  nav-item-hover:
+    backgroundColor: "{colors.hover}"
+    textColor: "{colors.ink}"
+  nav-item-active:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.accent-ink}"
+  button-primary:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.accent-ink}"
+    typography: "{typography.ui-strong}"
+    rounded: "{rounded.none}"
+    padding: "0 0.85rem"
+    height: "2.1rem"
+  button-primary-hover:
+    backgroundColor: "{colors.ink-2}"
+    textColor: "{colors.accent-ink}"
   button-outline:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.ui-strong}"
+    rounded: "{rounded.none}"
+    padding: "0 0.85rem"
+    height: "2.1rem"
+  button-outline-hover:
+    backgroundColor: "{colors.line}"
+  button-outline-pressed:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.bg}"
+  button-outline-pressed-hover:
+    backgroundColor: "{colors.ink-2}"
+    textColor: "{colors.bg}"
+  button-outline-large:
     backgroundColor: "transparent"
     textColor: "{colors.ink}"
     typography: "{typography.ui-strong}"
     rounded: "{rounded.none}"
     padding: "0 0.9rem"
     height: "2.4rem"
-  button-outline-hover:
-    backgroundColor: "{colors.rule}"
-  button-outline-pressed:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
-  button-outline-pressed-hover:
-    backgroundColor: "{colors.ink-2}"
-    textColor: "{colors.paper}"
+  button-small:
+    typography: "{typography.label}"
+    rounded: "{rounded.none}"
+    padding: "0 0.6rem"
+    height: "1.75rem"
+  button-ghost:
+    backgroundColor: "transparent"
+    rounded: "{rounded.none}"
+  chip:
+    backgroundColor: "{colors.accent-soft}"
+    textColor: "{colors.ink}"
+    typography: "{typography.meta-strong}"
+    rounded: "{rounded.none}"
+    padding: "0.1rem 0.5rem"
+  chip-muted:
+    backgroundColor: "{colors.accent-soft}"
+    textColor: "{colors.ink-2}"
+  chip-up:
+    backgroundColor: "{colors.up-soft}"
+    textColor: "{colors.up}"
+  chip-down:
+    backgroundColor: "{colors.down-soft}"
+    textColor: "{colors.down}"
+  chip-warn:
+    backgroundColor: "{colors.warn-soft}"
+    textColor: "{colors.warn}"
+  chip-action:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.meta-strong}"
+    rounded: "{rounded.none}"
+    padding: "0.1rem 0.5rem"
+  chip-action-hover:
+    backgroundColor: "{colors.line}"
+  chip-action-pressed:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.accent-ink}"
+  segment:
+    backgroundColor: "transparent"
+    textColor: "{colors.ink-2}"
+    typography: "{typography.label}"
+    padding: "0.25rem 0.6rem"
+  segment-hover:
+    backgroundColor: "{colors.line}"
+  segment-selected:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.accent-ink}"
+  input:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.ui}"
+    rounded: "{rounded.none}"
+    padding: "0.45rem 0.65rem"
+  search-trigger:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.muted}"
+    typography: "{typography.ui}"
+    rounded: "{rounded.none}"
+    padding: "0 0.7rem"
+    height: "2.25rem"
+  table-row:
+    typography: "{typography.ui}"
+    padding: "0.5rem 0.6rem"
+  table-row-hover:
+    backgroundColor: "{colors.hover}"
+  notice:
+    backgroundColor: "{colors.surface-2}"
+    textColor: "{colors.ink}"
+    padding: "0.6rem 0.8rem"
+  notice-warn:
+    backgroundColor: "{colors.warn-soft}"
+    textColor: "{colors.warn}"
+  notice-error:
+    backgroundColor: "{colors.warn-soft}"
+    textColor: "{colors.ink}"
+  mock-banner:
+    backgroundColor: "{colors.warn-soft}"
+    textColor: "{colors.warn}"
+    typography: "{typography.label}"
+    padding: "0.3rem 1rem"
+  verdict-up:
+    textColor: "{colors.up}"
+    typography: "{typography.verdict}"
+  verdict-down:
+    textColor: "{colors.down}"
+    typography: "{typography.verdict}"
+  verdict-hold:
+    textColor: "{colors.ink}"
+    typography: "{typography.verdict}"
   tape-cell:
     typography: "{typography.body}"
     padding: "0.55rem 1rem 0.65rem"
@@ -151,13 +358,13 @@ components:
     padding: "0.6rem 0.75rem 0.65rem"
   figure-row-active:
     backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
+    textColor: "{colors.bg}"
   source-row:
     typography: "{typography.ui}"
     padding: "0.25rem 0.5rem 0.3rem"
   source-row-active:
     backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
+    textColor: "{colors.bg}"
   status-square:
     backgroundColor: "{colors.up}"
     rounded: "{rounded.none}"
@@ -166,6 +373,14 @@ components:
     backgroundColor: "transparent"
     rounded: "{rounded.none}"
     size: "0.5rem"
+  status-dot:
+    backgroundColor: "{colors.muted}"
+    rounded: "{rounded.none}"
+    size: "0.55rem"
+  status-dot-ok:
+    backgroundColor: "{colors.up}"
+  status-dot-bad:
+    backgroundColor: "{colors.warn}"
 ---
 
 # Design System: invest-ai
@@ -174,92 +389,118 @@ components:
 
 **Creative North Star: "El extracto suizo"**
 
-El análisis se presenta como un extracto de banca privada suiza leído con los ojos del estilo tipográfico internacional: papel blanco, tinta negra, cada cifra en su columna con su referencia, y nada que adorne. La autoridad no sale de efectos sino de la disciplina: una rejilla de 12 columnas, una sola familia tipográfica que cambia de anchura y de peso, filetes de 3 px entre bloques y de 1 px entre filas. El rojo señal aparece poco y en grande, como en un sello: el veredicto y el bloque de acción.
+El análisis se presenta como un extracto de banca privada suiza leído con los ojos del estilo tipográfico internacional: papel y tinta, cada cifra en su columna con su referencia, y nada que adorne. La autoridad no sale de efectos sino de la disciplina: una sola familia tipográfica que cambia de anchura y de peso, filetes de 3 px que abren bloques y de 1 px entre filas, esquinas rectas y ninguna sombra. Toda acción, selección y foco va en tinta; el rojo señal aparece en dos sitios y en grande, como un sello: la marca del raíl y el bloque de acción de la landing.
 
-La densidad es la de un documento financiero, no la de una landing: la primera pantalla ocupa todo el alto y ya trae datos reales (estado del modelo local, cinta de cotizaciones, el último análisis con sus cuatro cifras y su índice de fuentes). Lo monumental (símbolo y veredicto) convive con texto de 13 a 17 px sin escalones intermedios decorativos. El único movimiento continuo es la cinta; todo lo demás es estático y los cambios de estado son instantáneos, sin transiciones.
+Un solo mundo rige toda la app con el mismo contrato de tokens (`frontend/src/styles/tokens.css`; la landing los consume a través de alias `--lp-*`). La landing (ruta `/`, modo Persuade) es monumental: primera pantalla a todo el alto con datos reales, símbolo y veredicto a cuerpo de cartel, rejilla de 12 columnas. El panel (todas las rutas dentro del Shell: panel, ficha e informe, chat, rendimiento, OPV, modelos, favoritos e historial, modo Operate) es denso y escaneable: raíl, tablas, filetes y texto de 12 a 17 px; allí la expresión vive en los detalles, no en el gesto.
 
-**Alcance.** Este mundo rige hoy solo la landing (ruta `/`, `frontend/src/pages/LandingPage.tsx` y `frontend/src/styles/landing.css`, todo bajo `.lp` y clases `lp-*`). Las superficies de la app (panel, ficha de activo, chat y demás, en `frontend/src/styles/app.css`) siguen con su identidad anterior y aún no usan este sistema; si lo heredan es una decisión pendiente del usuario. Este documento no describe ese sistema anterior. El mundo es solo claro: es papel, y no tiene tema oscuro aunque la app lo tenga.
+El mundo tiene dos temas. En claro es papel blanco y tinta negra; en oscuro, suelo negro y tinta blanca: el mismo extracto invertido, no un tema gris. Manda `prefers-color-scheme` salvo que el usuario fije claro u oscuro con el conmutador (sistema → claro → oscuro), que en el panel es un icono en la barra superior y en la landing un botón de texto «Tema: …»; un script previo fija `data-theme` antes del primer pintado para que no haya destello. Solo se mueve lo que informa (el destello de un precio que cambia, la barra de carga, el cursor del chat) y la cinta de la landing; los cambios de estado son instantáneos, sin transiciones.
 
 **Key Characteristics:**
-- Papel blanco y tinta negra; rojo señal solo en campos grandes y en cifras de bajada.
+- Papel y tinta en los dos temas: blanco y negro en claro, negro y blanco en oscuro.
+- Acciones, selección y foco en tinta; resaltar es invertir.
+- Rojo señal solo en dos campos: la marca del raíl y el bloque de acción de la landing. El rojo de dato significa bajada.
+- Todo veredicto lleva color direccional: verde comprar y acumular, rojo reducir y evitar, tinta mantener y esperar.
 - Una sola familia, Archivo variable, con la jerarquía hecha de anchura (74 % a 100 %) y peso (400 a 800); cifras tabulares en todo.
-- Rejilla de 12 columnas con bandera a la izquierda; filetes de 3 px entre bloques y de 1 px entre filas.
-- Esquinas rectas, sin sombras, sin degradados, sin iconos decorativos.
-- Resaltar es invertir: fondo tinta, texto papel.
-- La cinta de cotizaciones, de izquierda a derecha y con pausa, es el único movimiento continuo.
+- Filetes de 3 px que abren bloques y de 1 px entre filas; esquinas rectas; sin sombras, degradados ni desenfoques.
+- La cinta de cotizaciones es el único movimiento continuo que no informa de un estado.
 
 ## Colors
 
-Monocromo de papel y tinta con dos colores de dato: un rojo señal con presencia de sello y un verde que solo dice «sube».
+Monocromo de papel y tinta en dos temas, con un rojo de sello para la marca y la acción, y tres colores de dato: verde sube, rojo baja, ámbar avisa. Cada token claro tiene su pareja `-dark`; los componentes nombran el rol y el tema elige el valor.
 
 ### Primary
-- **Rojo señal** (#e2001a): campos grandes y nada más. Rellena el bloque de acción «Entrar al panel» (texto blanco, 4,9:1) y tiñe la palabra monumental del veredicto. Como color de dato, marca las variaciones negativas en la cinta.
+- **Tinta de acción** (`accent`, en oscuro `accent-dark`): botón primario, elemento de navegación activo (raíl y barra móvil), opción segmentada seleccionada, pestaña activa (filete inferior de 3 px), chip pulsado, conversación y OPV actuales, opción de la paleta de búsqueda, selección de texto, enlaces del texto del chat, barras de puntuación y gráfico de fiabilidad. Sobre ella, `accent-ink`. El anillo de foco (`focus`) y el filete fuerte (`line-strong`) comparten el valor de la tinta.
 
 ### Secondary
-- **Verde subida** (#127a3e): exclusivamente semántico. Variaciones positivas de la cinta (5,4:1 sobre papel) y el cuadrado de estado lleno («sí»: modelo cargado, ticks en vivo). Nunca decora.
+- **Rojo señal** (`signal`, igual en los dos temas, con texto `signal-ink`, 4,94:1): solo dos campos grandes. La marca «invest-ai» en el raíl del panel y el bloque de acción «Entrar al panel» de la landing (pie y cierre). No es texto, ni filete, ni borde, ni veredicto, ni error.
+
+### Tertiary
+- **Verde subida** (`up` / `up-dark`): sube, sí, comprar y acumular, escenario alcista, sentimiento positivo, estado correcto. 5,41:1 sobre papel y 8,91:1 sobre suelo negro; sobre su relleno `up-soft`, 4,64:1 y 6,51:1.
+- **Rojo bajada** (`down` / `down-dark`): baja, reducir y evitar, escenario bajista, sentimiento negativo. En claro comparte el hex con el rojo señal pero no el papel: es color de dato, en texto, barras y velas. En oscuro se aclara (6,46:1). Sobre `down-soft`, 4,56:1 en claro y 5,18:1 en oscuro.
+- **Ámbar aviso** (`warn` / `warn-dark`): avisos, errores y fallos, datos obsoletos, modo demostración, barra de riesgo y estado «en espera». Sobre `warn-soft`, 4,87:1 en claro y 6,9:1 en oscuro.
 
 ### Neutral
-- **Papel** (#ffffff): el fondo de todo el mundo, también la página y la barra de desplazamiento; texto sobre rojo y sobre tinta.
-- **Tinta** (#000000): texto principal, filetes de bloque de 3 px, borde del botón, anillo de foco y fondo de toda inversión (resalte, botón pulsado, selección, enlace de salto, bloque de acción al señalarlo).
-- **Tinta segunda** (#4a4a4a): texto secundario (lema, etiquetas de estado, procedencias, metadatos, cabeceras de tabla, variación plana); 8,9:1 sobre papel.
-- **Tinta tenue** (#737373): fuentes del índice con más de dos días; atenuadas pero legibles (4,7:1).
-- **Gris filete** (#d9d9d6): filetes de 1 px entre filas, separadores de celdas de la cinta y fondo del botón de contorno al señalarlo. No se usa para texto.
+- **Papel / suelo** (`bg`, `surface`): fondo de toda la app, de la barra de desplazamiento y de lo que flota; texto sobre tinta.
+- **Relleno** (`surface-2`): mensaje del usuario en el chat, código, aviso neutro, cita de evidencia.
+- **Señalado** (`hover`): fondo de filas, mosaicos y elementos de navegación al señalarlos, y fila de totales. En claro es un punto más suave que el relleno para que el rojo de las bajadas siga en 4,57:1; en oscuro es el relleno de chip, porque el relleno casi no se ve sobre negro. Es variable local del panel (`app.css`), no del contrato.
+- **Tinta** (`ink`): texto principal, filetes de 3 px, bordes de controles, fondo de toda inversión.
+- **Tinta segunda** (`ink-2`): texto secundario, cabeceras de tabla, etiquetas de la landing, chip atenuado (7,09:1 sobre su relleno en claro; 8,06:1 en oscuro) y fondo del botón primario al señalarlo.
+- **Tinta tenue** (`muted`): metadatos, procedencias, pistas, texto del buscador, fuentes con más de dos días. 5,33:1 sobre papel y 4,75:1 sobre relleno en claro; 6,25:1 en oscuro.
+- **Gris filete** (`line`): filetes de 1 px entre filas y celdas, pistas de barras, rejilla del gráfico, fondo del contorno al señalarlo. Nunca texto.
+- **Relleno de chip** (`accent-soft`): chips estáticos y esqueletos de carga.
 
 ### Named Rules
-**La regla del campo rojo.** El rojo señal ocupa superficies grandes (el bloque de acción, la palabra del veredicto) o tiñe cifras de bajada. No es color de texto corriente, de filetes, de bordes ni de adornos.
+**La regla de la tinta que actúa.** Toda acción, selección y foco va en tinta: negra en claro, blanca en oscuro. No hay color de acento: el rojo ya significa «baja».
 
-**La regla de la tinta invertida.** Resaltar es invertir: fondo tinta, texto papel. Así se marcan la cifra y la fuente activas, la fuente enlazada (`:target`), el botón pulsado y la selección de texto. No existe un color de resalte propio; dentro de una zona invertida, la tinta segunda pasa a papel y la tenue a gris filete.
+**La regla de la tinta invertida.** Resaltar es invertir: fondo tinta, texto papel. Dentro de una zona de tinta la selección de texto también se invierte, el foco pasa a `accent-ink` y lo atenuado toma el color del texto.
 
-**La regla del verde que dice sí.** El verde solo significa «sube» o «sí», y siempre acompañado de texto o de cifra.
+**La regla de los dos rojos.** El rojo señal es un campo de marca: el raíl y el bloque de acción, siempre con texto blanco. El rojo de dato (`down`) significa bajada y nada más. Ninguno de los dos marca un error ni una acción destructiva: borrar es una acción en tinta.
+
+**La regla del veredicto direccional.** Todo veredicto, del chip de una fila al monumental de la landing, lleva el color de su dirección: verde comprar y acumular, rojo reducir y evitar, tinta mantener y esperar.
+
+**La regla del ámbar.** Avisos, errores y fallos van en `warn` sobre `warn-soft`, nunca en rojo: un error no es una bajada.
 
 ## Typography
 
 **Display Font:** Archivo Variable (con Helvetica Neue, Helvetica, Arial, sans-serif)
 **Body Font:** Archivo Variable (la misma familia)
+**Label/Mono Font:** ui-monospace solo para el código y el registro de herramientas del chat
 
-**Character:** Una grotesca de anchura variable hace todo el trabajo: estrechada al 74 % y en negra 800 da el cuerpo monumental del símbolo y del veredicto; a anchura normal y peso 400 da el texto de lectura. Cifras tabulares en toda la página (`font-variant-numeric: tabular-nums` en la raíz), para que las columnas de números cuadren.
+**Character:** Una grotesca de anchura variable hace todo el trabajo: estrechada al 74 % y en negra 800 da el cuerpo monumental del símbolo y del veredicto; a anchura normal y peso 400 da el texto de lectura y la interfaz. Cifras tabulares en toda la app (`font-variant-numeric: tabular-nums` en la raíz de la landing y en el `body` del panel), para que las columnas de números cuadren.
 
 ### Hierarchy
-- **Wordmark** (800, 1.75rem, 1, anchura 88 %, -0.03em): el nombre «invest-ai» en la cabecera. Es el único logotipo; no hay imagen de marca.
-- **Display** (800, min(28cqi, 14rem), 0.84, anchura 74 %, -0.035em): el símbolo del activo, en tinta. El tamaño se mide contra su columna (contenedor) y contra su número de letras (`--lp-len`, ~0,6 em por letra) para no desbordar nunca.
-- **Display verdict** (800, min(17cqi, 8.4rem), 0.84, anchura 74 %): la palabra del veredicto, en rojo señal, ~60 % del símbolo. Sin `cqi`, ambos caen a clamp(3.5rem, 11vw, 6rem). El estado vacío usa el registro monumental reducido y en tinta (clamp(2.25rem, 5vw, 4rem), anchura 86 %, interlínea 0.95, equilibrado).
-- **Headline** (800, clamp(2rem, 3.6vw, 3rem), 1, anchura 92 %, -0.025em): titulares de sección bajo el pliegue, con `text-wrap: balance`.
-- **Figure** (600, hasta 3.5rem, 1, -0.02em, tabulares): las cuatro cifras del análisis. Se encogen con la columna (13cqi) y con la longitud del importe para no pasar del ~60 % de su columna. La unidad va en 15 px 400 tinta segunda; la referencia, en superíndice de 13 px 700 subrayado.
-- **CTA** (700, clamp(1.75rem, 2.6vw, 2.25rem), 1, -0.02em) y **CTA large** (700, clamp(2.5rem, 6vw, 4.5rem), -0.03em): el texto del bloque de acción, arriba a la izquierda del campo rojo.
-- **Title** (700, 1.5rem, 1.15, -0.01em): los pasos de «Cómo llega a cada cifra».
-- **Title small** (700, 1.25rem, 1.2, -0.01em): títulos de bloque menores («Fuentes de este análisis», «Backtest de la puntuación»).
-- **Lead** (400, 1.25rem, 1.4): el resumen del análisis, máximo 40rem; baja a 17 px en móvil.
-- **Body** (400, 1.0625rem, 1.5): texto de lectura, máximo 38rem en pasos y notas.
-- **UI** (400, 0.9375rem, 1.35) y **UI strong** (600, 0.9375rem, 1.4): lema, valores de estado, índice de fuentes, tabla, botones y enlaces de acción.
-- **Label** (600, 0.8125rem) y **Note** (400, 0.8125rem): etiquetas de dato (términos de estado, cabeceras de tabla) y metadatos (procedencia de una cifra, proveedor y antigüedad de una fuente).
+Landing:
+- **Wordmark** (800, 1.75rem, anchura 88 %): el nombre en la cabecera. En el raíl del panel, **Wordmark rail** (800, 1.25rem) dentro del campo rojo. No hay imagen de marca.
+- **Display** (800, min(28cqi, 14rem), 0.84, anchura 74 %): el símbolo del activo, en tinta, medido contra su columna y su número de letras (~0,6 em por letra).
+- **Display verdict** (800, min(17cqi, 8.4rem), anchura 74 %): la palabra del veredicto con su color direccional, ~60 % del símbolo. Sin `cqi`, ambos caen a clamp(3.5rem, 11vw, 6rem). El estado vacío usa el registro monumental reducido y en tinta.
+- **Headline** (800, clamp(2rem, 3.6vw, 3rem), anchura 92 %): titulares bajo el pliegue, equilibrados.
+- **Figure** (600, hasta 3.5rem, tabulares): las cuatro cifras del análisis, encogidas por columna y por longitud del importe.
+- **CTA** y **CTA large** (700): el texto del bloque de acción.
+- **Title** (700, 1.5rem) y **Title small** (700, 1.25rem): pasos y títulos de bloque menores.
+- **Lead** (400, 1.25rem, máximo 40rem): el resumen del análisis; 17 px en móvil.
 
-Escala de texto: 13 / 15 / 17 / 20 / 24 px, y por encima los registros fluidos de titular, CTA, cifra y monumental.
+Panel:
+- **Page title** (800, 1.75rem, 1.1, anchura 92 %): el título de cada página; en la ficha de activo sube a 1.9rem (1.6rem en móvil).
+- **Verdict** (800, 2.6rem, anchura 74 %): la palabra del veredicto en el informe, con su color direccional; 2.1rem en móvil.
+- **Price** (600, 2.6rem, tabulares): el precio grande de la ficha; 2.1rem en móvil.
+- **Section title** (700, 1rem, anchura 92 %): el título que acompaña al filete de 3 px de cada sección, con su pista en Meta a la derecha.
+
+Comunes:
+- **Body** (400, 1.0625rem, 1.5): texto de lectura; máximo 38rem en la landing y 52ch en el informe y el chat.
+- **UI** (400, 0.9375rem, 1.5) y **UI strong** (600): texto base del panel, botones, navegación, enlaces de acción. La landing aprieta la interlínea a 1.35 en el lema y el índice de fuentes.
+- **Label** (600, 0.8125rem) y **Note** (400, 0.8125rem): etiquetas de dato y metadatos de la landing; opciones segmentadas y botones pequeños del panel.
+- **Meta** (400, 0.75rem) y **Meta strong** (600, 0.75rem): procedencias, pistas, términos de pares clave-valor; chips y cabeceras de tabla del panel.
+
+Escala: 11 / 12 / 13 / 14 / 15 / 16 / 17 / 20 / 24 / 28 px, y por encima los registros de precio, veredicto, titular, CTA, cifra y monumental.
 
 ### Named Rules
-**La regla de una sola familia.** Todo es Archivo variable. La jerarquía sale de la anchura y del peso, nunca de una segunda familia.
+**La regla de una sola familia.** Todo es Archivo variable, en la landing y en el panel. La jerarquía sale de la anchura y del peso, nunca de una segunda familia.
 
 **La regla de la columna de cifras.** Toda cifra va en tabulares y alineada a la derecha de su columna. Lo monumental y las cifras se dimensionan contra su columna y su número de caracteres: ningún símbolo, veredicto ni importe desborda.
 
 ## Layout
 
-Rejilla de 12 columnas (`minmax(0, 1fr)`) con calle de 1.5rem y separación de filas de 2rem. El contenido se centra en un máximo de 90rem con margen lateral fluido (clamp(1rem, 3vw, 2rem)), pero los bloques no son contenedores: el relleno se calcula para centrar el contenido, de modo que el filete de 3 px de cada bloque corre de borde a borde de la ventana.
+**Landing.** Rejilla de 12 columnas (`minmax(0, 1fr)`) con calle de 1.5rem y separación de filas de 2rem, centrada en un máximo de 90rem con margen lateral fluido; los bloques no son contenedores, de modo que el filete de 3 px de cada bloque corre de borde a borde de la ventana. Repartos: principal 1–7 y lateral 9–12 (la 8 queda de aire), ancho 1–8 junto a la acción en 9–12, etiqueta 1–5 y cuerpo 6–12 bajo el pliegue. La primera pantalla ocupa 100dvh: cabecera con estado y conmutador de tema, cinta a todo el ancho, análisis que crece, y al pie el índice de fuentes junto al bloque de acción. Hasta 72rem el índice pasa a una columna; hasta 56rem la rejilla es de una columna y la cabecera se apila. En el DOM la acción va antes que el índice, para que en móvil coincidan el orden visual y el del foco.
 
-Repartos de columnas: principal 1–7 y lateral 9–12 (la columna 8 queda vacía como aire entre el monumental y las cifras); ancho 1–8 junto a la acción en 9–12; etiqueta 1–5 y cuerpo 6–12 bajo el pliegue. Bandera a la izquierda: nada se centra; las cifras se alinean a la derecha de su columna.
+**Panel.** El Shell es una rejilla: raíl fijo de 13rem a la izquierda (marca, navegación y, en modo demostración, el chip «Datos simulados»), barra superior fija de 3.25rem (buscador, menú de estado y conmutador de tema), pie fijo de 1.75rem con el aviso legal, y el contenido con 1.25rem de relleno en una página de hasta 90rem. Las secciones se apilan a 1.5rem; las rejillas de 2 y 3 columnas y la de principal más lateral de 22rem separan a 1.25rem. Cada sección se abre con un filete de 3 px y una fila de título; dentro, las filas se separan con filetes de 1 px. Bandera a la izquierda; las cifras se alinean a la derecha. El modo demostración añade una franja ámbar a todo el ancho bajo la barra superior.
 
-Cada bloque empieza con su filete y un relleno superior de 1.5rem (1rem en los bloques de la primera pantalla, 2rem bajo el pliegue) y cierra con 3rem. La primera pantalla ocupa 100dvh: cabecera con estado, cinta a todo el ancho, análisis que crece para llenar el alto, y al pie el índice de fuentes junto al bloque de acción. Bajo el pliegue, el titular de «Cómo llega a cada cifra» se queda fijo (sticky a 1.5rem) mientras se leen sus pasos.
-
-Responsive: hasta 72rem el índice de fuentes pasa de dos columnas (que se leen de arriba abajo) a una y el bloque de acción sube al inicio de su fila; hasta 56rem la rejilla es de una columna, la cabecera se apila, el estado se compacta en una línea por dato, el bloque de acción del pie baja a 6rem de alto mínimo y el de cierre a 10rem. En el DOM la acción va antes que el índice, para que en móvil el orden visual y el del foco coincidan.
+Responsive del panel: hasta 1100px la lateral y el calendario de OPV bajan a una columna; hasta 880px el raíl desaparece y la navegación pasa a una barra inferior fija de 3.5rem con siete iconos y etiqueta corta, el relleno baja a 0.9rem 0.75rem y el chat muestra la lista o el hilo; hasta 760px las rejillas de 2 y 3 columnas pasan a una; hasta 520px el selector de profundidad ocupa todo el ancho.
 
 ## Elevation & Depth
 
-Plano por completo: ni sombras, ni degradados, ni desenfoques, ni capas translúcidas. La estructura se lee por filetes (3 px de tinta entre bloques, 1 px gris entre filas y celdas) y por inversión de tinta y papel. El único apilamiento es funcional: los controles de la cinta quedan por encima de la pista que pasa por debajo.
+Plano por completo, en los dos temas: ni sombras, ni degradados, ni desenfoques. La estructura se lee por filetes (3 px de tinta que abren bloques, 1 px de gris entre filas) y por inversión de tinta y papel. Lo que flota (la paleta de búsqueda, el menú de estado) se separa con un filete superior de 3 px y un filete de tinta de 1 px alrededor; el velo de la paleta es papel al 72 % sin desenfoque. El apilamiento restante es funcional: raíl, barra superior, pie y barra móvil fijos, y los controles de la cinta por encima de su pista.
+
+### Shadow Vocabulary
+- **Filete flotante** (`box-shadow: 0 0 0 1px var(--ink)`): el único valor de `--shadow-pop`. Es un filete, no una sombra; solo para paleta y menús emergentes.
 
 ### Named Rules
 **La regla del papel plano.** Nada flota. Si algo tiene que destacar, se invierte o se agranda; no se eleva.
 
 ## Shapes
 
-Ángulo recto en todo: radio 0 en botones, campos, celdas y también en el anillo de foco. La forma la ponen los filetes horizontales, que separan sin encerrar (no hay tarjetas con borde a cuatro lados, salvo el botón de contorno). El único signo gráfico es un cuadrado de 0.5rem con borde de 2 px: lleno en verde para «sí», hueco con borde de tinta segunda para «no», siempre junto a su texto. Los enlaces se marcan con subrayado (desplazado 0.2em; 2 px al señalar un símbolo de la cinta).
+Ángulo recto en todo (`--radius: 0`): botones, campos, chips, segmentados, celdas, cuadrados de estado y anillo de foco. Los filetes horizontales separan sin encerrar: no hay tarjetas con borde a cuatro lados. El contorno de 1 px a cuatro lados es exclusivo de lo que se pulsa o se escribe (botones, chips pulsables, segmentados, campos, buscador, `kbd`).
+
+Signos gráficos: el cuadrado de estado, nunca un círculo (0.5rem con borde de 2 px en la landing: lleno en verde «sí», hueco «no»; 0.55rem lleno en el panel: verde correcto, ámbar fallo (nunca rojo: un fallo no es una bajada), tenue en espera), siempre junto a su texto. El panel usa iconos lineales funcionales (Lucide, de 0.8 a 1.25rem, en el color del texto): navegación, botones de solo icono con nombre accesible, avisos, y flechas de variación que acompañan al signo y al color. La landing no usa iconos. Los enlaces se marcan con subrayado.
 
 ### Named Rules
 **La regla del ángulo recto.** Ninguna esquina se redondea, ni siquiera la del foco.
@@ -267,52 +508,81 @@ Plano por completo: ni sombras, ni degradados, ni desenfoques, ni capas translú
 ## Components
 
 ### Buttons
-Sobrios y rectos: un campo rojo para la acción principal, un contorno de tinta para controlar, un subrayado para reintentar.
-- **Shape:** esquinas rectas (0px).
-- **Bloque de acción (primario):** campo rojo señal con texto blanco en 700, alineado arriba a la izquierda, 1.25rem de relleno, 9rem de alto en el pie y 14rem (10rem en móvil) en el cierre, con el texto en el registro CTA large. Es un enlace a `/dashboard`, no un botón con forma de píldora.
-- **Hover / Focus:** al señalarlo el campo pasa a tinta, sin transición. El foco es un anillo blanco de 3 px metido hacia dentro (desplazamiento -0.6rem) para verse sobre el rojo.
-- **Contorno (secundario):** «Pausar cinta». Borde de 1 px tinta, fondo transparente, 600 a 15 px, 2.4rem de alto. Al señalarlo, fondo gris filete; pulsado (`aria-pressed`), fondo tinta y texto papel; pulsado y señalado, fondo tinta segunda.
-- **Enlace de acción (terciario):** «Reintentar». Sin caja, 600 a 15 px, subrayado.
+Sobrios y rectos, en tinta: un relleno para la acción principal, un contorno para lo demás.
+- **Shape:** esquinas rectas (0px); 2.1rem de alto (1.75rem el pequeño, 2.4rem en la landing).
+- **Primario:** relleno de tinta con texto `accent-ink` en 600; al señalarlo, tinta segunda. Deshabilitado, al 50 % de opacidad.
+- **Contorno:** borde de 1 px de tinta, fondo de papel, texto en tinta; al señalarlo, gris filete; pulsado (`aria-pressed`), tinta con texto papel. En la landing es «Pausar cinta» y «Tema: …».
+- **Fantasma:** sin borde ni fondo, hereda el color: sobre tinta, papel. Es el de los botones de solo icono (conmutador de tema, fijar y borrar conversación). Borrar es tinta, no rojo.
+- **Bloque de acción (landing):** campo de rojo señal con texto blanco en 700, alineado arriba a la izquierda, 9rem de alto en el pie y 14rem (10rem en móvil) al cierre. Al señalarlo se invierte a tinta, sin transición; el foco es un anillo blanco de 3 px metido hacia dentro.
+- **Focus:** anillo de 3 px en `focus`, recto, separado 2 px en el panel y 3 px en la landing; hacia dentro (-3 px) en segmentados, pestañas y celdas de la cinta; en `accent-ink` sobre tinta.
 
-### Cinta de cotizaciones (firma)
-- **Estructura:** a todo el ancho bajo la cabecera, 4.25rem de alto mínimo. A la izquierda, alineados con el margen de la página, el botón de pausa y el indicador «En vivo» con su cuadrado; a la derecha, celdas de ancho fijo de 13rem separadas por filetes grises de 1 px: símbolo en 700, variación en 600 a 15 px a la derecha (verde, rojo o tinta segunda), precio en 600 a 1.25rem.
-- **Movimiento:** avanza de izquierda a derecha, lineal y sin fin, a 3.5 rem/s, con dos mitades idénticas para que el bucle no tenga costura. Solo anima `transform`. Se detiene al señalarla, con el botón de pausa y con el foco dentro (entonces pasa a desplazamiento horizontal y la celda enfocada se ve entera). Con «reducir movimiento» no se mueve, se recorre con scroll y el botón de pausa desaparece.
-- **Estados:** sin precio, «—» o «sin precio» en tinta segunda; si falla la carga, aviso con filete superior y enlace «Reintentar».
+### Chips
+- **Estáticos:** rellenos, sin filete, 600 a 12 px: `accent-soft` con tinta (clase, mercado, contexto), atenuado en `ink-2`, y en `up-soft`, `down-soft` o `warn-soft` con su color para veredictos y estados.
+- **Pulsables** (enlace o botón): papel con filete de 1 px de tinta; al señalarlos, gris filete; activos, rellenos de tinta con texto `accent-ink`. El filete es la señal de que se pulsan.
 
-### Columna de cifras (firma)
-- **Estructura:** lista de definición de cuatro filas separadas por filetes de 1 px. A la izquierda, la etiqueta en 600 a 15 px y debajo su procedencia en 13 px tinta segunda; a la derecha, la cifra en el registro Figure, con unidad y referencia en superíndice.
-- **Interacción:** señalar o enfocar una cifra con fuente invierte su fila y la fila de su fuente en el índice; señalar una fuente invierte la cifra que la cita. Seguir la referencia lleva a la fuente, que queda invertida por `:target`.
+### Segmentados y pestañas
+- **Segmentado:** contorno de tinta que recorta, opciones en 600 a 13 px separadas por filetes de 1 px; seleccionada, invertida; foco hacia dentro y en `accent-ink` sobre la opción invertida.
+- **Pestañas:** sin caja, texto tenue en 600; la activa pasa a tinta con filete inferior de 3 px de tinta, sobre un filete de 1 px que recorre la fila.
 
-### Índice de fuentes
-- **Style:** lista numerada en dos columnas que se leen de arriba abajo (una por debajo de 72rem). Número en 700, título en 15 px truncado con puntos suspensivos en escritorio, y debajo proveedor y antigüedad en 13 px tinta segunda. Filete superior de 1 px por fila.
-- **State:** una fuente con más de dos días pasa entera a tinta tenue; activa o enlazada, se invierte.
+### Inputs / Fields
+- **Style:** papel, contorno de 1 px de tinta, recto, 0.45rem 0.65rem de relleno. El buscador de la barra superior es un campo falso de 2.25rem con texto tenue y atajo `kbd` con su propio contorno.
+- **Focus:** el anillo común; en la paleta de búsqueda el filete inferior pasa de 1 a 3 px de `focus`, sin anillo.
 
-### Estado local
-- **Style:** en la cabecera, pares término y valor: término en 13 px 600 tinta segunda, valor en 15 px con el cuadrado de estado delante. En móvil, término y valor en la misma línea.
+### Navigation
+- **Raíl:** marca en campo de rojo señal arriba; enlaces en 600 con icono, tinta segunda; al señalarlos, fondo `hover` y tinta; el actual, invertido en tinta.
+- **Barra móvil:** siete columnas con icono y etiqueta de 11 px en tenue; la actual, invertida.
+- **Barra superior:** papel con filete inferior de 1 px; buscador, menú de estado (contorno con cuadrado de estado) y conmutador de tema.
 
 ### Tablas
-- **Style:** a ancho completo, filas separadas por filetes de 1 px (con filete también al final), cabeceras de columna en 13 px 600 tinta segunda sin filete, cabeceras de fila en 700. Sin bandas de color ni bordes verticales.
+- **Style:** a ancho completo; cabeceras de columna en 600 a 12 px tinta segunda sobre un filete de tinta; filas separadas por filetes de 1 px; cifras a la derecha; al señalar una fila, fondo `hover`; fila de totales en `hover` y 700. Sin bandas ni bordes verticales. En la landing, cabeceras sin filete y filete también al final.
 
-### Lista de pasos
-- **Style:** filas separadas por filetes de 1 px, título de paso en el registro Title y texto de lectura debajo; la prueba en vivo (notas de calidad reales) se añade bajo su paso tras un filete de 1 px.
+### Avisos
+- **Neutro:** relleno `surface-2`, 14 px, icono a la izquierda.
+- **Aviso:** ámbar sobre `warn-soft`.
+- **Error:** `warn-soft` con filete superior de 3 px de ámbar e icono ámbar; el texto queda en tinta.
+- **Modo demostración:** franja ámbar de 13 px en 600 bajo la barra superior y chip ámbar en el raíl.
+
+### Veredicto (firma)
+- **Panel:** bloque abierto por filete de 3 px: palabra en el registro Verdict con su color direccional y, a su lado, una escala de seis tramos (pista gris filete, tramo activo en el color del veredicto o en tinta) con sus etiquetas en 11 px.
+- **Landing:** la palabra monumental bajo el símbolo, con el mismo color direccional.
+- **Chips de veredicto:** relleno suave y texto del color de la dirección; mantener y esperar en el chip neutro.
+
+### Cinta de cotizaciones (firma de la landing)
+- **Estructura:** a todo el ancho bajo la cabecera, 4.25rem de alto mínimo; a la izquierda, el botón de pausa y «En vivo» con su cuadrado; a la derecha, celdas de 13rem separadas por filetes de 1 px: símbolo en 700, variación en 600 (verde, rojo o tinta segunda), precio en 600 a 1.25rem.
+- **Movimiento:** de izquierda a derecha, lineal y sin fin, a 3.5 rem/s, con dos mitades idénticas; solo anima `transform`. Se detiene al señalarla, con su botón y con el foco dentro (entonces pasa a desplazamiento horizontal). Con «reducir movimiento» no se mueve y el botón desaparece.
+
+### Columna de cifras e índice de fuentes (firma de la landing)
+- **Cifras:** cuatro filas separadas por filetes de 1 px: etiqueta en 600 y su procedencia debajo, cifra en el registro Figure con unidad y referencia en superíndice.
+- **Índice:** lista numerada en dos columnas que se leen de arriba abajo; una fuente con más de dos días pasa a tinta tenue.
+- **Interacción:** señalar una cifra invierte su fila y la de su fuente, y viceversa; la fuente enlazada queda invertida por `:target`.
+
+### Precio en vivo y gráficos (panel)
+- **Destello:** al cambiar un precio, su fondo se tiñe un instante del verde o rojo de dato al 20 % y se apaga en 0.9 s; la variación lleva signo y flecha.
+- **Gráfico:** fondo `surface`, rejilla `line`, texto `ink-2` y velas y volumen en `up` y `down`, leídos de los tokens.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** empezar cada bloque con un filete de tinta de 3 px de borde a borde y separar cada fila con un filete gris de 1 px (#d9d9d6).
-- **Do** poner cada cifra en tabulares, alineada a la derecha de su columna, con su procedencia bajo la etiqueta y su referencia en superíndice cuando tenga fuente.
-- **Do** resaltar invirtiendo tinta y papel, nunca con un color nuevo.
-- **Do** acompañar siempre el cuadrado de estado con texto: lleno en verde para «sí», hueco para «no».
-- **Do** dar a todo lo enfocable un anillo de tinta de 3 px separado 3 px y con esquinas rectas; sobre rojo, blanco y hacia dentro.
+- **Do** abrir cada bloque con un filete de tinta de 3 px y separar cada fila con un filete de 1 px en `line`.
+- **Do** usar los tokens de `tokens.css` por su rol, nunca un hex fijo, y comprobar cada superficie nueva en claro y en oscuro.
+- **Do** poner cada cifra en tabulares, alineada a la derecha de su columna, con su procedencia cerca y su referencia cuando tenga fuente.
+- **Do** resaltar invirtiendo tinta y papel; dentro de una zona invertida, invertir también la selección y el foco.
+- **Do** colorear todo veredicto por su dirección: verde comprar y acumular, rojo reducir y evitar, tinta mantener y esperar.
+- **Do** acompañar cada color de dato con texto, signo o flecha, y cada cuadrado de estado con su texto.
+- **Do** llevar avisos y errores en ámbar sobre `warn-soft`; el error abre con filete de 3 px de ámbar.
+- **Do** rellenar sin filete los chips estáticos y dar filete de tinta a los que se pulsan.
+- **Do** dar a todo lo enfocable un anillo de 3 px en `focus` con esquinas rectas; hacia dentro donde el contenedor recorta y en `accent-ink` sobre tinta.
 - **Do** dimensionar lo monumental y las cifras contra su columna y su número de caracteres, para que nada desborde.
 - **Do** detener la cinta con «reducir movimiento», al señalarla, al enfocarla y con su botón de pausa.
 
 ### Don't:
-- **Don't** usar el rojo señal para texto corriente, filetes, bordes o adornos: solo campos grandes y cifras de bajada.
+- **Don't** usar el rojo señal fuera de la marca del raíl y el bloque de acción: ni texto, ni filetes, ni bordes, ni veredictos, ni errores.
+- **Don't** usar rojo para un aviso, un error o una acción de borrar: en este mundo el rojo significa bajada.
+- **Don't** introducir un color de acento, azul ni de ningún otro tono, para acciones, enlaces, selección o foco: es tinta.
 - **Don't** añadir sombras, degradados, desenfoques ni esquinas redondeadas.
-- **Don't** introducir una segunda familia tipográfica, tampoco las de las superficies de la app (Geist, Newsreader), ni su acento azul.
-- **Don't** añadir iconos decorativos: el único signo gráfico es el cuadrado de estado, y siempre lleva texto.
-- **Don't** usar el estilo de etiqueta (13 px, 600) como antetítulo sobre un titular: solo nombra un dato (término de estado, cabecera de tabla).
+- **Don't** introducir una segunda familia tipográfica.
+- **Don't** añadir iconos decorativos ni usar círculos como marca de estado: solo iconos lineales funcionales junto a su texto o con nombre accesible, y el cuadrado.
+- **Don't** usar el estilo de etiqueta como antetítulo sobre un titular: solo nombra un dato.
 - **Don't** centrar titulares ni bloques de texto.
-- **Don't** añadir un segundo movimiento continuo: la cinta es el único.
-- **Don't** dar a este mundo un tema oscuro: es papel.
+- **Don't** añadir un movimiento continuo que no informe de un estado: la cinta es el único.
+- **Don't** fijar un color de tema en un componente: los dos temas salen del mismo contrato.

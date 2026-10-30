@@ -312,13 +312,13 @@ function WatchlistPanel({ w }: { w: WatchlistStatus }) {
         <p className="small">
           Última pasada: <strong>{formatDateTime(run.startedAt)}</strong>
           {run.status === 'missed'
-            ? <span className="down"> · perdida: llegó la apertura sin completar la pasada (equipo apagado o Ollama sin responder)</span>
-            : <> · {run.ok} correctos{run.failed > 0 ? <>, <strong className="down">{run.failed} con fallo</strong></> : null}</>}
+            ? <span className="warn-text"> · perdida: llegó la apertura sin completar la pasada (equipo apagado o Ollama sin responder)</span>
+            : <> · {run.ok} correctos{run.failed > 0 ? <>, <strong className="warn-text">{run.failed} con fallo</strong></> : null}</>}
           {run.finishedAt && run.status !== 'missed' ? <span className="muted"> · duró {formatSpan((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000)}</span> : null}
           {late ? <span className="muted"> · recuperada: tocaba a las {formatDateTime(run.scheduledFor)}</span> : null}
           {run.powerWaitSecs > 0 ? <span className="muted"> · esperó {formatSpan(run.powerWaitSecs)} a que se enchufara el equipo</span> : null}
-          {run.status === 'aborted' ? <span className="down"> · abortada (Ollama o el mercado no respondían, o se cerró la ventana); lo pendiente se reintenta mientras siga abierta</span> : null}
-          {run.status === 'interrupted' ? <span className="down"> · interrumpida al apagar el servidor</span> : null}
+          {run.status === 'aborted' ? <span className="warn-text"> · abortada (Ollama o el mercado no respondían, o se cerró la ventana); lo pendiente se reintenta mientras siga abierta</span> : null}
+          {run.status === 'interrupted' ? <span className="warn-text"> · interrumpida al apagar el servidor</span> : null}
         </p>
       ) : (
         <p className="small muted">Todavía no se ha hecho ninguna pasada.</p>
@@ -338,7 +338,7 @@ function WatchlistPanel({ w }: { w: WatchlistStatus }) {
                     {a.last === null ? <span className="muted">Sin intentos</span>
                       : a.last.status === 'ok' ? <span className="up">Correcto</span>
                       : a.last.status === 'skipped' ? <span className="muted">{a.last.errorCode === 'missed' ? 'Ventana perdida' : 'No intentado'}</span>
-                      : <span className="down">Falló</span>}
+                      : <span className="warn-text">Falló</span>}
                     {a.last ? <span className="small muted"> · {formatRelative(a.last.finishedAt)}</span> : null}
                   </td>
                   <td>{a.last?.verdict ? verdictName(a.last.verdict) : '—'}</td>

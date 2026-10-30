@@ -66,7 +66,7 @@ function Loaded({ loaded, models }: { loaded: LoadedModel[]; models: LlmModel[] 
         return (
           <li key={l.id}>
             <strong>{name}</strong>: <span className="num">{pct} % en GPU</span> ({gb(l.sizeVram / 2 ** 30)} en VRAM de {gb(l.size / 2 ** 30)})
-            {pct < 100 ? <span className="down"> — el resto va en CPU, más lento. «Forzar todas las capas en GPU» (en la tarjeta del modelo) lo evita si cabe.</span> : null}
+            {pct < 100 ? <span className="warn-text"> — el resto va en CPU, más lento. «Forzar todas las capas en GPU» (en la tarjeta del modelo) lo evita si cabe.</span> : null}
           </li>
         )
       })}

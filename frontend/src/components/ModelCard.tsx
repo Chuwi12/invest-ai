@@ -84,7 +84,7 @@ export const ModelCard = memo(function ModelCard({ model: m, hardware, pull, bus
         <span aria-hidden="true">{fit.kind === 'vram' ? '●' : fit.kind === 'no' ? '○' : '◐'}</span>
         <span>
           {fit.text}
-          {fit.note ? <span className="down"> {fit.note}</span> : null}
+          {fit.note ? <span className="warn-text"> {fit.note}</span> : null}
         </span>
       </div>
 

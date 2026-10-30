@@ -144,9 +144,10 @@ export default function ChatPage() {
         <div className="msgs" ref={scroller} role="log" aria-live="polite" aria-label="Mensajes">
           {cid && thread.isPending ? <SkeletonRows rows={3} h="3rem" /> : null}
           {cid && thread.isError ? <ErrorNotice error={thread.error} onRetry={() => void thread.refetch()} title="No se pudo abrir la conversación" /> : null}
-          {empty && !thread.isPending ? (
+          {/* Sin `cid` la query está desactivada y sigue en `isPending`: el estado vacío no puede esperar a ella. */}
+          {empty && !(cid && thread.isPending) ? (
             <div className="stack" style={{ margin: 'auto', maxWidth: '34rem', textAlign: 'center', alignItems: 'center' }}>
-              <h1 style={{ font: '500 1.6rem/1.2 var(--font-prose)' }}>Pregunta sobre cualquier activo</h1>
+              <h1>Pregunta sobre cualquier activo</h1>
               <p className="muted small">
                 El modelo local consulta datos en vivo (cotización, indicadores, fundamentales, noticias, macro) y te muestra qué ha consultado y de dónde.
                 {ctxIds.length ? ` Contexto: ${ctxIds.map(symbolOf).join(', ')}.` : ''}

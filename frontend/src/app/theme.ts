@@ -1,3 +1,4 @@
+import { Monitor, Moon, Sun } from 'lucide-react'
 import { useCallback, useSyncExternalStore } from 'react'
 
 export type ThemePref = 'system' | 'light' | 'dark'
@@ -53,6 +54,10 @@ export function useTheme(): [ThemePref, (p: ThemePref) => void] {
 export function nextTheme(p: ThemePref): ThemePref {
   return p === 'system' ? 'light' : p === 'light' ? 'dark' : 'system'
 }
+
+/** Nombre accesible y icono del conmutador, compartidos por el panel (Shell) y la landing. */
+export const THEME_LABEL = { system: 'Tema: automático', light: 'Tema: claro', dark: 'Tema: oscuro' } as const
+export const THEME_ICON = { system: Monitor, light: Sun, dark: Moon } as const
 
 const dark = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null
 

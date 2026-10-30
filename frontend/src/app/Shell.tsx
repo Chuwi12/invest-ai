@@ -1,10 +1,10 @@
-import { Gauge, History, LayoutDashboard, MessageSquare, Monitor, Moon, Rocket, Search, Settings, Star, Sun } from 'lucide-react'
+import { Gauge, History, LayoutDashboard, MessageSquare, Rocket, Search, Settings, Star } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { SkeletonRows } from '@/components/states'
 import { IS_MOCK } from '@/lib/env'
 import { StatusMenu } from './StatusMenu'
-import { nextTheme, useTheme } from './theme'
+import { THEME_ICON, THEME_LABEL, nextTheme, useTheme } from './theme'
 
 const SearchPalette = lazy(() => import('./SearchPalette').then((m) => ({ default: m.SearchPalette })))
 
@@ -20,9 +20,6 @@ const NAV = [
 
 /** Etiquetas más cortas para la barra móvil (7 columnas a 400 px). */
 const MOBILE_LABEL: Record<string, string> = { 'Modelos de IA': 'Modelos', Rendimiento: 'Rendim.' }
-
-const THEME_LABEL = { system: 'Tema: automático', light: 'Tema: claro', dark: 'Tema: oscuro' } as const
-const THEME_ICON = { system: Monitor, light: Sun, dark: Moon } as const
 
 export function Shell() {
   const [searchOpen, setSearchOpen] = useState(false)

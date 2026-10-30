@@ -1,40 +1,10 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-27T14:52:56+01:00",
+  "generatedAt": "2026-10-30T14:22:48+01:00",
   "title": "Design System: invest-ai",
   "extensions": {
     "colorMeta": {
-      "red": {
-        "role": "primary",
-        "displayName": "Rojo señal",
-        "canonical": "#e2001a",
-        "tonalRamp": [
-          "#1f0001",
-          "#4c0305",
-          "#7f050c",
-          "#b51219",
-          "#e92e2f",
-          "#fd756a",
-          "#feb3aa",
-          "#ffe9e6"
-        ]
-      },
-      "up": {
-        "role": "secondary",
-        "displayName": "Verde subida",
-        "canonical": "#127a3e",
-        "tonalRamp": [
-          "#001004",
-          "#022e13",
-          "#065026",
-          "#0f743b",
-          "#4b9561",
-          "#7cb58a",
-          "#acd5b5",
-          "#dcf6e2"
-        ]
-      },
-      "paper": {
+      "bg": {
         "role": "neutral",
         "displayName": "Papel",
         "canonical": "#ffffff",
@@ -48,6 +18,52 @@
           "#c9c9c9",
           "#eeeeee"
         ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Superficie",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Relleno",
+        "canonical": "#f2f2f0",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#252524",
+          "#424240",
+          "#616160",
+          "#828281",
+          "#a5a5a3",
+          "#c9c9c8",
+          "#eeeeee"
+        ]
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Señalado",
+        "canonical": "color-mix(in srgb, var(--surface-2) 70%, var(--bg))",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#252524",
+          "#424240",
+          "#616160",
+          "#828281",
+          "#a5a5a3",
+          "#c9c9c8",
+          "#eeeeee"
+        ],
+        "approximation": "#f6f6f4"
       },
       "ink": {
         "role": "neutral",
@@ -79,10 +95,10 @@
           "#eeeeee"
         ]
       },
-      "faint": {
+      "muted": {
         "role": "neutral",
         "displayName": "Tinta tenue",
-        "canonical": "#737373",
+        "canonical": "#6b6b6b",
         "tonalRamp": [
           "#0b0b0b",
           "#252525",
@@ -94,204 +110,797 @@
           "#eeeeee"
         ]
       },
-      "rule": {
+      "line": {
         "role": "neutral",
         "displayName": "Gris filete",
         "canonical": "#d9d9d6",
         "tonalRamp": [
-          "#0b0b0b",
-          "#252524",
-          "#424241",
-          "#616160",
+          "#0b0b0a",
+          "#252523",
+          "#424240",
+          "#61615f",
           "#828280",
           "#a5a5a3",
-          "#c9c9c6",
-          "#efefec"
+          "#c9c9c7",
+          "#eeeeee"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Filete fuerte",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Tinta de acción",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Texto sobre tinta",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "accent-soft": {
+        "role": "neutral",
+        "displayName": "Relleno de chip",
+        "canonical": "#e6e6e3",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#252523",
+          "#424240",
+          "#61615f",
+          "#828280",
+          "#a5a5a3",
+          "#c9c9c7",
+          "#eeeeee"
+        ]
+      },
+      "focus": {
+        "role": "primary",
+        "displayName": "Anillo de foco",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "signal": {
+        "role": "secondary",
+        "displayName": "Rojo señal",
+        "canonical": "#e2001a",
+        "tonalRamp": [
+          "#1f0001",
+          "#4d0003",
+          "#7e090e",
+          "#b80113",
+          "#ee2027",
+          "#fd756a",
+          "#feb3aa",
+          "#fee9e6"
+        ]
+      },
+      "signal-ink": {
+        "role": "secondary",
+        "displayName": "Texto sobre rojo señal",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "up": {
+        "role": "tertiary",
+        "displayName": "Verde subida",
+        "canonical": "#127a3e",
+        "tonalRamp": [
+          "#001004",
+          "#012e13",
+          "#015025",
+          "#067539",
+          "#3a985a",
+          "#6bb981",
+          "#a4d8b0",
+          "#e2f4e6"
+        ]
+      },
+      "up-soft": {
+        "role": "tertiary",
+        "displayName": "Relleno de subida",
+        "canonical": "#e3f1e8",
+        "tonalRamp": [
+          "#080d09",
+          "#1f2822",
+          "#3a453e",
+          "#59655d",
+          "#79867e",
+          "#9da8a1",
+          "#c3cbc6",
+          "#ecefed"
+        ]
+      },
+      "down": {
+        "role": "tertiary",
+        "displayName": "Rojo bajada",
+        "canonical": "#e2001a",
+        "tonalRamp": [
+          "#1f0001",
+          "#4d0003",
+          "#7e090e",
+          "#b80113",
+          "#ee2027",
+          "#fd756a",
+          "#feb3aa",
+          "#fee9e6"
+        ]
+      },
+      "down-soft": {
+        "role": "tertiary",
+        "displayName": "Relleno de bajada",
+        "canonical": "#fff3f4",
+        "tonalRamp": [
+          "#0e0a0a",
+          "#2a2324",
+          "#493f40",
+          "#685e5f",
+          "#8a7f80",
+          "#aca2a3",
+          "#cec7c8",
+          "#f0eeee"
+        ]
+      },
+      "warn": {
+        "role": "tertiary",
+        "displayName": "Ámbar aviso",
+        "canonical": "#8a5a00",
+        "tonalRamp": [
+          "#130900",
+          "#352001",
+          "#5b3a02",
+          "#845706",
+          "#a9772e",
+          "#c99c5f",
+          "#e3c39b",
+          "#f8edde"
+        ]
+      },
+      "warn-soft": {
+        "role": "tertiary",
+        "displayName": "Relleno de aviso",
+        "canonical": "#f5e8c8",
+        "tonalRamp": [
+          "#0f0a02",
+          "#2d240e",
+          "#4c4126",
+          "#6c6044",
+          "#8d8164",
+          "#afa48a",
+          "#d0c9b6",
+          "#f1eee8"
+        ]
+      },
+      "bg-dark": {
+        "role": "neutral",
+        "displayName": "Papel (oscuro)",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Superficie (oscuro)",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "surface-2-dark": {
+        "role": "neutral",
+        "displayName": "Relleno (oscuro)",
+        "canonical": "#161616",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "hover-dark": {
+        "role": "neutral",
+        "displayName": "Señalado (oscuro)",
+        "canonical": "#262626",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "ink-dark": {
+        "role": "neutral",
+        "displayName": "Tinta (oscuro)",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "ink-2-dark": {
+        "role": "neutral",
+        "displayName": "Tinta segunda (oscuro)",
+        "canonical": "#bdbdbd",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "muted-dark": {
+        "role": "neutral",
+        "displayName": "Tinta tenue (oscuro)",
+        "canonical": "#8c8c8c",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "line-dark": {
+        "role": "neutral",
+        "displayName": "Gris filete (oscuro)",
+        "canonical": "#333333",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "line-strong-dark": {
+        "role": "neutral",
+        "displayName": "Filete fuerte (oscuro)",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "accent-dark": {
+        "role": "primary",
+        "displayName": "Tinta de acción (oscuro)",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "accent-ink-dark": {
+        "role": "primary",
+        "displayName": "Texto sobre tinta (oscuro)",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "accent-soft-dark": {
+        "role": "neutral",
+        "displayName": "Relleno de chip (oscuro)",
+        "canonical": "#262626",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "focus-dark": {
+        "role": "primary",
+        "displayName": "Anillo de foco (oscuro)",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "up-dark": {
+        "role": "tertiary",
+        "displayName": "Verde subida (oscuro)",
+        "canonical": "#3fbf72",
+        "tonalRamp": [
+          "#001004",
+          "#022e15",
+          "#055028",
+          "#0d743e",
+          "#169b54",
+          "#54be7a",
+          "#98dcac",
+          "#dff5e4"
+        ]
+      },
+      "up-soft-dark": {
+        "role": "tertiary",
+        "displayName": "Relleno de subida (oscuro)",
+        "canonical": "#0f2a1b",
+        "tonalRamp": [
+          "#030e07",
+          "#142b1e",
+          "#2e4939",
+          "#4d6957",
+          "#6d8b78",
+          "#92ad9b",
+          "#bccfc2",
+          "#eaf0ec"
+        ]
+      },
+      "down-dark": {
+        "role": "tertiary",
+        "displayName": "Rojo bajada (oscuro)",
+        "canonical": "#ff4d5a",
+        "tonalRamp": [
+          "#1f0002",
+          "#4c020d",
+          "#7f041c",
+          "#b50d2c",
+          "#e63246",
+          "#fe7275",
+          "#ffb2b0",
+          "#ffe9e7"
+        ]
+      },
+      "down-soft-dark": {
+        "role": "tertiary",
+        "displayName": "Relleno de bajada (oscuro)",
+        "canonical": "#3a0d12",
+        "tonalRamp": [
+          "#190405",
+          "#3e171a",
+          "#623134",
+          "#855052",
+          "#a97172",
+          "#c99696",
+          "#e4bfbf",
+          "#f8ebeb"
+        ]
+      },
+      "warn-dark": {
+        "role": "tertiary",
+        "displayName": "Ámbar aviso (oscuro)",
+        "canonical": "#e6b450",
+        "tonalRamp": [
+          "#120900",
+          "#322200",
+          "#563d00",
+          "#7d5a03",
+          "#a77a07",
+          "#c99e48",
+          "#e3c58e",
+          "#f8eddb"
+        ]
+      },
+      "warn-soft-dark": {
+        "role": "tertiary",
+        "displayName": "Relleno de aviso (oscuro)",
+        "canonical": "#3a2f12",
+        "tonalRamp": [
+          "#100a01",
+          "#2d240c",
+          "#4c4124",
+          "#6c6042",
+          "#8e8162",
+          "#b0a488",
+          "#d1c9b5",
+          "#f1eee7"
         ]
       }
     },
     "typographyMeta": {
       "wordmark": {
         "displayName": "Wordmark",
-        "purpose": "El nombre «invest-ai» en la cabecera; único logotipo."
+        "purpose": "El nombre «invest-ai» en la cabecera de la landing; único logotipo."
+      },
+      "wordmark-rail": {
+        "displayName": "Wordmark rail",
+        "purpose": "El nombre dentro del campo de rojo señal del raíl del panel."
       },
       "display": {
         "displayName": "Display",
-        "purpose": "Símbolo del activo a cuerpo monumental, medido contra su columna y su número de letras."
+        "purpose": "Símbolo del activo a cuerpo monumental en la landing, medido contra su columna y su número de letras."
       },
       "display-verdict": {
         "displayName": "Display verdict",
-        "purpose": "Palabra del veredicto en rojo señal, ~60 % del símbolo."
+        "purpose": "Palabra del veredicto en la landing, con color direccional, ~60 % del símbolo."
       },
       "headline": {
         "displayName": "Headline",
-        "purpose": "Titulares de sección bajo el pliegue."
+        "purpose": "Titulares de sección bajo el pliegue de la landing."
+      },
+      "page-title": {
+        "displayName": "Page title",
+        "purpose": "Título de cada página del panel; 1.9rem en la ficha de activo."
+      },
+      "verdict": {
+        "displayName": "Verdict",
+        "purpose": "Palabra del veredicto en el informe del panel, con color direccional."
       },
       "figure": {
         "displayName": "Figure",
-        "purpose": "Las cuatro cifras del análisis, tabulares, alineadas a la derecha."
+        "purpose": "Las cuatro cifras del análisis en la landing, tabulares, alineadas a la derecha."
+      },
+      "price": {
+        "displayName": "Price",
+        "purpose": "Precio grande de la ficha de activo."
       },
       "cta": {
         "displayName": "CTA",
-        "purpose": "Texto del bloque de acción del pie."
+        "purpose": "Texto del bloque de acción del pie de la landing."
       },
       "cta-large": {
         "displayName": "CTA large",
-        "purpose": "Texto del bloque de acción de cierre."
+        "purpose": "Texto del bloque de acción de cierre de la landing."
       },
       "title": {
         "displayName": "Title",
-        "purpose": "Títulos de los pasos."
+        "purpose": "Títulos de los pasos de la landing."
       },
       "title-small": {
         "displayName": "Title small",
-        "purpose": "Títulos de bloque menores."
+        "purpose": "Títulos de bloque menores de la landing."
+      },
+      "section-title": {
+        "displayName": "Section title",
+        "purpose": "Título de sección del panel, junto al filete de 3 px."
       },
       "lead": {
         "displayName": "Lead",
-        "purpose": "Resumen del análisis, máximo 40rem."
+        "purpose": "Resumen del análisis en la landing, máximo 40rem."
       },
       "body": {
         "displayName": "Body",
-        "purpose": "Texto de lectura, máximo 38rem."
+        "purpose": "Texto de lectura: landing (38rem), informe y chat (52ch)."
       },
       "ui": {
         "displayName": "UI",
-        "purpose": "Lema, valores de estado, índice de fuentes, tablas."
+        "purpose": "Texto base del panel y de la interfaz de la landing."
       },
       "ui-strong": {
         "displayName": "UI strong",
-        "purpose": "Botones, enlaces de acción y etiquetas de cifra."
+        "purpose": "Botones, navegación y enlaces de acción."
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Términos de estado y cabeceras de tabla; nunca antetítulo."
+        "purpose": "Etiquetas de dato de la landing; segmentados y botones pequeños del panel. Nunca antetítulo."
       },
       "note": {
         "displayName": "Note",
-        "purpose": "Procedencias y metadatos de fuentes."
+        "purpose": "Procedencias y metadatos de la landing."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Procedencias, pistas y términos del panel."
+      },
+      "meta-strong": {
+        "displayName": "Meta strong",
+        "purpose": "Chips y cabeceras de tabla del panel."
       }
     },
-    "shadows": [],
+    "shadows": [
+      {
+        "name": "shadow-pop",
+        "value": "0 0 0 1px var(--ink)",
+        "purpose": "Filete flotante de la paleta de búsqueda y del menú de estado; es un filete, no una sombra."
+      }
+    ],
     "motion": [
       {
         "name": "tape-run",
         "value": "linear infinite; translate3d(-50%) → 0; 3.5rem/s (duración = celdas × 13 / 3.5 s)",
-        "purpose": "Avance de la cinta de cotizaciones de izquierda a derecha; único movimiento continuo. Pausa al señalarla, con su botón y con el foco dentro; parada con prefers-reduced-motion."
+        "purpose": "Avance de la cinta de la landing de izquierda a derecha; único movimiento continuo que no informa de un estado. Pausa al señalarla, con su botón y con el foco dentro; parada con prefers-reduced-motion."
+      },
+      {
+        "name": "tick-flash",
+        "value": "0.9s ease-out; fondo color-mix(up|down 20%, bg) → transparente",
+        "purpose": "Destello de un precio que cambia en el panel."
+      },
+      {
+        "name": "indeterminate",
+        "value": "1.4s ease-in-out infinite; translateX(-100%) → 333%",
+        "purpose": "Barra de carga de 3 px en tinta, solo mientras un análisis avanza."
+      },
+      {
+        "name": "caret-blink",
+        "value": "1s steps(2) infinite",
+        "purpose": "Cursor del chat mientras el modelo escribe."
       },
       {
         "name": "state-change",
         "value": "none",
-        "purpose": "Hover, pulsado y resalte cambian al instante: no hay transiciones."
+        "purpose": "Hover, pulsado, selección y cambio de tema son instantáneos: no hay transiciones. Con prefers-reduced-motion, todas las animaciones se reducen a 0.001ms."
       }
     ],
     "breakpoints": [
       {
-        "name": "sources-single",
+        "name": "landing-sources-single",
         "value": "72rem"
       },
       {
-        "name": "single-column",
+        "name": "landing-single-column",
         "value": "56rem"
+      },
+      {
+        "name": "panel-side-stack",
+        "value": "1100px"
+      },
+      {
+        "name": "panel-mobile-nav",
+        "value": "880px"
+      },
+      {
+        "name": "panel-grids-single",
+        "value": "760px"
+      },
+      {
+        "name": "panel-narrow",
+        "value": "520px"
       }
-    ]
+    ],
+    "themes": {
+      "default": "light",
+      "dark": "@media (prefers-color-scheme: dark) :root:not([data-theme='light']) y :root[data-theme='dark']",
+      "tokenSuffix": "-dark",
+      "unchanged": [
+        "signal",
+        "signal-ink",
+        "font-ui",
+        "radius",
+        "shadow-pop"
+      ],
+      "toggle": "sistema → claro → oscuro (frontend/src/app/theme.ts, localStorage invest-ai.theme); icono en la barra superior del panel, botón «Tema: …» en la landing; public/theme-init.js fija data-theme antes del primer pintado."
+    }
   },
   "components": [
     {
       "name": "Bloque de acción",
       "kind": "button",
       "refersTo": "cta-field",
-      "description": "Campo rojo que lleva al panel; la acción principal, al pie de la primera pantalla y al cierre.",
+      "description": "Campo de rojo señal de la landing que lleva al panel; al señalarlo se invierte a tinta.",
       "html": "<a class=\"ds-cta\" href=\"#\">Entrar al panel</a>",
-      "css": ".ds-cta { display: flex; align-items: flex-start; min-height: 9rem; width: 18rem; padding: 1.25rem; background: #e2001a; color: #fff; font: 700 2rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; letter-spacing: -0.02em; text-decoration: none; border-radius: 0; } .ds-cta:hover { background: #000; } .ds-cta:focus-visible { outline: 3px solid #fff; outline-offset: -0.6rem; }"
+      "css": ".ds-cta { display: flex; align-items: flex-start; min-height: 9rem; width: 18rem; padding: 1.25rem; background: var(--signal, #e2001a); color: var(--signal-ink, #fff); font: 700 2rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; letter-spacing: -0.02em; text-decoration: none; border-radius: 0; } .ds-cta:hover { background: var(--ink, #000); color: var(--bg, #fff); } .ds-cta:focus-visible { outline: 3px solid var(--signal-ink, #fff); outline-offset: -0.6rem; } .ds-cta:hover:focus-visible { outline-color: var(--bg, #fff); }"
+    },
+    {
+      "name": "Botón primario",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "La acción principal del panel: relleno de tinta, sin color de acento.",
+      "html": "<button type=\"button\" class=\"ds-btn ds-btn-primary\">Analizar</button> <button type=\"button\" class=\"ds-btn ds-btn-primary\" disabled>Enviar</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 0.4rem; height: 2.1rem; padding: 0 0.85rem; border: 1px solid var(--ink, #000); border-radius: 0; font: 600 0.9375rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; cursor: pointer; white-space: nowrap; } .ds-btn-primary { background: var(--accent, #000); border-color: var(--accent, #000); color: var(--accent-ink, #fff); } .ds-btn-primary:hover:not(:disabled) { background: var(--ink-2, #4a4a4a); border-color: var(--ink-2, #4a4a4a); } .ds-btn:disabled { opacity: 0.5; cursor: not-allowed; } .ds-btn:focus-visible { outline: 3px solid var(--focus, #000); outline-offset: 2px; }"
     },
     {
       "name": "Botón de contorno",
       "kind": "button",
       "refersTo": "button-outline",
-      "description": "Control secundario conmutable (pausar la cinta); pulsado se invierte.",
-      "html": "<button type=\"button\" class=\"ds-btn-outline\" aria-pressed=\"false\" onclick=\"this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') !== 'true')\">Pausar cinta</button>",
-      "css": ".ds-btn-outline { min-height: 2.4rem; padding: 0 0.9rem; border: 1px solid #000; border-radius: 0; background: transparent; color: #000; font: 600 0.9375rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; cursor: pointer; } .ds-btn-outline:hover { background: #d9d9d6; } .ds-btn-outline[aria-pressed='true'] { background: #000; color: #fff; } .ds-btn-outline[aria-pressed='true']:hover { background: #4a4a4a; } .ds-btn-outline:focus-visible { outline: 3px solid #000; outline-offset: 3px; }"
+      "description": "Control secundario en panel y landing; pulsado se invierte. Borrar también va en contorno o fantasma, nunca en rojo.",
+      "html": "<button type=\"button\" class=\"ds-btn-o\" aria-pressed=\"false\" onclick=\"this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') !== 'true')\">Pausar cinta</button> <button type=\"button\" class=\"ds-btn-o\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z\"/></svg> Favorito</button>",
+      "css": ".ds-btn-o { display: inline-flex; align-items: center; gap: 0.4rem; height: 2.1rem; padding: 0 0.85rem; border: 1px solid var(--ink, #000); border-radius: 0; background: var(--surface, #fff); color: var(--ink, #000); font: 600 0.9375rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; cursor: pointer; } .ds-btn-o:hover { background: var(--line, #d9d9d6); } .ds-btn-o[aria-pressed='true'] { background: var(--ink, #000); color: var(--bg, #fff); } .ds-btn-o[aria-pressed='true']:hover { background: var(--ink-2, #4a4a4a); } .ds-btn-o:focus-visible { outline: 3px solid var(--focus, #000); outline-offset: 2px; }"
     },
     {
-      "name": "Enlace de acción",
-      "kind": "button",
-      "refersTo": "ui-strong",
-      "description": "Acción terciaria sin caja (reintentar una carga).",
-      "html": "<p class=\"ds-notice\"><strong>No se pudieron cargar las cotizaciones.</strong> <button type=\"button\" class=\"ds-link\">Reintentar</button></p>",
-      "css": ".ds-notice { margin: 0; padding: 0.7rem 0; border-top: 1px solid #d9d9d6; font: 400 0.9375rem/1.4 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; } .ds-link { padding: 0; border: 0; background: none; color: inherit; font: 600 0.9375rem/1.4 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; } .ds-link:focus-visible { outline: 3px solid #000; outline-offset: 3px; }"
+      "name": "Chips",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Estáticos rellenos y sin filete (neutro, atenuado, veredictos, aviso); los que se pulsan llevan filete de tinta y activos se rellenan de tinta.",
+      "html": "<div class=\"ds-chips\"><span class=\"ds-chip\">NASDAQ</span><span class=\"ds-chip ds-muted\">vwce</span><span class=\"ds-chip ds-up\">Acumular</span><span class=\"ds-chip\">Mantener</span><span class=\"ds-chip ds-down\">Reducir</span><span class=\"ds-chip ds-warn\">Datos simulados</span><button type=\"button\" class=\"ds-chip ds-act\">apple</button><button type=\"button\" class=\"ds-chip ds-act\" aria-pressed=\"true\">MM 50</button></div>",
+      "css": ".ds-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; } .ds-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem; border: 1px solid transparent; border-radius: 0; font: 600 0.75rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--ink, #000); background: var(--accent-soft, #e6e6e3); white-space: nowrap; } .ds-muted { color: var(--ink-2, #4a4a4a); } .ds-up { background: var(--up-soft, #e3f1e8); color: var(--up, #127a3e); } .ds-down { background: var(--down-soft, #fff3f4); color: var(--down, #e2001a); } .ds-warn { background: var(--warn-soft, #f5e8c8); color: var(--warn, #8a5a00); } .ds-act { background: var(--surface, #fff); border-color: var(--ink, #000); cursor: pointer; } .ds-act:hover { background: var(--line, #d9d9d6); } .ds-act[aria-pressed='true'] { background: var(--accent, #000); color: var(--accent-ink, #fff); } .ds-act:focus-visible { outline: 3px solid var(--focus, #000); outline-offset: 2px; }"
     },
     {
-      "name": "Estado local",
+      "name": "Segmentado",
       "kind": "custom",
-      "refersTo": "status-square",
-      "description": "Pares término y valor de la cabecera; el cuadrado lleno en verde es «sí», hueco es «no», siempre con texto.",
-      "html": "<dl class=\"ds-status\"><div><dt>Modelo local</dt><dd><span class=\"ds-sq\"></span>qwen3.5:9b, cargado en memoria</dd></div><div><dt>Ticks</dt><dd><span class=\"ds-sq\" data-off=\"true\"></span>Sin ticks en vivo</dd></div></dl>",
-      "css": ".ds-status { display: flex; gap: 0.5rem 2.5rem; margin: 0; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; } .ds-status > div { display: flex; flex-direction: column; gap: 0.1rem; } .ds-status dt { font-size: 0.8125rem; font-weight: 600; color: #4a4a4a; } .ds-status dd { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 0.9375rem; } .ds-sq { flex: none; width: 0.5rem; height: 0.5rem; background: #127a3e; border: 2px solid #127a3e; } .ds-sq[data-off='true'] { background: transparent; border-color: #4a4a4a; }"
+      "refersTo": "segment",
+      "description": "Selector de intervalo o de horizonte: contorno de tinta que recorta, opción seleccionada invertida y foco hacia dentro.",
+      "html": "<div class=\"ds-seg\" role=\"group\" aria-label=\"Horizonte\"><button type=\"button\">1 semana</button><button type=\"button\" aria-pressed=\"true\">4 semanas</button><button type=\"button\">12 semanas</button></div>",
+      "css": ".ds-seg { display: inline-flex; border: 1px solid var(--ink, #000); border-radius: 0; overflow: hidden; background: var(--surface, #fff); font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; } .ds-seg button { border: 0; border-right: 1px solid var(--line, #d9d9d6); background: transparent; padding: 0.25rem 0.6rem; font: 600 0.8125rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--ink-2, #4a4a4a); cursor: pointer; } .ds-seg button:last-child { border-right: 0; } .ds-seg button:hover { background: var(--line, #d9d9d6); } .ds-seg button[aria-pressed='true'] { background: var(--accent, #000); color: var(--accent-ink, #fff); } .ds-seg button:focus-visible { outline: 3px solid var(--focus, #000); outline-offset: -3px; } .ds-seg button[aria-pressed='true']:focus-visible { outline-color: var(--accent-ink, #fff); }"
     },
     {
-      "name": "Celda de cinta",
+      "name": "Campo de texto",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Campo recto con contorno de tinta; el buscador de la barra superior lleva su atajo en kbd.",
+      "html": "<label class=\"ds-field\"><span>Pregunta</span><input type=\"text\" placeholder=\"Escribe tu pregunta\"></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 0.3rem; width: 22rem; font: 600 0.8125rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--ink-2, #4a4a4a); } .ds-field input { background: var(--surface, #fff); color: var(--ink, #000); border: 1px solid var(--ink, #000); border-radius: 0; padding: 0.45rem 0.65rem; font: 400 0.9375rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; } .ds-field input::placeholder { color: var(--muted, #6b6b6b); } .ds-field input:focus-visible { outline: 3px solid var(--focus, #000); outline-offset: 2px; }"
+    },
+    {
+      "name": "Raíl de navegación",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Marca en campo de rojo señal y enlaces con icono lineal; el actual se invierte en tinta.",
+      "html": "<nav class=\"ds-rail\" aria-label=\"Principal\"><div class=\"ds-brand\">invest<b>-ai</b></div><a href=\"#\" aria-current=\"page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 3v18h18\"/><path d=\"M7 14l4-4 4 4 5-5\"/></svg> Panel</a><a href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z\"/></svg> Favoritos</a></nav>",
+      "css": ".ds-rail { display: flex; flex-direction: column; gap: 2px; width: 13rem; padding: 1rem 0.75rem; background: var(--surface, #fff); border-right: 1px solid var(--line, #d9d9d6); font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; } .ds-brand { margin-bottom: 1.25rem; padding: 0.7rem 0.75rem; background: var(--signal, #e2001a); color: var(--signal-ink, #fff); font: 800 1.25rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-stretch: 88%; letter-spacing: -0.03em; } .ds-brand b { font-weight: 400; } .ds-rail a { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; color: var(--ink-2, #4a4a4a); font-weight: 600; font-size: 0.9375rem; text-decoration: none; } .ds-rail a:hover { background: var(--hover, #f6f6f4); color: var(--ink, #000); } .ds-rail a[aria-current='page'] { background: var(--accent, #000); color: var(--accent-ink, #fff); } .ds-rail a:focus-visible { outline: 3px solid var(--focus, #000); outline-offset: 2px; }"
+    },
+    {
+      "name": "Sección con tabla",
+      "kind": "card",
+      "refersTo": "table-row",
+      "description": "Unidad del panel: filete de 3 px con título y pista, tabla de filetes de 1 px, cifras a la derecha con color direccional, fila señalada en hover.",
+      "html": "<section class=\"ds-sec\"><header><h2>Favoritos</h2><span class=\"ds-hint\">Ponderado por recencia</span></header><table class=\"ds-tbl\"><thead><tr><th>Activo</th><th class=\"r\">Precio</th><th class=\"r\">Var.</th></tr></thead><tbody><tr><td><b>AAPL</b></td><td class=\"r\">227,52 $</td><td class=\"r ds-down\">↘ −2,13 %</td></tr><tr><td><b>NVDA</b></td><td class=\"r\">131,20 $</td><td class=\"r ds-up\">↗ +4,77 %</td></tr></tbody></table></section>",
+      "css": ".ds-sec { width: 30rem; font: 400 0.9375rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; color: var(--ink, #000); background: var(--bg, #fff); } .ds-sec header { display: flex; align-items: baseline; gap: 0.75rem; border-top: 3px solid var(--ink, #000); padding-top: 0.4rem; margin-bottom: 0.6rem; } .ds-sec h2 { margin: 0; font-size: 1rem; font-weight: 700; font-stretch: 92%; letter-spacing: -0.01em; } .ds-hint { margin-left: auto; font-size: 0.75rem; color: var(--muted, #6b6b6b); } .ds-tbl { width: 100%; border-collapse: collapse; } .ds-tbl th { text-align: left; font-size: 0.75rem; font-weight: 600; color: var(--ink-2, #4a4a4a); padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--ink, #000); } .ds-tbl td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line, #d9d9d6); } .ds-tbl .r { text-align: right; } .ds-tbl tbody tr:hover { background: var(--hover, #f6f6f4); } .ds-up { color: var(--up, #127a3e); } .ds-down { color: var(--down, #e2001a); }"
+    },
+    {
+      "name": "Veredicto",
       "kind": "custom",
-      "refersTo": "tape-cell",
-      "description": "Celda de ancho fijo de la cinta de cotizaciones: símbolo, variación coloreada por signo y precio.",
-      "html": "<ul class=\"ds-tape\"><li><a href=\"#\"><span class=\"ds-sym\">AAPL</span><span class=\"ds-chg ds-down\">-1,10 %</span><span class=\"ds-px\">343,91 $</span></a></li><li><a href=\"#\"><span class=\"ds-sym\">MSFT</span><span class=\"ds-chg ds-up\">+1,54 %</span><span class=\"ds-px\">532,60 $</span></a></li></ul>",
-      "css": ".ds-tape { display: flex; margin: 0; padding: 0; list-style: none; border-top: 3px solid #000; border-bottom: 3px solid #000; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; } .ds-tape li { flex: none; width: 13rem; } .ds-tape a { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; row-gap: 0.15rem; min-height: 4.25rem; align-content: center; padding: 0.55rem 1rem 0.65rem; border-right: 1px solid #d9d9d6; color: #000; text-decoration: none; } .ds-sym { font-weight: 700; font-size: 1.0625rem; } .ds-tape a:hover .ds-sym { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.2em; } .ds-tape a:focus-visible { outline: 3px solid #000; outline-offset: -3px; } .ds-chg { font-size: 0.9375rem; font-weight: 600; text-align: right; } .ds-up { color: #127a3e; } .ds-down { color: #e2001a; } .ds-px { grid-column: 1 / 3; font-size: 1.25rem; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; white-space: nowrap; }"
+      "refersTo": "verdict-up",
+      "description": "Palabra del veredicto con color direccional (verde comprar y acumular, rojo reducir y evitar, tinta mantener y esperar) y escala de seis tramos.",
+      "html": "<div class=\"ds-verdict\"><span class=\"ds-vw ds-up\">Acumular</span><div><div class=\"ds-scale\"><span></span><span></span><span></span><span></span><span class=\"on ds-up-bg\"></span><span></span></div><div class=\"ds-scale-l\"><span>Evitar</span><span>Reducir</span><span>Esperar</span><span>Mantener</span><span class=\"on\">Acumular</span><span>Comprar</span></div></div></div>",
+      "css": ".ds-verdict { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.5rem 2rem; align-items: center; width: 34rem; padding: 0.9rem 0; border-top: 3px solid var(--ink, #000); border-bottom: 1px solid var(--line, #d9d9d6); font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--ink, #000); } .ds-vw { font: 800 2.6rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-stretch: 74%; letter-spacing: -0.035em; } .ds-up { color: var(--up, #127a3e); } .ds-scale, .ds-scale-l { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; } .ds-scale span { height: 0.5rem; background: var(--line, #d9d9d6); } .ds-scale span.ds-up-bg { background: var(--up, #127a3e); } .ds-scale-l { margin-top: 0.3rem; font-size: 0.6875rem; color: var(--muted, #6b6b6b); text-align: center; } .ds-scale-l .on { color: var(--ink, #000); font-weight: 600; }"
     },
     {
       "name": "Fila de cifra",
       "kind": "card",
       "refersTo": "figure-row",
-      "description": "Cifra estructurada con etiqueta, procedencia y referencia en superíndice; señalada se invierte junto a su fuente.",
+      "description": "Cifra de la landing con etiqueta, procedencia y referencia en superíndice; señalada se invierte junto a su fuente.",
       "html": "<dl class=\"ds-figs\"><div class=\"ds-fig\"><dt>Precio en el análisis</dt><dd class=\"ds-fig-v\">692,13 $<sup><a href=\"#\">3</a></sup></dd><dd class=\"ds-fig-o\">Yahoo Finance</dd></div><div class=\"ds-fig\"><dt>Puntuación global</dt><dd class=\"ds-fig-v\">50<span class=\"ds-fig-u\">&nbsp;de 100</span></dd><dd class=\"ds-fig-o\">calculado por invest-ai</dd></div></dl>",
-      "css": ".ds-figs { width: 24rem; margin: 0; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; color: #000; } .ds-fig { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; padding: 0.6rem 0.75rem 0.65rem; border-top: 1px solid #d9d9d6; } .ds-fig:first-child { border-top: 0; } .ds-fig dt { font-size: 0.9375rem; font-weight: 600; } .ds-fig dd { margin: 0; } .ds-fig-v { grid-column: 2; grid-row: 1 / 3; align-self: end; font-size: 3.5rem; font-weight: 600; line-height: 1; letter-spacing: -0.02em; white-space: nowrap; } .ds-fig-u { font-size: 0.9375rem; font-weight: 400; letter-spacing: 0; color: #4a4a4a; } .ds-fig-o { font-size: 0.8125rem; color: #4a4a4a; } .ds-fig sup { margin-left: 0.15em; font-size: 0.8125rem; font-weight: 700; line-height: 0; } .ds-fig sup a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; } .ds-fig:hover { background: #000; color: #fff; } .ds-fig:hover .ds-fig-u, .ds-fig:hover .ds-fig-o { color: #fff; } .ds-fig :focus-visible { outline: 3px solid #000; outline-offset: 3px; } .ds-fig:hover :focus-visible { outline-color: #fff; }"
+      "css": ".ds-figs { width: 24rem; margin: 0; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; color: var(--ink, #000); background: var(--bg, #fff); } .ds-fig { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; padding: 0.6rem 0.75rem 0.65rem; border-top: 1px solid var(--line, #d9d9d6); } .ds-fig:first-child { border-top: 0; } .ds-fig dt { font-size: 0.9375rem; font-weight: 600; } .ds-fig dd { margin: 0; } .ds-fig-v { grid-column: 2; grid-row: 1 / 3; align-self: end; font-size: 3.5rem; font-weight: 600; line-height: 1; letter-spacing: -0.02em; white-space: nowrap; } .ds-fig-u { font-size: 0.9375rem; font-weight: 400; letter-spacing: 0; color: var(--ink-2, #4a4a4a); } .ds-fig-o { font-size: 0.8125rem; color: var(--ink-2, #4a4a4a); } .ds-fig sup { margin-left: 0.15em; font-size: 0.8125rem; font-weight: 700; line-height: 0; } .ds-fig sup a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; } .ds-fig:hover { background: var(--ink, #000); color: var(--bg, #fff); } .ds-fig:hover .ds-fig-u, .ds-fig:hover .ds-fig-o { color: var(--bg, #fff); } .ds-fig :focus-visible { outline: 3px solid var(--focus, #000); outline-offset: 3px; } .ds-fig:hover :focus-visible { outline-color: var(--bg, #fff); }"
     },
     {
-      "name": "Fila de fuente",
+      "name": "Aviso de error",
       "kind": "custom",
-      "refersTo": "source-row",
-      "description": "Entrada numerada del índice de fuentes con proveedor y antigüedad; atenuada si tiene más de dos días, invertida si está activa.",
-      "html": "<ol class=\"ds-srcs\"><li class=\"ds-src\"><span class=\"ds-src-n\">3</span><span><a href=\"#\">Cotización</a></span><span class=\"ds-src-m\"><span>Yahoo Finance</span><span>hace 12 horas</span></span></li><li class=\"ds-src\" data-old=\"true\"><span class=\"ds-src-n\">4</span><span><a href=\"#\">Fundamentales</a></span><span class=\"ds-src-m\"><span>Yahoo Finance</span><span>hace 3 días</span></span></li></ol>",
-      "css": ".ds-srcs { width: 26rem; margin: 0; padding: 0; list-style: none; font-family: 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; } .ds-src { display: grid; grid-template-columns: 1.75rem minmax(0, 1fr); column-gap: 0.5rem; align-items: baseline; padding: 0.25rem 0.5rem 0.3rem; border-top: 1px solid #d9d9d6; font-size: 0.9375rem; line-height: 1.35; } .ds-src-n { font-weight: 700; } .ds-src a { color: inherit; text-decoration: none; } .ds-src a:hover { text-decoration: underline; text-underline-offset: 0.2em; } .ds-src a:focus-visible { outline: 3px solid #000; outline-offset: 3px; } .ds-src-m { grid-column: 2; display: flex; gap: 1rem; font-size: 0.8125rem; color: #4a4a4a; } .ds-src[data-old='true'], .ds-src[data-old='true'] .ds-src-m { color: #737373; } .ds-src:hover { background: #000; color: #fff; } .ds-src:hover .ds-src-m { color: #fff; } .ds-src:hover a:focus-visible { outline-color: #fff; }"
-    },
-    {
-      "name": "Bloque con filete",
-      "kind": "custom",
-      "refersTo": "headline",
-      "description": "Unidad de sección: filete de tinta de 3 px a todo el ancho, titular en la columna de etiqueta y cuerpo en la de lectura.",
-      "html": "<section class=\"ds-block\"><h2 class=\"ds-h2\">Cómo llega a cada cifra</h2><div class=\"ds-step\"><h3>Cifras calculadas en Rust</h3><p>La puntuación global y los indicadores los calcula el código de invest-ai. El modelo no los inventa.</p></div></section>",
-      "css": ".ds-block { display: grid; grid-template-columns: 5fr 7fr; column-gap: 1.5rem; border-top: 3px solid #000; padding: 2rem 0 3rem; font: 400 1.0625rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; background: #fff; } .ds-h2 { margin: 0; font: 800 2.5rem/1 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-stretch: 92%; letter-spacing: -0.025em; text-wrap: balance; } .ds-step h3 { margin: 0 0 0.4rem; font: 700 1.5rem/1.15 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; letter-spacing: -0.01em; } .ds-step p { margin: 0; max-width: 38rem; }"
+      "refersTo": "notice-error",
+      "description": "Un error no es una bajada: relleno de aviso, filete superior de 3 px en ámbar e icono ámbar; el texto en tinta.",
+      "html": "<div class=\"ds-notice\" role=\"alert\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4M12 16h.01\"/></svg><p>No se pudo completar el análisis. <button type=\"button\" class=\"ds-link\">Reintentar</button></p></div>",
+      "css": ".ds-notice { display: flex; gap: 0.6rem; align-items: flex-start; width: 28rem; padding: 0.6rem 0.8rem; background: var(--warn-soft, #f5e8c8); border-top: 3px solid var(--warn, #8a5a00); color: var(--ink, #000); font: 400 0.875rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; } .ds-notice > svg { flex: none; margin-top: 0.2rem; color: var(--warn, #8a5a00); } .ds-notice p { margin: 0; } .ds-link { padding: 0; border: 0; background: none; color: inherit; font: 600 0.875rem/1.5 'Archivo Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; } .ds-link:focus-visible { outline: 3px solid var(--focus, #000); outline-offset: 2px; }"
     }
   ],
   "narrative": {
     "northStar": "El extracto suizo",
-    "overview": "El análisis se presenta como un extracto de banca privada suiza leído con los ojos del estilo tipográfico internacional: papel blanco, tinta negra, cada cifra en su columna con su referencia, y nada que adorne. La autoridad no sale de efectos sino de la disciplina: una rejilla de 12 columnas, una sola familia tipográfica que cambia de anchura y de peso, filetes de 3 px entre bloques y de 1 px entre filas. El rojo señal aparece poco y en grande, como en un sello: el veredicto y el bloque de acción.\n\nLa densidad es la de un documento financiero, no la de una landing: la primera pantalla ocupa todo el alto y ya trae datos reales (estado del modelo local, cinta de cotizaciones, el último análisis con sus cuatro cifras y su índice de fuentes). Lo monumental (símbolo y veredicto) convive con texto de 13 a 17 px sin escalones intermedios decorativos. El único movimiento continuo es la cinta; todo lo demás es estático y los cambios de estado son instantáneos, sin transiciones.\n\n**Alcance.** Este mundo rige hoy solo la landing (ruta `/`, `frontend/src/pages/LandingPage.tsx` y `frontend/src/styles/landing.css`, todo bajo `.lp` y clases `lp-*`). Las superficies de la app (panel, ficha de activo, chat y demás, en `frontend/src/styles/app.css`) siguen con su identidad anterior y aún no usan este sistema; si lo heredan es una decisión pendiente del usuario. Este documento no describe ese sistema anterior. El mundo es solo claro: es papel, y no tiene tema oscuro aunque la app lo tenga.",
+    "overview": "El análisis se presenta como un extracto de banca privada suiza leído con los ojos del estilo tipográfico internacional: papel y tinta, cada cifra en su columna con su referencia, y nada que adorne. La autoridad no sale de efectos sino de la disciplina: una sola familia tipográfica que cambia de anchura y de peso, filetes de 3 px que abren bloques y de 1 px entre filas, esquinas rectas y ninguna sombra. Toda acción, selección y foco va en tinta; el rojo señal aparece en dos sitios y en grande, como un sello: la marca del raíl y el bloque de acción de la landing.\n\nUn solo mundo rige toda la app con el mismo contrato de tokens (`frontend/src/styles/tokens.css`; la landing los consume a través de alias `--lp-*`). La landing (ruta `/`, modo Persuade) es monumental: primera pantalla a todo el alto con datos reales, símbolo y veredicto a cuerpo de cartel, rejilla de 12 columnas. El panel (todas las rutas dentro del Shell: panel, ficha e informe, chat, rendimiento, OPV, modelos, favoritos e historial, modo Operate) es denso y escaneable: raíl, tablas, filetes y texto de 12 a 17 px; allí la expresión vive en los detalles, no en el gesto.\n\nEl mundo tiene dos temas. En claro es papel blanco y tinta negra; en oscuro, suelo negro y tinta blanca: el mismo extracto invertido, no un tema gris. Manda `prefers-color-scheme` salvo que el usuario fije claro u oscuro con el conmutador (sistema → claro → oscuro), que en el panel es un icono en la barra superior y en la landing un botón de texto «Tema: …»; un script previo fija `data-theme` antes del primer pintado para que no haya destello. Solo se mueve lo que informa (el destello de un precio que cambia, la barra de carga, el cursor del chat) y la cinta de la landing; los cambios de estado son instantáneos, sin transiciones.",
     "keyCharacteristics": [
-      "Papel blanco y tinta negra; rojo señal solo en campos grandes y en cifras de bajada.",
+      "Papel y tinta en los dos temas: blanco y negro en claro, negro y blanco en oscuro.",
+      "Acciones, selección y foco en tinta; resaltar es invertir.",
+      "Rojo señal solo en dos campos: la marca del raíl y el bloque de acción de la landing. El rojo de dato significa bajada.",
+      "Todo veredicto lleva color direccional: verde comprar y acumular, rojo reducir y evitar, tinta mantener y esperar.",
       "Una sola familia, Archivo variable, con la jerarquía hecha de anchura (74 % a 100 %) y peso (400 a 800); cifras tabulares en todo.",
-      "Rejilla de 12 columnas con bandera a la izquierda; filetes de 3 px entre bloques y de 1 px entre filas.",
-      "Esquinas rectas, sin sombras, sin degradados, sin iconos decorativos.",
-      "Resaltar es invertir: fondo tinta, texto papel.",
-      "La cinta de cotizaciones, de izquierda a derecha y con pausa, es el único movimiento continuo."
+      "Filetes de 3 px que abren bloques y de 1 px entre filas; esquinas rectas; sin sombras, degradados ni desenfoques.",
+      "La cinta de cotizaciones es el único movimiento continuo que no informa de un estado."
     ],
     "rules": [
       {
-        "name": "La regla del campo rojo",
-        "body": "El rojo señal ocupa superficies grandes (el bloque de acción, la palabra del veredicto) o tiñe cifras de bajada. No es color de texto corriente, de filetes, de bordes ni de adornos.",
+        "name": "La regla de la tinta que actúa",
+        "body": "Toda acción, selección y foco va en tinta: negra en claro, blanca en oscuro. No hay color de acento: el rojo ya significa «baja».",
         "section": "colors"
       },
       {
         "name": "La regla de la tinta invertida",
-        "body": "Resaltar es invertir: fondo tinta, texto papel. Así se marcan la cifra y la fuente activas, la fuente enlazada (`:target`), el botón pulsado y la selección de texto. No existe un color de resalte propio; dentro de una zona invertida, la tinta segunda pasa a papel y la tenue a gris filete.",
+        "body": "Resaltar es invertir: fondo tinta, texto papel. Dentro de una zona de tinta la selección de texto también se invierte, el foco pasa a `accent-ink` y lo atenuado toma el color del texto.",
         "section": "colors"
       },
       {
-        "name": "La regla del verde que dice sí",
-        "body": "El verde solo significa «sube» o «sí», y siempre acompañado de texto o de cifra.",
+        "name": "La regla de los dos rojos",
+        "body": "El rojo señal es un campo de marca: el raíl y el bloque de acción, siempre con texto blanco. El rojo de dato (`down`) significa bajada y nada más. Ninguno de los dos marca un error ni una acción destructiva: borrar es una acción en tinta.",
+        "section": "colors"
+      },
+      {
+        "name": "La regla del veredicto direccional",
+        "body": "Todo veredicto, del chip de una fila al monumental de la landing, lleva el color de su dirección: verde comprar y acumular, rojo reducir y evitar, tinta mantener y esperar.",
+        "section": "colors"
+      },
+      {
+        "name": "La regla del ámbar",
+        "body": "Avisos, errores y fallos van en `warn` sobre `warn-soft`, nunca en rojo: un error no es una bajada.",
         "section": "colors"
       },
       {
         "name": "La regla de una sola familia",
-        "body": "Todo es Archivo variable. La jerarquía sale de la anchura y del peso, nunca de una segunda familia.",
+        "body": "Todo es Archivo variable, en la landing y en el panel. La jerarquía sale de la anchura y del peso, nunca de una segunda familia.",
         "section": "typography"
       },
       {
@@ -311,23 +920,29 @@
       }
     ],
     "dos": [
-      "**Do** empezar cada bloque con un filete de tinta de 3 px de borde a borde y separar cada fila con un filete gris de 1 px (#d9d9d6).",
-      "**Do** poner cada cifra en tabulares, alineada a la derecha de su columna, con su procedencia bajo la etiqueta y su referencia en superíndice cuando tenga fuente.",
-      "**Do** resaltar invirtiendo tinta y papel, nunca con un color nuevo.",
-      "**Do** acompañar siempre el cuadrado de estado con texto: lleno en verde para «sí», hueco para «no».",
-      "**Do** dar a todo lo enfocable un anillo de tinta de 3 px separado 3 px y con esquinas rectas; sobre rojo, blanco y hacia dentro.",
+      "**Do** abrir cada bloque con un filete de tinta de 3 px y separar cada fila con un filete de 1 px en `line`.",
+      "**Do** usar los tokens de `tokens.css` por su rol, nunca un hex fijo, y comprobar cada superficie nueva en claro y en oscuro.",
+      "**Do** poner cada cifra en tabulares, alineada a la derecha de su columna, con su procedencia cerca y su referencia cuando tenga fuente.",
+      "**Do** resaltar invirtiendo tinta y papel; dentro de una zona invertida, invertir también la selección y el foco.",
+      "**Do** colorear todo veredicto por su dirección: verde comprar y acumular, rojo reducir y evitar, tinta mantener y esperar.",
+      "**Do** acompañar cada color de dato con texto, signo o flecha, y cada cuadrado de estado con su texto.",
+      "**Do** llevar avisos y errores en ámbar sobre `warn-soft`; el error abre con filete de 3 px de ámbar.",
+      "**Do** rellenar sin filete los chips estáticos y dar filete de tinta a los que se pulsan.",
+      "**Do** dar a todo lo enfocable un anillo de 3 px en `focus` con esquinas rectas; hacia dentro donde el contenedor recorta y en `accent-ink` sobre tinta.",
       "**Do** dimensionar lo monumental y las cifras contra su columna y su número de caracteres, para que nada desborde.",
       "**Do** detener la cinta con «reducir movimiento», al señalarla, al enfocarla y con su botón de pausa."
     ],
     "donts": [
-      "**Don't** usar el rojo señal para texto corriente, filetes, bordes o adornos: solo campos grandes y cifras de bajada.",
+      "**Don't** usar el rojo señal fuera de la marca del raíl y el bloque de acción: ni texto, ni filetes, ni bordes, ni veredictos, ni errores.",
+      "**Don't** usar rojo para un aviso, un error o una acción de borrar: en este mundo el rojo significa bajada.",
+      "**Don't** introducir un color de acento, azul ni de ningún otro tono, para acciones, enlaces, selección o foco: es tinta.",
       "**Don't** añadir sombras, degradados, desenfoques ni esquinas redondeadas.",
-      "**Don't** introducir una segunda familia tipográfica, tampoco las de las superficies de la app (Geist, Newsreader), ni su acento azul.",
-      "**Don't** añadir iconos decorativos: el único signo gráfico es el cuadrado de estado, y siempre lleva texto.",
-      "**Don't** usar el estilo de etiqueta (13 px, 600) como antetítulo sobre un titular: solo nombra un dato (término de estado, cabecera de tabla).",
+      "**Don't** introducir una segunda familia tipográfica.",
+      "**Don't** añadir iconos decorativos ni usar círculos como marca de estado: solo iconos lineales funcionales junto a su texto o con nombre accesible, y el cuadrado.",
+      "**Don't** usar el estilo de etiqueta como antetítulo sobre un titular: solo nombra un dato.",
       "**Don't** centrar titulares ni bloques de texto.",
-      "**Don't** añadir un segundo movimiento continuo: la cinta es el único.",
-      "**Don't** dar a este mundo un tema oscuro: es papel."
+      "**Don't** añadir un movimiento continuo que no informe de un estado: la cinta es el único.",
+      "**Don't** fijar un color de tema en un componente: los dos temas salen del mismo contrato."
     ]
   }
 }

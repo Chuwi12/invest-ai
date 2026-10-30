@@ -5,6 +5,7 @@ import { setApi } from '@/api'
 import type { Api } from '@/api'
 import { ApiError } from '@/api/client'
 import type { Analysis, AssetId, HorizonReport, Quote, WatchlistStatus } from '@/api/types'
+import { setThemePref } from '@/app/theme'
 import { mockApi } from '@/mock'
 import { RealtimeClient, setRealtime, type SocketLike } from '@/realtime'
 import { renderApp } from '@/test/utils'
@@ -102,6 +103,7 @@ function install(over: Partial<Api> = {}) {
 }
 
 beforeEach(() => {
+  setThemePref('system')
   socket = new FakeSocket()
   setRealtime(new RealtimeClient({ url: 'ws://test/api/ws', createSocket: () => socket }))
   install()
@@ -234,6 +236,30 @@ describe('LandingPage', () => {
     expect(document.querySelectorAll('.lp-dup[aria-hidden="true"]')).toHaveLength(1)
     // Las copias se pueden pulsar con el ratón (sin inert), pero no reciben el foco del teclado.
     expect(document.querySelectorAll('.lp-dup a:not([tabindex="-1"]), .lp-rep a:not([tabindex="-1"])')).toHaveLength(0)
+  })
+
+  it('el conmutador de la cabecera cicla sistema, claro y oscuro, aplica data-theme y recuerda la preferencia', async () => {
+    renderLanding()
+    await screen.findByRole('heading', { level: 2, name: /AAPL/ })
+    const toggle = within(screen.getByRole('banner')).getByRole('button', { name: 'Tema: automático' })
+    const root = document.documentElement
+    expect(root).not.toHaveAttribute('data-theme')
+
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAccessibleName('Tema: claro')
+    expect(root).toHaveAttribute('data-theme', 'light')
+    expect(localStorage.getItem('invest-ai.theme')).toBe('light')
+
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAccessibleName('Tema: oscuro')
+    expect(root).toHaveAttribute('data-theme', 'dark')
+    expect(localStorage.getItem('invest-ai.theme')).toBe('dark')
+
+    // De vuelta al sistema: sin atributo y sin preferencia guardada.
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAccessibleName('Tema: automático')
+    expect(root).not.toHaveAttribute('data-theme')
+    expect(localStorage.getItem('invest-ai.theme')).toBeNull()
   })
 
   it('«Entrar al panel» enlaza a /dashboard arriba y al cierre', async () => {

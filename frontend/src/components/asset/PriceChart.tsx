@@ -132,7 +132,7 @@ export function PriceChart({ id, summary, quote }: Props) {
     const up = cssVar('--up')
     const down = cssVar('--down')
     c.applyOptions({
-      layout: { background: { type: ColorType.Solid, color: cssVar('--surface') }, textColor: ink, fontFamily: cssVar('--font-ui'), attributionLogo: true },
+      layout: { background: { type: ColorType.Solid, color: cssVar('--surface') }, textColor: ink, fontFamily: cssVar('--font-ui'), attributionLogo: true, panes: { separatorColor: line, separatorHoverColor: ink } },
       grid: { vertLines: { color: line }, horzLines: { color: line } },
       rightPriceScale: { borderColor: line },
       timeScale: { borderColor: line },
@@ -234,8 +234,8 @@ export function PriceChart({ id, summary, quote }: Props) {
         </label>
         <div className="row wrap right" role="group" aria-label="Superposiciones">
           {OVERLAYS.map((o) => (
-            <button key={o.key} type="button" className="chip" aria-pressed={overlays.has(o.key)} onClick={() => toggle(o.key)} style={overlays.has(o.key) ? { borderColor: o.color, color: 'var(--ink)' } : undefined}>
-              <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 2, background: o.color, opacity: overlays.has(o.key) ? 1 : 0.35 }} /> {o.label}
+            <button key={o.key} type="button" className="chip" aria-pressed={overlays.has(o.key)} onClick={() => toggle(o.key)}>
+              <span aria-hidden="true" style={{ width: 8, height: 8, background: o.color, opacity: overlays.has(o.key) ? 1 : 0.35 }} /> {o.label}
             </button>
           ))}
         </div>

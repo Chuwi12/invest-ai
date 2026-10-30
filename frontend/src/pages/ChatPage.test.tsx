@@ -69,3 +69,22 @@ describe('ChatPage: una respuesta no se pinta dos veces', () => {
     await waitFor(() => expect(screen.getAllByText('hola', { selector: 'div' })).toHaveLength(1))
   })
 })
+
+describe('ChatPage: estado vacío', () => {
+  beforeAll(async () => {
+    await import('@/pages/ChatPage')
+  })
+  beforeEach(() => setApi(mockApi))
+
+  it('en /chat, sin conversación abierta, se ve la invitación a preguntar (la query desactivada sigue en isPending)', async () => {
+    renderApp(<App />, '/chat')
+    expect(await screen.findByRole('heading', { name: 'Pregunta sobre cualquier activo' })).toBeInTheDocument()
+  })
+
+  it('con una conversación que aún carga no se enseña el estado vacío', async () => {
+    setApi({ ...mockApi, getConversation: () => new Promise<never>(() => {}) })
+    renderApp(<App />, '/chat/c1')
+    await screen.findByRole('textbox', { name: 'Mensaje' })
+    expect(screen.queryByRole('heading', { name: 'Pregunta sobre cualquier activo' })).not.toBeInTheDocument()
+  })
+})
