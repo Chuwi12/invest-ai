@@ -5,7 +5,7 @@ members = ["crates/domain", "crates/market", "crates/ai", "crates/knowledge", "c
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
-license = "UNLICENSED"
+license = "AGPL-3.0-or-later"
 publish = false
 
 [workspace.dependencies]

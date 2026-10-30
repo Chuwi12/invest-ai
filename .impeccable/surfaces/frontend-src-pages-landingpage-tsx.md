@@ -11,7 +11,7 @@ related_targets: []
 Persuade. Primera pantalla al abrir la app (`/`); el panel pasa a `/dashboard` detrás de «Entrar al panel».
 
 ## Audiencia, trabajo y acción
-- Terceros a los que el autor enseña la app (portfolio, demos, contactos de BIP): en segundos deben entender qué es, que cada cifra se puede comprobar y que todo corre en local.
+- Terceros a los que el autor enseña la app (portfolio, demos, contactos profesionales): en segundos deben entender qué es, que cada cifra se puede comprobar y que todo corre en local.
 - Acción principal: «Entrar al panel».
 - Prueba: datos REALES de la instancia (último análisis guardado, cotizaciones en vivo de la lista, estado del modelo y de la pasada). Sin datos de ejemplo: con la instancia vacía, estado vacío honesto que invita a entrar y analizar.
 - Restricciones: solo hechos verificables, sin promesas de rentabilidad, aviso «no es asesoramiento financiero» visible.

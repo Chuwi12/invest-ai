@@ -11,7 +11,7 @@ web
 - **Quien la usa:** un inversor particular que la ejecuta en su propio ordenador (un solo usuario, sin cuentas). Abre la app
   desde el menú del escritorio o el navegador para analizar un activo concreto, preguntar al chat, revisar su lista de
   seguimiento y ver si los análisis pasados acertaron.
-- **Quien la ve en la landing:** terceros a los que el autor enseña el producto (portfolio, demos, contactos de BIP). Tienen
+- **Quien la ve en la landing:** terceros a los que el autor enseña el producto (portfolio, demos, contactos profesionales). Tienen
   que entender en poco tiempo qué es, cómo funciona y por qué es distinto, y entrar a la app.
 
 ## Product Purpose
