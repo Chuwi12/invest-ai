@@ -151,7 +151,12 @@ impl Citations {
             let d = &h.doc;
             let kind = match d.kind {
                 DocKind::News => if es { "noticia" } else { "news" }.to_string(),
-                DocKind::Filing => format!("{} {}", if es { "folleto" } else { "filing" }, d.subtype.as_deref().unwrap_or("")),
+                DocKind::Filing => {
+                    let form = d.subtype.as_deref().unwrap_or("");
+                    // 10-K, 10-Q, 20-F, 40-F y 8-K/6-K son informes de la empresa; S-1, 424B, 497K… son folletos.
+                    let report = ["10-", "20-F", "40-F", "8-K", "6-K"].iter().any(|p| form.starts_with(p));
+                    format!("{} {form}", if !es { "filing" } else if report { "informe" } else { "folleto" })
+                }
                 DocKind::Analysis => if es { "análisis previo de esta app (no es fuente primaria)" } else { "previous analysis by this app (not a primary source)" }.to_string(),
             };
             let publisher = d.publisher.as_deref().unwrap_or(&d.source);

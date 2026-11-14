@@ -23,7 +23,7 @@ use crate::{
     lexical::{fts_query, rrf_max, rrf_term},
     model::*,
     store::{self, ChunkRow, InsertDoc},
-    text::{fold_key, hash128, hash128_hex, looks_like_injection, normalize_text, parse_hash128},
+    text::{fold_key, hash128, hash128_hex, is_low_value_news, looks_like_injection, normalize_text, parse_hash128},
 };
 
 /// Tras un fallo transitorio del embedder no se vuelve a intentar durante este tiempo.
@@ -565,6 +565,8 @@ impl KnowledgeBase {
         let max_per_doc = req.max_per_doc.max(1);
         let now = req.now.unwrap_or_else(Utc::now);
         let n = (k * 5).max(25);
+        // La exclusión se resuelve a ids una vez y se aplica en ambos candidatos (vectorial y léxico) ANTES de elegir los `k`.
+        let excluded = store::ids_by_keys(&self.pool, &req.exclude_doc_keys[..req.exclude_doc_keys.len().min(MAX_EXCLUDED_KEYS)]).await?;
         let filter = Filter {
             assets: req.assets.iter().map(|a| a.trim().to_string()).collect(),
             include_general: req.include_general,
@@ -572,6 +574,7 @@ impl KnowledgeBase {
             issuer_key: req.issuer.as_deref().map(fold_key).filter(|s| !s.is_empty()),
             since_ms: req.since.map(|t| t.timestamp_millis()),
             until_ms: req.until.map(|t| t.timestamp_millis()),
+            exclude_docs: excluded.iter().copied().collect(),
         };
         // Candidatos léxicos (BM25), ya con los filtros de SQL; el resto del filtro (emisor) se aplica abajo.
         let mut lex: Vec<store::LexRow> = Vec::new();
@@ -585,6 +588,7 @@ impl KnowledgeBase {
                 include_general: filter.include_general,
                 since_ms: filter.since_ms,
                 until_ms: filter.until_ms,
+                exclude_docs: &excluded,
                 limit: n as i64,
             };
             match store::lexical_search(&self.pool, &q).await {
@@ -674,8 +678,8 @@ impl KnowledgeBase {
 
     // -------------------------------------------------------------- retención
 
-    /// Aplica la retención por antigüedad y el tope de fragmentos. Los fijados y los análisis
-    /// (retención 0) nunca se tocan.
+    /// Aplica la retención por antigüedad, borra el ruido ya archivado (noticias que `is_low_value_news` marca, p. ej.
+    /// páginas de cotización) y aplica el tope de fragmentos. Los fijados y los análisis (retención 0) nunca se tocan.
     pub async fn purge(&self, now: DateTime<Utc>) -> Result<PurgeReport> {
         let _gate = self.write_gate.lock().await;
         let mut rep = PurgeReport::default();
@@ -694,6 +698,13 @@ impl KnowledgeBase {
                     removed_chunks_est += cc;
                     rep.documents_by_age += 1;
                 }
+            }
+        }
+        for (id, title, cc) in store::unpinned_news(&self.pool).await? {
+            if is_low_value_news(&title) && gone.insert(id) {
+                ids.push(id);
+                removed_chunks_est += cc;
+                rep.documents_noise += 1;
             }
         }
         let total = store::total_chunks(&self.pool).await? - removed_chunks_est;

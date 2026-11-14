@@ -147,7 +147,8 @@ async fn build_services(
     let (market, ipo, analyst) = match rag {
         Some(rag) => {
             let funds: Arc<dyn domain::FundDocs> = market.clone();
-            rag.wrap_with_funds(market, ipo, analyst, funds)
+            let companies: Arc<dyn domain::CompanyDocs> = market.clone();
+            rag.wrap_with_docs(market, ipo, analyst, funds, companies)
         }
         None => (market as Arc<dyn MarketData>, ipo, analyst),
     };

@@ -10,115 +10,58 @@
 //! - Como mucho una descarga por ETF cada [`REFRESH_DAYS`] días, también entre reinicios (se mira
 //!   la fecha del documento ya archivado) y un reintento en memoria cada [`RETRY`] tras un fallo.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
 
 use chrono::{NaiveTime, Utc};
 use domain::{AssetClass, AssetId, FundDocs, Prospectus};
 use knowledge::{DocKind, KnowledgeBase, NewDocument, Section};
-use sqlx::{Row, SqlitePool};
-use tokio::{sync::mpsc, task::JoinHandle};
+use sqlx::SqlitePool;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+
+use crate::doc_queue::{DocArchive, DocSink, FETCH_TIMEOUT, archived_age_ms, ingest_checked};
+pub use crate::doc_queue::RETRY;
 
 /// Días entre refrescos de un mismo folleto.
 pub const REFRESH_DAYS: i64 = 30;
-/// Espera en memoria antes de volver a intentar un ETF (con éxito, fallo o sin folleto).
-pub const RETRY: Duration = Duration::from_secs(6 * 3600);
-/// Tiempo máximo de una descarga completa (varias peticiones a EDGAR).
-const FETCH_TIMEOUT: Duration = Duration::from_secs(150);
 const QUEUE: usize = 8;
-const SEEN_CAP: usize = 1000;
 
 /// Cola de ETF cuyo folleto conviene archivar. `offer` nunca espera.
-#[derive(Clone)]
-pub struct FundSink {
-    tx: mpsc::Sender<AssetId>,
-    seen: Arc<Mutex<HashMap<String, Instant>>>,
-}
+pub type FundSink = DocSink;
 
-impl FundSink {
-    /// Ofrece un activo; ignora lo que no sea ETF/fondo y lo ofrecido hace menos de [`RETRY`].
-    pub fn offer(&self, id: &AssetId) {
-        if !matches!(id.class, AssetClass::Etf | AssetClass::Fund) {
-            return;
-        }
-        let key = id.to_string();
-        {
-            let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
-            if seen.len() > SEEN_CAP {
-                seen.clear();
-            }
-            if seen.get(&key).is_some_and(|t| t.elapsed() < RETRY) {
-                return;
-            }
-            seen.insert(key.clone(), Instant::now());
-        }
-        if self.tx.try_send(id.clone()).is_err() {
-            // Cola llena: se olvida para que la próxima petición lo reintente.
-            self.seen.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
-        }
-    }
+fn is_fund(id: &AssetId) -> bool {
+    matches!(id.class, AssetClass::Etf | AssetClass::Fund)
 }
 
 /// Cola + trabajador. El trabajador arranca con [`FundArchive::start`], cuando ya hay un `FundDocs`.
-pub struct FundArchive {
-    sink: FundSink,
-    rx: Mutex<Option<mpsc::Receiver<AssetId>>>,
-    kb: Arc<KnowledgeBase>,
-    pool: SqlitePool,
-    shutdown: CancellationToken,
-    handles: Mutex<Vec<JoinHandle<()>>>,
-}
+pub struct FundArchive(DocArchive);
 
 impl FundArchive {
     pub fn new(kb: Arc<KnowledgeBase>, pool: SqlitePool, shutdown: CancellationToken) -> Self {
-        let (tx, rx) = mpsc::channel(QUEUE);
-        Self { sink: FundSink { tx, seen: Arc::default() }, rx: Mutex::new(Some(rx)), kb, pool, shutdown, handles: Mutex::default() }
+        Self(DocArchive::new(kb, pool, shutdown, QUEUE, is_fund))
     }
 
     pub fn sink(&self) -> FundSink {
-        self.sink.clone()
+        self.0.sink()
     }
 
     /// Arranca el trabajador (una sola vez; las siguientes llamadas no hacen nada).
     pub fn start(&self, docs: Arc<dyn FundDocs>) {
-        let Some(mut rx) = self.rx.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
-        let (kb, pool, shutdown) = (self.kb.clone(), self.pool.clone(), self.shutdown.clone());
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    () = shutdown.cancelled() => break,
-                    item = rx.recv() => {
-                        let Some(id) = item else { break };
-                        archive_one(&kb, &pool, docs.as_ref(), &id).await;
-                    }
-                }
-            }
+        self.0.start(move |kb, pool, id| {
+            let docs = docs.clone();
+            async move { archive_one(&kb, &pool, docs.as_ref(), &id).await }
         });
-        self.handles.lock().unwrap_or_else(|e| e.into_inner()).push(handle);
     }
 
     /// Trabajadores lanzados, para que el apagado los espere.
     pub fn take_handles(&self) -> Vec<JoinHandle<()>> {
-        std::mem::take(&mut *self.handles.lock().unwrap_or_else(|e| e.into_inner()))
+        self.0.take_handles()
     }
 }
 
 /// Clave lógica del folleto de un ETF: una por ticker, así el de cada año sustituye al anterior.
 pub fn doc_key(id: &AssetId) -> String {
     format!("etf:{}", id.symbol.to_ascii_uppercase())
-}
-
-/// Edad (ms) del folleto archivado: desde la última vez que se archivó o se comprobó.
-async fn archived_age_ms(pool: &SqlitePool, key: &str) -> Option<i64> {
-    let row = sqlx::query("SELECT ingested_at, meta FROM documents WHERE doc_key = ?").bind(key).fetch_optional(pool).await.ok()??;
-    let ingested: i64 = row.try_get(0).ok()?;
-    let meta: String = row.try_get(1).unwrap_or_default();
-    let checked = serde_json::from_str::<serde_json::Value>(&meta).ok().and_then(|m| m["checkedAt"].as_i64()).unwrap_or(0);
-    Some(Utc::now().timestamp_millis() - ingested.max(checked))
 }
 
 async fn archive_one(kb: &KnowledgeBase, pool: &SqlitePool, docs: &dyn FundDocs, id: &AssetId) {
@@ -142,12 +85,8 @@ async fn archive_one(kb: &KnowledgeBase, pool: &SqlitePool, docs: &dyn FundDocs,
         tracing::debug!(%id, "el folleto del ETF no tiene secciones");
         return;
     };
-    match kb.ingest(doc).await {
-        Ok(r) => {
-            // Marca la comprobación: un documento sin cambios no mueve `ingested_at`.
-            let _ = kb.merge_meta(r.document_id, serde_json::json!({ "checkedAt": Utc::now().timestamp_millis() })).await;
-            tracing::debug!(%id, accession = %p.accession, outcome = ?r.outcome, chunks = r.chunks, pending = r.pending, "folleto de ETF archivado");
-        }
+    match ingest_checked(kb, doc).await {
+        Ok(r) => tracing::debug!(%id, accession = %p.accession, outcome = ?r.outcome, chunks = r.chunks, pending = r.pending, "folleto de ETF archivado"),
         Err(e) => tracing::warn!(%id, error = %e, "no se pudo archivar el folleto del ETF"),
     }
 }

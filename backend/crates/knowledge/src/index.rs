@@ -39,10 +39,15 @@ pub struct Filter {
     pub issuer_key: Option<String>,
     pub since_ms: Option<i64>,
     pub until_ms: Option<i64>,
+    /// Documentos que no deben salir (ids ya resueltos desde sus `doc_key`).
+    pub exclude_docs: HashSet<i64>,
 }
 
 impl Filter {
     fn accepts(&self, d: &DocMeta) -> bool {
+        if self.exclude_docs.contains(&d.id) {
+            return false;
+        }
         if !self.kinds.is_empty() && !self.kinds.contains(&d.kind) {
             return false;
         }

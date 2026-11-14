@@ -1517,6 +1517,18 @@ pub trait FundDocs: Send + Sync + 'static {
     async fn fund_prospectus(&self, id: &AssetId) -> Result<Prospectus>;
 }
 
+/// Informes periódicos de una empresa cotizada en EE. UU. (EDGAR). Lo implementa `market`
+/// (`MarketService`). Descarga costosa (varios documentos de cientos de KB): solo para el archivo
+/// RAG y siempre en segundo plano.
+#[async_trait]
+pub trait CompanyDocs: Send + Sync + 'static {
+    /// Los informes más recientes de la empresa `id`, cada uno con sus secciones clave en `sections`
+    /// (`form` dice cuál es): el último 10-K (o 20-F), el último 10-Q si es posterior y la nota de
+    /// prensa de resultados del último 8-K con Item 2.02 (EX-99.1). Vacío si la empresa no presenta
+    /// esos formularios; `Err` si no figura en EDGAR o si la descarga falla.
+    async fn company_reports(&self, id: &AssetId) -> Result<Vec<Prospectus>>;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Redes sociales (opinión, no hechos). Ver docs/notes/social.md.
 // ---------------------------------------------------------------------------------------------

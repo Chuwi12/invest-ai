@@ -282,12 +282,8 @@ impl Relevance {
         let min_len = if id.class == AssetClass::Crypto { 2 } else { 3 };
         let mut phrases = Vec::new();
         if let Some(name) = name {
-            let words: Vec<String> = name
-                .to_lowercase()
-                .split(|c: char| !c.is_alphanumeric() && c != '&' && c != '\'')
-                .filter(|w| !w.is_empty())
-                .map(str::to_string)
-                .collect();
+            let lower = name.to_lowercase();
+            let words: Vec<String> = name_words(&lower).map(str::to_string).collect();
             let core: Vec<&String> = words
                 .iter()
                 .filter(|w| !LEGAL_SUFFIXES.contains(&w.as_str()))
@@ -337,15 +333,38 @@ impl Relevance {
         0
     }
 
+    /// El título o el resumen nombran el activo (sin contar la etiqueta del proveedor: Finnhub
+    /// etiqueta con el símbolo artículos que solo hablan de otras empresas). Lo usa el archivo del
+    /// servidor, que es más laxo que el feed: además del nombre y del ticker exacto, acepta el ticker de
+    /// 4 o más letras sin distinguir mayúsculas como palabra completa («Meta beats Q3 estimates» para
+    /// `META`). Los de 3 letras (XOM, CAT, SAP) siguen exigiendo mayúsculas: «cat» o «sap» son palabras.
+    /// A cambio, un ticker que es una palabra corriente (COST, WELL, ALLY) trae algún falso positivo.
+    /// Límite que queda: un alias que no es el nombre ni el ticker («Google» para GOOGL, «TSMC» para TSM)
+    /// no se reconoce. `score` y `merge` (feed en vivo) no usan esta regla.
+    pub fn mentioned(&self, item: &NewsItem) -> bool {
+        let loose = |text: &str| {
+            self.mentions(text) || self.ticker.as_deref().is_some_and(|t| t.chars().count() >= 4 && contains_word(text, t, false))
+        };
+        loose(&item.title) || item.summary.as_deref().is_some_and(loose)
+    }
+
     fn mentions(&self, text: &str) -> bool {
         if let Some(t) = &self.ticker
             && contains_word(text, t, true)
         {
             return true;
         }
+        // El texto se parte igual que el nombre («Coca-Cola» y «Coca Cola» son la misma frase).
         let lower = text.to_lowercase();
-        self.phrases.iter().any(|p| contains_word(&lower, p, false))
+        let words = name_words(&lower).collect::<Vec<_>>().join(" ");
+        self.phrases.iter().any(|p| contains_word(&words, p, false))
     }
+}
+
+/// Palabras de un texto ya en minúsculas: guiones (`-`, `‑`, `–`, `—`) y demás signos separan; `&` y
+/// `'` forman parte de la palabra («AT&T», «o'reilly»).
+fn name_words(lower: &str) -> impl Iterator<Item = &str> {
+    lower.split(|c: char| !c.is_alphanumeric() && c != '&' && c != '\'').filter(|w| !w.is_empty())
 }
 
 /// Búsqueda de palabra completa (sin depender de `regex`).
@@ -618,6 +637,57 @@ mod tests {
             )),
             2
         );
+    }
+
+    #[test]
+    fn hyphenated_names_match_with_or_without_hyphen() {
+        let ko = Relevance::new(&AssetId::new(AssetClass::Stock, "KO"), Some("The Coca-Cola Company"));
+        for title in [
+            "Coca-Cola lifts outlook after strong quarter",
+            "Coca\u{2011}Cola lifts outlook",
+            "Coca\u{2013}Cola lifts outlook",
+            "Coca\u{2014}Cola lifts outlook",
+            "Coca Cola lifts outlook",
+            "Why COCA-COLA shares rose",
+        ] {
+            assert!(ko.mentioned(&item(title, "https://a.com/ko", "google_news", 1)), "{title}");
+        }
+        // Una palabra pegada a la frase no es la frase.
+        assert!(!ko.mentioned(&item("Coca-Colanomics explained", "https://a.com/ko2", "google_news", 1)));
+        assert!(!ko.mentioned(&item("Decoca-Cola is not a thing", "https://a.com/ko3", "google_news", 1)));
+        let rr = Relevance::new(&AssetId::new(AssetClass::Stock, "RR"), Some("Rolls-Royce Holdings plc"));
+        assert!(rr.mentioned(&item("Rolls-Royce raises guidance", "https://a.com/rr", "google_news", 1)));
+        assert!(rr.mentioned(&item("Rolls Royce raises guidance", "https://a.com/rr2", "google_news", 1)));
+        assert!(!rr.mentioned(&item("Rolls-Roycefan club", "https://a.com/rr3", "google_news", 1)));
+        // El filtro de `merge` (feed en vivo) deja pasar el titular con guion.
+        let now = DateTime::<Utc>::from_timestamp(10_000, 0).unwrap();
+        let out = merge(vec![vec![item("Coca-Cola lifts outlook", "https://a.com/ko", "google_news", 5)]], Some(&ko), 10, now);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn mentioned_accepts_a_long_ticker_in_any_case_but_the_live_feed_does_not() {
+        let meta = Relevance::new(&AssetId::new(AssetClass::Stock, "META"), Some("Meta Platforms, Inc."));
+        let headline = item("Meta beats Q3 estimates as ad revenue jumps 26%", "https://a.com/meta", "google_news", 1);
+        assert!(meta.mentioned(&headline));
+        let mut in_summary = item("Ad revenue jumps 26%", "https://a.com/meta2", "google_news", 1);
+        in_summary.summary = Some("Shares of META rose after the report.".into());
+        assert!(meta.mentioned(&in_summary));
+        assert!(!meta.mentioned(&item("Metadata standards for open data", "https://a.com/meta3", "google_news", 1)), "palabra completa");
+        assert!(!meta.mentioned(&item("Nothing about the company", "https://a.com/meta4", "google_news", 1)));
+        // El feed en vivo no cambia: `score` y `merge` siguen sin ver el ticker en minúsculas.
+        assert_eq!(meta.score(&headline), 0);
+        let now = DateTime::<Utc>::from_timestamp(10_000, 0).unwrap();
+        assert!(merge(vec![vec![headline]], Some(&meta), 10, now).is_empty());
+        // Tickers de 3 letras: mayúsculas exactas, como siempre.
+        let cat = Relevance::new(&AssetId::new(AssetClass::Stock, "CAT"), Some("Caterpillar Inc."));
+        assert!(!cat.mentioned(&item("Cat food prices rise", "https://a.com/cat", "google_news", 1)));
+        assert!(cat.mentioned(&item("CAT raises outlook", "https://a.com/cat2", "google_news", 1)));
+        assert!(cat.mentioned(&item("Caterpillar raises outlook", "https://a.com/cat3", "google_news", 1)));
+        // Un alias que no es ni el nombre ni el ticker no se reconoce (límite documentado).
+        let goog = Relevance::new(&AssetId::new(AssetClass::Stock, "GOOGL"), Some("Alphabet Inc."));
+        assert!(!goog.mentioned(&item("Google unveils a new chip", "https://a.com/g", "google_news", 1)));
+        assert!(goog.mentioned(&item("Googl falls after the report", "https://a.com/g2", "google_news", 1)));
     }
 
     #[test]

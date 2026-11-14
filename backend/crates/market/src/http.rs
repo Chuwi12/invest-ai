@@ -14,6 +14,10 @@ pub const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
 /// Tope de tamaño de respuesta que aceptamos leer (company_tickers de la SEC pesa ~1 MB).
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
+/// Mensaje de `ProviderError::Upstream` cuando el cuerpo pasa del tope: quien lo trata como un caso
+/// distinto de un fallo de red (un documento enorme lo será siempre) lo reconoce por esta constante.
+pub const TOO_LARGE: &str = "respuesta demasiado grande";
+
 /// Contadores de peticiones salientes por host (cabeceras recibidas, sin leer el cuerpo).
 /// Solo hay un puñado de hosts distintos (los de los proveedores), así que el mapa no crece.
 static OUTBOUND: std::sync::Mutex<Vec<(String, u64, u64)>> = std::sync::Mutex::new(Vec::new());
@@ -182,12 +186,12 @@ async fn read_limited(mut resp: reqwest::Response, max: usize) -> PResult<Vec<u8
     if let Some(len) = resp.content_length()
         && len > max as u64
     {
-        return Err(ProviderError::upstream("respuesta demasiado grande"));
+        return Err(ProviderError::upstream(TOO_LARGE));
     }
     let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = resp.chunk().await.map_err(map_reqwest)? {
         if buf.len() + chunk.len() > max {
-            return Err(ProviderError::upstream("respuesta demasiado grande"));
+            return Err(ProviderError::upstream(TOO_LARGE));
         }
         buf.extend_from_slice(&chunk);
     }

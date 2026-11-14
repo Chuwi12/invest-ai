@@ -385,7 +385,8 @@ mod rag_on {
         assert_eq!(tools.len(), 9);
         assert!(!tools.iter().any(|t| t["function"]["name"] == "search_knowledge"));
         assert!(!reqs[0]["messages"][0]["content"].as_str().unwrap().contains("Knowledge archive"));
-        assert_eq!(analysis_kb.calls(), 1, "el análisis lanzado desde el chat recupera con la búsqueda del análisis");
+        // Desde el 13-nov la recuperación del análisis hace una búsqueda por aspecto y tipo (3 aspectos × informes y noticias), no una.
+        assert_eq!(analysis_kb.calls(), 6, "el análisis lanzado desde el chat recupera con la búsqueda del análisis");
     }
 
     /// `RAG_ANALYSIS=0`, `RAG_CHAT=1`: el chat ofrece `search_knowledge`, pero el análisis que lanza con

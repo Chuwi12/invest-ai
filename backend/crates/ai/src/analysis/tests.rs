@@ -818,6 +818,44 @@ mod rag_on {
     }
 
     #[tokio::test]
+    async fn the_news_the_context_already_delivers_are_not_repeated_and_the_filing_comes_first() {
+        let kb = KnowledgeBase::open(testutil::memory_pool().await, Arc::new(FakeEmbedder::default()), KnowledgeConfig::default()).await.unwrap();
+        // `news:n1` es una noticia del snapshot (ya llega a las etapas como [N#]); `news:x9`, no.
+        for (key, kind, title, text) in [
+            ("news:n1", DocKind::News, "Apple shares rise as analysts upgrade iPhone demand outlook", "DELIVERED-MARKER Apple shares rise as analysts upgrade iPhone demand outlook."),
+            ("news:x9", DocKind::News, "Apple supplier warns of memory shortage", "FRESH-MARKER Apple supplier warns of a memory shortage next quarter."),
+            ("filing:k", DocKind::Filing, "Apple 10-K", "FILING-MARKER Apple depends on outsourcing partners located in Asia."),
+        ] {
+            kb.ingest(NewDocument {
+                doc_key: key.into(),
+                kind,
+                subtype: (kind == DocKind::Filing).then(|| "10-K".to_string()),
+                source: "test".into(),
+                publisher: None,
+                title: title.into(),
+                url: Some(format!("https://example.test/{key}")),
+                issuer: None,
+                language: Some("en".into()),
+                published_at: Utc.with_ymd_and_hms(2026, 10, 5, 12, 0, 0).unwrap(),
+                assets: vec!["stock:AAPL".into()],
+                sections: vec![Section { heading: None, text: text.into() }],
+                meta: json!({}),
+            })
+            .await
+            .unwrap();
+        }
+        let e = with_kb(env().await, kb);
+        script(&e, ["RSI correcto", "x", "y"]);
+        e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Standard)).await.unwrap();
+        let reqs = e.mock.chat_requests();
+        assert!(reqs[..4].iter().any(|r| user_of(r).contains("Apple shares rise as analysts upgrade iPhone demand outlook")), "alguna etapa sí recibe la noticia como [N#]");
+        let judge = user_of(&reqs[4]);
+        assert!(!judge.contains("DELIVERED-MARKER"), "la noticia que el contexto ya entrega no se repite como [D#]: {judge}");
+        let (filing, fresh) = (judge.find("FILING-MARKER").expect("informe"), judge.find("FRESH-MARKER").expect("noticia nueva"));
+        assert!(filing < fresh, "las fuentes primarias van primero");
+    }
+
+    #[tokio::test]
     async fn without_the_archive_the_same_figure_is_not_backed() {
         let e = env().await;
         script(&e, ["Los ingresos de servicios crecieron un 31.4 percent en el tercer trimestre", "x", "y"]);
