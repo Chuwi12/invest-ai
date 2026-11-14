@@ -1,4 +1,5 @@
 //! Datos de mercado de invest-ai.
+pub mod company_filing;
 pub mod config;
 pub mod fund;
 pub mod fund_prospectus;

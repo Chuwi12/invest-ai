@@ -325,3 +325,89 @@ async fn missing_schema_is_reported() {
     let err = KnowledgeBase::open(pool, Arc::new(FakeEmbedder::default()), KnowledgeConfig::default()).await.err().unwrap();
     assert!(err.to_string().contains("0004"));
 }
+
+/// 5 noticias del mismo activo que comparten palabras: todas son candidatas de cualquier consulta sobre «copper».
+async fn five_copper_news(kb: &KnowledgeBase) {
+    for i in 0..5 {
+        let t = format!("Copper rally number {i} lifts miners");
+        kb.ingest(doc(&format!("news:c{i}"), DocKind::News, &t, &t, &["stock:FCX"], 1)).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn excluded_doc_keys_never_come_out_and_do_not_cost_results() {
+    let down: Arc<dyn Embedder> = Arc::new(Down);
+    let fake: Arc<dyn Embedder> = Arc::new(FakeEmbedder::default());
+    // Híbrida con vectores, solo vectores y solo BM25 (embedder caído): los tres caminos de candidatos.
+    for (name, embedder, hybrid) in [("híbrida", fake.clone(), true), ("solo vectores", fake, false), ("solo léxica", down, true)] {
+        let kb = KnowledgeBase::open(testutil::memory_pool().await, embedder, KnowledgeConfig { hybrid, ..KnowledgeConfig::default() }).await.unwrap();
+        five_copper_news(&kb).await;
+        let q = SearchRequest { k: 3, assets: vec!["stock:FCX".into()], ..req("copper rally lifts miners") };
+        let top: Vec<String> = kb.search(&q).await.unwrap().hits.into_iter().map(|h| h.doc.doc_key).collect();
+        assert_eq!(top.len(), 3, "{name}");
+        // Excluye dos de los tres mejores: siguen saliendo 3 (los otros 3 documentos), no 1.
+        let excluded = vec![top[0].clone(), top[1].clone()];
+        let hits = kb.search(&SearchRequest { exclude_doc_keys: excluded.clone(), ..q.clone() }).await.unwrap().hits;
+        let keys: Vec<&str> = hits.iter().map(|h| h.doc.doc_key.as_str()).collect();
+        assert_eq!(keys.len(), 3, "{name}: {keys:?}");
+        assert!(excluded.iter().all(|e| !keys.contains(&e.as_str())), "{name}: {keys:?}");
+        // Una clave inexistente (o vacía) no rompe ni cambia nada.
+        let same = kb.search(&SearchRequest { exclude_doc_keys: vec!["news:nope".into(), "".into()], ..q.clone() }).await.unwrap().hits;
+        assert_eq!(same.iter().map(|h| h.doc.doc_key.clone()).collect::<Vec<_>>(), top, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn purge_removes_archived_noise_but_not_pinned_or_legitimate_news() {
+    let kb = kb().await;
+    let quote = "Apple Inc. (AAPL) stock price, news, quote and history";
+    let sport = "Burgos CF 1-0 CE Sabadell | Resumen LaLiga Hypermotion";
+    let legit = "Weekly Recap: BPCE 7% stake in Banco de Sabadell and buyback 76% complete";
+    // `ingest` directo = lo que había en el archivo antes de existir el filtro.
+    kb.ingest(doc("news:q", DocKind::News, quote, quote, &["stock:AAPL"], 1)).await.unwrap();
+    kb.ingest(doc("news:s", DocKind::News, sport, sport, &["stock:SAB.MC"], 1)).await.unwrap();
+    let pinned = kb.ingest(doc("news:p", DocKind::News, "Rheinmetall AG Estimates – XETR:RHM", "Rheinmetall AG Estimates – XETR:RHM", &[], 1)).await.unwrap();
+    kb.pin(pinned.document_id, true).await.unwrap();
+    // Ruido ya caducado: lo cuenta la antigüedad, no el ruido (no se cuenta dos veces).
+    kb.ingest(doc("news:old", DocKind::News, "NVIDIA Corporation $NVDA Stock Sold by Woodstock Corp", "NVIDIA Corporation $NVDA Stock Sold by Woodstock Corp", &[], 200)).await.unwrap();
+    kb.ingest(doc("news:l", DocKind::News, legit, legit, &["stock:SAB.MC"], 1)).await.unwrap();
+    kb.ingest(doc("filing:f", DocKind::Filing, "Apple Inc. (AAPL) stock price, news, quote and history", "Not a news item: filings are never touched by the noise filter.", &["stock:AAPL"], 1)).await.unwrap();
+
+    let rep = kb.purge(now()).await.unwrap();
+    assert_eq!((rep.documents_by_age, rep.documents_noise, rep.documents_by_cap), (1, 2, 0), "{rep:?}");
+    assert_eq!(rep.chunks_removed, 3, "{rep:?}");
+    let s = kb.stats().await.unwrap();
+    assert_eq!((s.documents, s.chunks, s.indexed, s.lexical_indexed), (3, 3, 3, 3), "el índice vectorial y el léxico quedan coherentes: {s:?}");
+    for q in ["stock price quote history", "Burgos Sabadell Hypermotion"] {
+        let titles: Vec<String> = kb.search(&SearchRequest { k: 10, kinds: vec![DocKind::News], ..req(q) }).await.unwrap().hits.into_iter().map(|h| h.doc.title).collect();
+        assert!(!titles.iter().any(|t| t == quote || t == sport), "{q}: {titles:?}");
+    }
+    assert!(kb.search(&req("BPCE stake buyback")).await.unwrap().hits.iter().any(|h| h.doc.title == legit));
+    // Segunda pasada: nada que hacer.
+    assert_eq!(kb.purge(now()).await.unwrap(), knowledge::PurgeReport::default());
+}
+
+#[tokio::test]
+async fn ingesting_news_skips_noise() {
+    let kb = kb().await;
+    let item = |id: &str, title: &str| NewsItem {
+        id: id.into(),
+        title: title.into(),
+        summary: None,
+        url: format!("https://x.test/{id}"),
+        publisher: None,
+        published_at: now(),
+        image_url: None,
+        tickers: vec![],
+        sentiment: None,
+        provider: "google_news".into(),
+        language: None,
+    };
+    let rep = kb
+        .ingest_news(
+            Some(&AssetId::new(domain::AssetClass::Stock, "SAB.MC")),
+            &[item("1", "Burgos CF vs Sabadell: estadísticas previas y datos en directo | LALIGA Hypermotion"), item("2", "Banco Sabadell cierra el trimestre con beneficios récord")],
+        )
+        .await;
+    assert_eq!((rep.added, rep.skipped), (1, 1), "{rep:?}");
+}

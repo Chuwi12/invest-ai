@@ -3,8 +3,10 @@
 //! Todo el código habla con `market` y `ai` a través de los traits de `domain`; solo `main.rs`
 //! conoce las implementaciones concretas.
 
+pub mod company_docs;
 pub mod config;
 pub mod db;
+pub mod doc_queue;
 pub mod error;
 pub mod extract;
 pub mod fake;

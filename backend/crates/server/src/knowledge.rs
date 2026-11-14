@@ -20,7 +20,7 @@
 //! - [`run_maintenance`]: `embed_pending` en tandas pequeñas y `purge` cada 6 h.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -52,6 +52,8 @@ pub const MAINTENANCE_TICK: Duration = Duration::from_secs(120);
 pub const PENDING_BATCH: usize = 64;
 const FILING_QUEUE: usize = 16;
 const FILINGS_SEEN_CAP: usize = 1000;
+/// Nombres de activo recordados para filtrar noticias (ver [`TeeMarket`]).
+const NAMES_CAP: usize = 2000;
 const GATE_POLL: Duration = Duration::from_millis(500);
 
 // ------------------------------------------------------------------------------------ actividad
@@ -170,16 +172,25 @@ impl Embedder for GatedEmbedder {
 // ------------------------------------------------------------------------------------- mercado
 
 /// `MarketData` que ofrece al archivo las noticias que ya devuelve, sin peticiones extra.
+///
+/// Las noticias de una acción solo se archivan enlazadas a ella si su título o resumen la nombran
+/// (`market::news::Relevance`): los proveedores etiquetan con el símbolo artículos «relacionados»
+/// que hablan de otras empresas. El filtro solo afecta a lo que se archiva; al llamador se le
+/// devuelve exactamente lo que dio el proveedor.
 pub struct TeeMarket {
     inner: Arc<dyn MarketData>,
     sink: NewsSink,
     /// Cola de folletos de ETF (ver `fund_docs`): solo con RAG y un `FundDocs` cableado.
     funds: Option<crate::fund_docs::FundSink>,
+    /// Cola de informes de empresa (ver `company_docs`): solo con RAG y un `CompanyDocs` cableado.
+    companies: Option<crate::company_docs::CompanySink>,
+    /// Nombre de los activos vistos en `snapshot` (id -> nombre), acotado: `news(id, ..)` no trae el nombre.
+    names: Mutex<HashMap<String, String>>,
 }
 
 impl TeeMarket {
     pub fn new(inner: Arc<dyn MarketData>, sink: NewsSink) -> Self {
-        Self { inner, sink, funds: None }
+        Self { inner, sink, funds: None, companies: None, names: Mutex::default() }
     }
 
     /// Ofrece al archivo los ETF/fondos de cada snapshot para archivar su folleto resumido.
@@ -188,6 +199,45 @@ impl TeeMarket {
         self.funds = Some(funds);
         self
     }
+
+    /// Ofrece al archivo las acciones de cada snapshot para archivar sus informes periódicos.
+    #[must_use]
+    pub fn with_companies(mut self, companies: crate::company_docs::CompanySink) -> Self {
+        self.companies = Some(companies);
+        self
+    }
+
+    fn remember_name(&self, id: &AssetId, name: Option<&str>) {
+        let Some(name) = name else { return };
+        let mut names = self.names.lock().unwrap_or_else(|e| e.into_inner());
+        if names.len() > NAMES_CAP {
+            names.clear();
+        }
+        names.insert(id.to_string(), name.to_string());
+    }
+
+    /// Ofrece las noticias al archivo; las de un activo, solo las que lo nombran.
+    fn offer_news(&self, id: Option<&AssetId>, name: Option<&str>, items: &[NewsItem]) {
+        match (id, name) {
+            // Solo acciones: es donde los proveedores etiquetan noticias ajenas; las de materias primas o divisas
+            // casi nunca nombran «GC=F» o «EUR/USD» y el filtro las tiraría todas.
+            (Some(id), Some(name)) if id.class == domain::AssetClass::Stock => {
+                let rel = market::news::Relevance::new(id, Some(name));
+                let own: Vec<NewsItem> = items.iter().filter(|n| rel.mentioned(n)).cloned().collect();
+                self.sink.offer(Some(id), &own);
+            }
+            // shortcut: sin nombre conocido (`news` antes de ningún `snapshot` de ese activo tras arrancar) se
+            // enlazan todas como antes; se corrige recordando también los nombres que devuelve `search`.
+            _ => self.sink.offer(id, items),
+        }
+    }
+}
+
+/// El nombre del activo si de verdad se conoce: cuando falla la ficha, `market` rellena el nombre con el
+/// símbolo, y con eso el filtro de noticias descartaría casi todo.
+fn known_name<'a>(id: &AssetId, name: &'a str) -> Option<&'a str> {
+    let name = name.trim();
+    (!name.is_empty() && !name.eq_ignore_ascii_case(&id.symbol)).then_some(name)
 }
 
 #[async_trait]
@@ -212,7 +262,8 @@ impl MarketData for TeeMarket {
     }
     async fn news(&self, id: Option<&AssetId>, limit: usize) -> domain::Result<Vec<NewsItem>> {
         let r = self.inner.news(id, limit).await?;
-        self.sink.offer(id, &r);
+        let name = id.and_then(|id| self.names.lock().unwrap_or_else(|e| e.into_inner()).get(&id.to_string()).cloned());
+        self.offer_news(id, name.as_deref(), &r);
         Ok(r)
     }
     async fn macro_context(&self) -> domain::Result<MacroContext> {
@@ -220,9 +271,16 @@ impl MarketData for TeeMarket {
     }
     async fn snapshot(&self, id: &AssetId) -> domain::Result<AssetSnapshot> {
         let s = self.inner.snapshot(id).await?;
-        self.sink.offer(Some(id), &s.news);
+        let name = known_name(id, &s.summary.name);
+        self.remember_name(id, name);
+        // Ficha caída (el nombre es el símbolo): se filtra con el último nombre bueno recordado, si lo hay.
+        let name = name.map(str::to_string).or_else(|| self.names.lock().unwrap_or_else(|e| e.into_inner()).get(&id.to_string()).cloned());
+        self.offer_news(Some(id), name.as_deref(), &s.news);
         if let Some(funds) = &self.funds {
             funds.offer(&s.summary.id);
+        }
+        if let Some(companies) = &self.companies {
+            companies.offer(&s.summary.id);
         }
         Ok(s)
     }
@@ -352,6 +410,7 @@ struct Archiver {
     news: NewsSink,
     filings: FilingSink,
     funds: crate::fund_docs::FundArchive,
+    companies: crate::company_docs::CompanyArchive,
     workers: Vec<JoinHandle<()>>,
 }
 
@@ -428,8 +487,9 @@ pub async fn open_with(cfg: KnowledgeConfig, pool: SqlitePool, embedder: Arc<dyn
     let archiver = modes.archive.then(|| {
         let (news, w1) = spawn_news_worker(kb.clone(), shutdown.clone());
         let (filings, w2) = spawn_filing_worker(kb.clone(), shutdown.clone());
-        let funds = crate::fund_docs::FundArchive::new(kb.clone(), pool, shutdown);
-        Archiver { news, filings, funds, workers: vec![w1, w2] }
+        let funds = crate::fund_docs::FundArchive::new(kb.clone(), pool.clone(), shutdown.clone());
+        let companies = crate::company_docs::CompanyArchive::new(kb.clone(), pool, shutdown);
+        Archiver { news, filings, funds, companies, workers: vec![w1, w2] }
     });
     Some(Rag { kb, activity, modes, archiver })
 }
@@ -460,13 +520,41 @@ impl Rag {
         analyst: Arc<dyn Analyst>,
         funds: Arc<dyn domain::FundDocs>,
     ) -> (Arc<dyn MarketData>, Arc<dyn IpoData>, Arc<dyn Analyst>) {
+        self.wrap_inner(market, ipo, analyst, Some(funds), None)
+    }
+
+    /// Como [`Rag::wrap_with_funds`], y además archiva los informes periódicos (10-K, 10-Q, nota de
+    /// resultados) de las acciones cuyo snapshot se pide, como mucho cada 7 días, con `companies`.
+    pub fn wrap_with_docs(
+        &self,
+        market: Arc<dyn MarketData>,
+        ipo: Arc<dyn IpoData>,
+        analyst: Arc<dyn Analyst>,
+        funds: Arc<dyn domain::FundDocs>,
+        companies: Arc<dyn domain::CompanyDocs>,
+    ) -> (Arc<dyn MarketData>, Arc<dyn IpoData>, Arc<dyn Analyst>) {
+        self.wrap_inner(market, ipo, analyst, Some(funds), Some(companies))
+    }
+
+    fn wrap_inner(
+        &self,
+        market: Arc<dyn MarketData>,
+        ipo: Arc<dyn IpoData>,
+        analyst: Arc<dyn Analyst>,
+        funds: Option<Arc<dyn domain::FundDocs>>,
+        companies: Option<Arc<dyn domain::CompanyDocs>>,
+    ) -> (Arc<dyn MarketData>, Arc<dyn IpoData>, Arc<dyn Analyst>) {
         let Some(a) = &self.archiver else { return (market, ipo, analyst) };
-        a.funds.start(funds);
-        (
-            Arc::new(TeeMarket::new(market, a.news.clone()).with_funds(a.funds.sink())),
-            Arc::new(TeeIpo::new(ipo, a.filings.clone())),
-            Arc::new(TrackedAnalyst::new(analyst, self.activity.clone())),
-        )
+        let mut tee = TeeMarket::new(market, a.news.clone());
+        if let Some(funds) = funds {
+            a.funds.start(funds);
+            tee = tee.with_funds(a.funds.sink());
+        }
+        if let Some(companies) = companies {
+            a.companies.start(companies);
+            tee = tee.with_companies(a.companies.sink());
+        }
+        (Arc::new(tee), Arc::new(TeeIpo::new(ipo, a.filings.clone())), Arc::new(TrackedAnalyst::new(analyst, self.activity.clone())))
     }
 
     /// Búsquedas para `ai`: la del análisis solo con `RAG_ANALYSIS=1` y la del chat solo con `RAG_CHAT=1`.
@@ -479,7 +567,7 @@ impl Rag {
     /// Sin `RAG_ARCHIVE` no hay nada que mantener (ni `embed_pending` ni `purge`).
     pub fn spawn_background(self, tasks: &TaskTracker, shutdown: CancellationToken) {
         let Some(a) = self.archiver else { return };
-        for w in a.workers.into_iter().chain(a.funds.take_handles()) {
+        for w in a.workers.into_iter().chain(a.funds.take_handles()).chain(a.companies.take_handles()) {
             tasks.spawn(async move {
                 let _ = w.await;
             });
@@ -522,7 +610,7 @@ pub async fn run_maintenance(kb: Arc<KnowledgeBase>, activity: Activity, shutdow
             }
             if last_purge.is_none_or(|t| t.elapsed() >= PURGE_EVERY) {
                 match kb.purge(Utc::now()).await {
-                    Ok(r) => tracing::info!(by_age = r.documents_by_age, by_cap = r.documents_by_cap, chunks = r.chunks_removed, "archivo de conocimiento purgado"),
+                    Ok(r) => tracing::info!(by_age = r.documents_by_age, by_cap = r.documents_by_cap, noise = r.documents_noise, chunks = r.chunks_removed, "archivo de conocimiento purgado"),
                     Err(e) => tracing::warn!(error = %e, "purge del archivo de conocimiento falló"),
                 }
                 last_purge = Some(Instant::now());

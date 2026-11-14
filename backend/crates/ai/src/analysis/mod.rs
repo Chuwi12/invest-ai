@@ -324,7 +324,7 @@ impl AnalysisEngine {
         let system = system_prompt(&lang_code);
         // RAG: una recuperación por activo, antes de las etapas y del juez. Un fallo no detiene el análisis.
         let (knowledge, rag_warning) = match &self.knowledge {
-            Some(kb) => match crate::rag::retrieve_for_analysis(kb.as_ref(), &snap, depth).await {
+            Some(kb) => match crate::rag::retrieve_for_analysis(kb.as_ref(), &snap, depth, &registry).await {
                 Ok(c) => (c, None),
                 Err(e) => {
                     tracing::warn!(error = %e, "archivo de conocimiento no disponible: el análisis sigue sin él");

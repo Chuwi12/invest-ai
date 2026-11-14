@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     chunk::Section,
-    text::{fold_key, normalize_text, sha256_hex},
+    text::{fold_key, is_low_value_news, normalize_text, sha256_hex},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -72,10 +72,11 @@ fn strip_publisher_suffix(title: &str) -> &str {
 
 impl NewDocument {
     /// Convierte una noticia que la app YA ha descargado (sin pedir nada a ningún proveedor).
-    /// `None` si no hay contenido útil (título casi vacío).
+    /// `None` si no hay contenido útil: título casi vacío o ruido (páginas de cotización, avisos 13F,
+    /// deporte; ver [`is_low_value_news`]).
     pub fn from_news_item(item: &NewsItem, asset: Option<&AssetId>) -> Option<Self> {
         let title = normalize_text(&item.title);
-        if title.split_whitespace().count() < 3 {
+        if title.split_whitespace().count() < 3 || is_low_value_news(&title) {
             return None;
         }
         let mut body = title.clone();
@@ -174,6 +175,9 @@ pub struct BatchReport {
     pub failed: usize,
 }
 
+/// Tope de `exclude_doc_keys` atendidas por consulta (cada una es un parámetro SQL).
+pub const MAX_EXCLUDED_KEYS: usize = 500;
+
 /// Consulta. `Default` da una consulta vacía: rellena `query`.
 #[derive(Debug, Clone)]
 pub struct SearchRequest {
@@ -195,6 +199,10 @@ pub struct SearchRequest {
     pub max_per_doc: usize,
     /// Reloj para la recencia (tests). `None` = ahora.
     pub now: Option<DateTime<Utc>>,
+    /// `doc_key` que no deben salir (p. ej. `news:<id>` de las noticias que el contexto ya entrega como `[N#]`).
+    /// Se excluyen ANTES de elegir los `k` (no se devuelven menos por culpa de la exclusión); se atienden las
+    /// primeras [`MAX_EXCLUDED_KEYS`].
+    pub exclude_doc_keys: Vec<String>,
 }
 
 impl Default for SearchRequest {
@@ -211,6 +219,7 @@ impl Default for SearchRequest {
             min_similarity: None,
             max_per_doc: 2,
             now: None,
+            exclude_doc_keys: Vec::new(),
         }
     }
 }
@@ -268,6 +277,8 @@ pub struct Stats {
 pub struct PurgeReport {
     pub documents_by_age: usize,
     pub documents_by_cap: usize,
+    /// Noticias no fijadas que `is_low_value_news` marca (archivadas antes de existir el filtro) y no habían caducado.
+    pub documents_noise: usize,
     pub chunks_removed: usize,
 }
 
@@ -304,5 +315,12 @@ mod tests {
     #[test]
     fn junk_titles_are_skipped() {
         assert!(NewDocument::from_news_item(&news("Hola", 0), None).is_none());
+    }
+
+    #[test]
+    fn noise_is_skipped_but_legitimate_news_is_kept() {
+        assert!(NewDocument::from_news_item(&news("Apple Inc. (AAPL) stock price, news, quote and history", 0), None).is_none());
+        assert!(NewDocument::from_news_item(&news("Burgos CF 1-0 CE Sabadell | Resumen LaLiga Hypermotion", 0), None).is_none());
+        assert!(NewDocument::from_news_item(&news("Weekly Recap: BPCE 7% stake in Banco de Sabadell and buyback 76% complete", 0), None).is_some());
     }
 }

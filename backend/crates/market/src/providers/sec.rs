@@ -16,6 +16,7 @@ use super::{
     text as json_text,
 };
 use crate::{
+    company_filing::{self, Report},
     http::{parse_json, send_ok},
     prospectus,
     ratelimit::RateLimiter,
@@ -154,6 +155,8 @@ pub struct FilingRow {
     pub form: String,
     pub filed: NaiveDate,
     pub document: String,
+    /// Columna `items` de `submissions` (`2.02,9.01`): los apartados que lleva un 8-K. Vacía si no hay.
+    pub items: String,
 }
 
 /// Filas de un bloque columnar de `submissions` (`filings.recent` o un fichero de `filings.files`).
@@ -173,8 +176,9 @@ pub fn parse_filing_rows(block: &Value) -> Vec<FilingRow> {
             let form = form.get(i)?.as_str()?.to_string();
             let filed = NaiveDate::parse_from_str(date.get(i)?.as_str()?, "%Y-%m-%d").ok()?;
             let document = doc.get(i)?.as_str()?.to_string();
+            let items = block["items"].get(i).and_then(Value::as_str).unwrap_or("").to_string();
             let clean = accession.chars().all(|c| c.is_ascii_digit() || c == '-');
-            (clean && safe_path(&document)).then_some(FilingRow { accession, form, filed, document })
+            (clean && safe_path(&document)).then_some(FilingRow { accession, form, filed, document, items })
         })
         .collect()
 }
@@ -555,6 +559,159 @@ impl Sec {
             }
         }
         Err(ProviderError::NotFound(format!("{ticker}: sin folleto resumido utilizable en EDGAR")))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Informes periódicos de una empresa (10-K, 10-Q, 20-F y nota de resultados de un 8-K)
+// ---------------------------------------------------------------------------------------------
+
+/// Formularios anuales que se leen: 10-K de EE. UU. y 20-F de emisores extranjeros (SAP, ASML). El
+/// 40-F no: su MD&A y sus riesgos van en anexos EX-99 del Annual Information Form, no en el documento principal.
+const ANNUAL_FORMS: &[&str] = &["10-K", "20-F"];
+/// Antigüedad máxima del 8-K de resultados (Item 2.02).
+const EARNINGS_DAYS: i64 = 120;
+
+/// Qué presentaciones de una empresa se descargan (`None` = la empresa no tiene ese formulario).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CompanyPlan {
+    /// El último 10-K o 20-F.
+    pub annual: Option<FilingRow>,
+    /// El último 10-Q, solo si se presentó después del anual (si no, el anual ya lo cubre).
+    pub quarterly: Option<FilingRow>,
+    /// El último 8-K con Item 2.02 de los últimos 120 días.
+    pub earnings: Option<FilingRow>,
+}
+
+/// Elige las presentaciones de `rows` (en el orden que sea). Las enmiendas (`10-K/A`) no cuentan: casi
+/// siempre solo añaden la parte III.
+pub fn plan_company_reports(rows: &[FilingRow], today: NaiveDate) -> CompanyPlan {
+    let newest = |it: Vec<&FilingRow>| it.into_iter().max_by(|a, b| (a.filed, &a.accession).cmp(&(b.filed, &b.accession))).cloned();
+    let annual = newest(rows.iter().filter(|r| ANNUAL_FORMS.contains(&r.form.as_str())).collect());
+    let quarterly = newest(rows.iter().filter(|r| r.form == "10-Q" && annual.as_ref().is_none_or(|a| r.filed > a.filed)).collect());
+    let earnings = newest(
+        rows.iter()
+            .filter(|r| r.form == "8-K" && r.items.split(',').any(|i| i.trim() == "2.02"))
+            .filter(|r| (0..=EARNINGS_DAYS).contains(&(today - r.filed).num_days()))
+            .collect(),
+    );
+    CompanyPlan { annual, quarterly, earnings }
+}
+
+/// Anexo EX-99.1 de la página de índice de una presentación (`<acc>-index.htm`, tabla «Document Format
+/// Files»): el nombre del fichero de la fila cuyo tipo es EX-99.1. En un 8-K de resultados es la nota de prensa.
+pub fn pick_exhibit_99(index_html: &str) -> Option<String> {
+    index_html.split("</tr>").find_map(|row| {
+        // Cada trozo tras «<td» empieza por los atributos de la celda: el texto va tras el primer «>».
+        let is_99 = row
+            .split("<td")
+            .skip(1)
+            .filter_map(|c| c.split_once('>'))
+            .map(|(_, c)| super::strip_html(c))
+            .any(|c| matches!(c.to_ascii_uppercase().as_str(), "EX-99.1" | "EX-99.01" | "EX-99"));
+        let href = row.split_once("href=\"")?.1.split('"').next()?;
+        let name = href.rsplit('/').next()?;
+        let lower = name.to_ascii_lowercase();
+        (is_99 && safe_path(name) && (lower.ends_with(".htm") || lower.ends_with(".html"))).then(|| name.to_string())
+    })
+}
+
+/// `submissions` de un CIK -> (nombre del emisor, qué presentaciones descargar). Toda empresa activa tiene
+/// filas en `filings.recent`: sin ellas el JSON no tiene la forma esperada y es un error, no una empresa
+/// sin informes (el servidor borraría del archivo los que ya tenía).
+pub fn parse_company_submissions(text: &str, fallback_name: &str, today: NaiveDate) -> PResult<(String, CompanyPlan)> {
+    let v: Value = parse_json(text)?;
+    let rows = parse_filing_rows(&v["filings"]["recent"]);
+    if rows.is_empty() {
+        return Err(ProviderError::upstream("submissions sin filings recientes"));
+    }
+    let issuer = v["name"].as_str().filter(|n| !n.is_empty()).unwrap_or(fallback_name).to_string();
+    Ok((issuer, plan_company_reports(&rows, today)))
+}
+
+impl Sec {
+    /// Informes periódicos de una empresa: el último 10-K (o 20-F), el último 10-Q si es posterior y la
+    /// nota de resultados (EX-99.1) del último 8-K con Item 2.02 de los últimos 120 días, cada uno con
+    /// las secciones que `company_filing` localiza (`sections`) y las que no (`missing`).
+    ///
+    /// Contrato con quien archiva (el servidor borra la familia que no llega en un `Ok`):
+    /// - Un formulario que la empresa no tiene (sin 10-Q posterior, sin 8-K 2.02 reciente, sin 10-K en
+    ///   `submissions.recent`) se omite en un `Ok`; pero un `submissions` sin ninguna fila en `recent` es
+    ///   `Err` (`parse_company_submissions`): toda empresa activa las tiene.
+    /// - Si falla la descarga de un documento ya elegido (red, HTTP, `RateLimited`, tiempo) la llamada
+    ///   entera es `Err`: nunca un `Ok` parcial, que haría borrar un documento válido.
+    /// - Un documento cuyo texto no se parte (memoria integrada de ASML, 10-K que solo remite al informe
+    ///   anual) se devuelve con `sections` vacías y todas sus claves en `missing`; también un 8-K cuya
+    ///   página de índice no lista EX-99.1 y un documento por encima del tope de descarga de `http::send`
+    ///   (16 MB descomprimidos; el 20-F de ASML pesa 25 MB): eso es siempre igual para el mismo
+    ///   documento, no un fallo transitorio, y reintentarlo cada vez gastaría 16 MB de EDGAR para nada.
+    ///
+    /// Varias peticiones (3-6, hasta 30 MB): solo en segundo plano.
+    pub async fn company_reports(&self, id: &AssetId, now: DateTime<Utc>) -> PResult<Vec<Prospectus>> {
+        if id.class != AssetClass::Stock {
+            return Err(ProviderError::Unsupported);
+        }
+        let co = self.company(id).await?;
+        let text = self.get(format!("https://data.sec.gov/submissions/CIK{:010}.json", co.cik)).await?;
+        let (issuer, plan) = parse_company_submissions(&text, &co.name, now.date_naive())?;
+        drop(text);
+        let ticker = id.symbol.to_ascii_uppercase();
+        let mut out = Vec::new();
+        for row in [plan.annual, plan.quarterly, plan.earnings].into_iter().flatten() {
+            out.push(self.company_report(&co, &issuer, &ticker, &row, now).await?);
+        }
+        Ok(out)
+    }
+
+    /// Descarga un documento. Pasarse del tope de tamaño no es un fallo transitorio: `None`.
+    async fn fetch_document(&self, url: String) -> PResult<(String, Option<String>)> {
+        match self.get(url.clone()).await {
+            Ok(html) => Ok((url, Some(html))),
+            Err(ProviderError::Upstream(m)) if m == crate::http::TOO_LARGE => Ok((url, None)),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn company_report(&self, co: &Company, issuer: &str, ticker: &str, row: &FilingRow, now: DateTime<Utc>) -> PResult<Prospectus> {
+        let kind = Report::from_form(&row.form).ok_or_else(|| ProviderError::upstream(format!("formulario {} no soportado", row.form)))?;
+        let base = format!("https://www.sec.gov/Archives/edgar/data/{}/{}", co.cik, row.accession.replace('-', ""));
+        let index_url = format!("{base}/{}-index.htm", row.accession);
+        // `None`: el documento no se pudo leer entero (sin EX-99.1 en el índice, o más grande que el tope de
+        // descarga, que es siempre igual para el mismo documento): se devuelve sin secciones.
+        let (url, html) = if kind == Report::Release {
+            match pick_exhibit_99(&self.get(index_url.clone()).await?) {
+                Some(doc) => self.fetch_document(format!("{base}/{doc}")).await?,
+                None => (format!("{base}/{}", row.document), None),
+            }
+        } else {
+            self.fetch_document(format!("{base}/{}", row.document)).await?
+        };
+        let (sections, missing, document_chars) = match html {
+            Some(html) => {
+                let ex = tokio::task::spawn_blocking(move || company_filing::extract(kind, &html, company_filing::MAX_SECTION_CHARS))
+                    .await
+                    .map_err(|e| ProviderError::upstream(format!("extracción interrumpida: {e}")))?;
+                (ex.sections, ex.missing, ex.document_chars)
+            }
+            None => (Vec::new(), kind.keys().iter().map(|k| (*k).to_string()).collect(), 0),
+        };
+        Ok(Prospectus {
+            issuer: issuer.to_string(),
+            cik: co.cik,
+            ticker: Some(ticker.to_string()),
+            form: row.form.clone(),
+            preliminary: false,
+            filed_on: row.filed,
+            accession: row.accession.clone(),
+            url,
+            index_url,
+            offer_price: None,
+            sections,
+            missing,
+            document_chars,
+            source: "sec".into(),
+            fetched_at: now,
+        })
     }
 }
 

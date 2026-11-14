@@ -209,6 +209,8 @@ pub struct LexQuery<'a> {
     pub include_general: bool,
     pub since_ms: Option<i64>,
     pub until_ms: Option<i64>,
+    /// Documentos excluidos: se descartan en SQL, antes del `LIMIT`, para no devolver menos candidatos.
+    pub exclude_docs: &'a [i64],
     pub limit: i64,
 }
 
@@ -235,6 +237,9 @@ pub async fn lexical_search(pool: &SqlitePool, q: &LexQuery<'_>) -> Result<Vec<L
         }
         sql.push(')');
     }
+    if !q.exclude_docs.is_empty() {
+        sql.push_str(&format!(" AND d.id NOT IN ({})", vec!["?"; q.exclude_docs.len()].join(",")));
+    }
     sql.push_str(&format!(" ORDER BY bm25(chunks_fts, {FTS_WEIGHTS}), chunks_fts.rowid LIMIT ?"));
     let mut query = sqlx::query(&sql).bind(q.expr);
     for k in q.kinds {
@@ -249,6 +254,9 @@ pub async fn lexical_search(pool: &SqlitePool, q: &LexQuery<'_>) -> Result<Vec<L
     for a in q.assets {
         query = query.bind(a);
     }
+    for id in q.exclude_docs {
+        query = query.bind(id);
+    }
     let rows = query.bind(q.limit).fetch_all(pool).await?;
     Ok(rows.iter().map(|r| LexRow { chunk_id: r.get(0), doc_id: r.get(1), text_hash: r.get(2) }).collect())
 }
@@ -261,6 +269,20 @@ pub struct Existing {
 pub async fn find_by_key(pool: &SqlitePool, key: &str) -> Result<Option<Existing>> {
     let row = sqlx::query("SELECT id, content_hash FROM documents WHERE doc_key = ?").bind(key).fetch_optional(pool).await?;
     Ok(row.map(|r| Existing { id: r.get(0), content_hash: r.get(1) }))
+}
+
+/// Ids de los documentos con esas `doc_key` (las que no existen no aparecen).
+pub async fn ids_by_keys(pool: &SqlitePool, keys: &[String]) -> Result<Vec<i64>> {
+    let mut out = Vec::new();
+    for part in keys.chunks(400) {
+        let sql = format!("SELECT id FROM documents WHERE doc_key IN ({})", vec!["?"; part.len()].join(","));
+        let mut q = sqlx::query_scalar::<_, i64>(&sql);
+        for k in part {
+            q = q.bind(k.trim());
+        }
+        out.extend(q.fetch_all(pool).await?);
+    }
+    Ok(out)
 }
 
 pub async fn find_by_hash(pool: &SqlitePool, hash: &str) -> Result<Option<i64>> {
@@ -415,6 +437,12 @@ pub async fn chunks_with_docs(pool: &SqlitePool, ids: &[i64]) -> Result<HashMap<
 pub async fn expired(pool: &SqlitePool, kind: DocKind, cutoff_ms: i64) -> Result<Vec<(i64, i64)>> {
     let rows = sqlx::query("SELECT id, chunk_count FROM documents WHERE kind = ? AND pinned = 0 AND published_at < ?").bind(kind.as_str()).bind(cutoff_ms).fetch_all(pool).await?;
     Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+}
+
+/// Noticias no fijadas: `(id, título, chunk_count)`, para que la purga aplique el filtro de ruido a lo ya archivado.
+pub async fn unpinned_news(pool: &SqlitePool) -> Result<Vec<(i64, String, i64)>> {
+    let rows = sqlx::query("SELECT id, title, chunk_count FROM documents WHERE kind = 'news' AND pinned = 0").fetch_all(pool).await?;
+    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
 }
 
 /// Candidatos a expulsar por tope, de menos a más valiosos: noticias antiguas primero, luego

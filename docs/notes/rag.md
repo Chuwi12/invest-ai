@@ -3,6 +3,9 @@
 Estado: **cableado** en servidor e IA y **medido con Ollama real** (ver «Medición real y recomendación»): convive con el LLM en la GPU,
 pero con `qwen2.5:7b` la recuperación no mejora la tesis. Desde el 20-oct el **archivado** y la **recuperación** son interruptores
 distintos (ver «Archivado frente a recuperación»): por defecto se archiva (`RAG_ARCHIVE=1`) y no se recupera (`RAG_ANALYSIS=0`, `RAG_CHAT=0`).
+El 13-nov se endureció la **recopilación** y la **recuperación del análisis** (filtro de ruido al archivar y en la purga, exclusión por `doc_key`, consultas por
+aspecto, informes primero, regla 7 más estricta): ver «Diagnóstico de recopilación y mejoras (13-nov-2026)» al final. Las cifras de la medición del 20-oct
+(fragmentos duplicados de las `[N#]`, consulta única) describen el comportamiento ANTERIOR.
 
 ## Principio
 El LLM no aprende: consulta. El archivo guarda texto que la app ya tiene (noticias descargadas, secciones de
@@ -14,7 +17,7 @@ noticias `[N#]`, y sus citas se verifican en Rust contra lo que realmente se le 
 ## Qué se guarda
 | Tipo (`DocKind`) | Origen | Qué se indexa | Clave lógica (`doc_key`) |
 |---|---|---|---|
-| `news` | `NewsItem` que `market` ya devolvió (sin peticiones extra) | título + resumen | `news:<NewsItem.id>` |
+| `news` | `NewsItem` que `market` ya devolvió (sin peticiones extra); no se archivan páginas de cotización, avisos 13F, «$100 hace N años» ni deporte (`text::is_low_value_news`) | título + resumen | `news:<NewsItem.id>` |
 | `filing` | S-1/F-1/424B… que obtiene el otro agente, por secciones | cada sección troceada | `filing:<accession>` |
 | `analysis` | `Analysis` guardado (más adelante, con su resultado en `meta`) | tesis, casos alcista/bajista | `analysis:<uuid>` |
 
@@ -55,7 +58,8 @@ tipo (`kind`+`subtype`), idioma, hash (`content_hash` del documento, `text_hash`
 ## Recuperación
 1. Se embebe la consulta (`EmbedKind::Query`; cada familia de modelos usa su prefijo, ver abajo).
 2. **Prefiltro** en memoria por metadatos: activos (cualquiera de; `include_general` añade los documentos sin activo),
-   tipos, emisor, rango de fechas. Con filtro por activo el escaneo baja de 30 ms a ~0,3 ms (medido).
+   tipos, emisor, rango de fechas y `exclude_doc_keys` (documentos que no deben salir; se resuelven a ids una vez y se aplican a los candidatos
+   vectoriales y a los léxicos —en SQL, antes del `LIMIT`— ANTES de elegir los `k`, así que excluir no devuelve menos resultados). Con filtro por activo el escaneo baja de 30 ms a ~0,3 ms (medido).
 3. Similitud coseno exacta (producto escalar, vectores normalizados) → `5k` candidatos (mín. 25).
 4. **Reranking** simple: `score = 0,80·sim + 0,12·recencia + 0,08·peso_fuente`.
    - recencia = `0,5^(edad/vida_media)`: noticias 14 d, folletos 365 d, análisis 90 d.
@@ -219,7 +223,8 @@ pide a Ollama CPU para no competir por VRAM (opción de Ollama, **sin verificar*
   **nunca** análisis ni documentos `pinned` (p. ej. los citados por un análisis guardado, `KnowledgeBase::pin`).
 - Estimación: unas 600 noticias/día con 20 activos seguidos × 90 d ≈ 54 000 fragmentos (~165 MiB a 768 dim); 20 OPV
   con secciones clave ≈ 6 000 fragmentos. Es una estimación de volumen, no una medida: `stats()` da las cifras reales.
-- `purge(now)` hay que llamarla periódicamente (cada pocas horas); el crate no lanza temporizadores propios.
+- `purge(now)` hay que llamarla periódicamente (cada pocas horas); el crate no lanza temporizadores propios. Desde el 13-nov también borra las noticias
+  no fijadas que `is_low_value_news` marca (lo archivado antes del filtro) y lo cuenta en `PurgeReport.documents_noise`.
 - Los embeddings viven en la misma SQLite que las conversaciones: la BD crece cientos de MB. Si molesta, mover a un
   fichero propio es sencillo (misma migración, otro pool).
 - **Tamaño medido** (no estimado) y cómo se acota: ver «Archivado frente a recuperación» → «Coste del archivado por defecto».
@@ -232,8 +237,9 @@ FakeEmbedder { dim }                                      // determinista, para 
 let kb = KnowledgeBase::open(pool, Arc<dyn Embedder>, cfg).await?;   // comprueba esquema, carga índice
 kb.ingest(NewDocument) -> IngestReport                    // Added | Updated | Unchanged | Duplicate{of}
 kb.ingest_news(Option<&AssetId>, &[NewsItem]) -> BatchReport
-kb.search(&SearchRequest) -> SearchResults               // hits con texto original + DocumentInfo + score/sim/recencia
-kb.embed_pending(limit) / kb.purge(now) / kb.pin(id, bool) / kb.merge_meta(id, json) / kb.delete_by_key(key) / kb.stats()
+kb.search(&SearchRequest) -> SearchResults               // hits con texto original + DocumentInfo + score/sim/recencia; SearchRequest.exclude_doc_keys
+text::is_low_value_news(title) -> bool                    // ruido que no se archiva ni se conserva (ver 13-nov)
+kb.embed_pending(limit) / kb.purge(now) -> PurgeReport { documents_by_age, documents_by_cap, documents_noise, chunks_removed } / kb.pin(id, bool) / kb.merge_meta(id, json) / kb.delete_by_key(key) / kb.stats()
 trait KnowledgeSearch { async fn search(&self, &SearchRequest) }   // contrato mínimo para `ai`
 spawn_news_worker(kb, CancellationToken) -> (NewsSink, JoinHandle) // sink.offer(asset, &[NewsItem]): síncrono, no bloquea
 sections_from_text(text) -> Vec<Section>; chunk_sections(..)
@@ -320,12 +326,15 @@ degrada a vectores sin perder el documento; borrado, actualización y purga mant
 - **Un fallo del RAG nunca impide arrancar**: si `KnowledgeBase::open` falla (p. ej. falta la migración) hay `tracing::error!` y la app
   sigue sin RAG (`knowledge: None`, `/knowledge/stats` → `enabled:false`). Si una búsqueda falla en un análisis, este sigue sin
   conocimiento y lo anota en `dataWarnings`; en el chat el error llega al modelo como resultado de la herramienta.
-- **Análisis**: una búsqueda por activo antes de las etapas (`assets=[id]`, solo noticias y folletos, nunca análisis propios;
-  k=6 en standard/deep, 3 en quick; tope de 20 s). El bloque `<knowledge_base>` va solo al juez. El system prompt añade la regla 7
-  (dato no fiable, citar `[D#]`, los folletos son declaraciones de la empresa) **solo si se entregaron fragmentos**. Tras el juez,
+- **Análisis** (desde el 13-nov, ver su sección): tras construir el contexto (etapas y juez) y antes de lanzar las etapas, una búsqueda por
+  aspecto y tipo (3 aspectos según la clase del activo × informes y noticias; `assets=[id]`, nunca análisis propios; k=6 en standard/deep,
+  3 en quick; tope de 20 s por búsqueda, que van en paralelo), fusionadas sin repetir, con hasta ceil(k/2) huecos para informes y sin las noticias que el contexto ya
+  entregó como `[N#]`. El bloque `<knowledge_base>` va solo al juez. El system prompt añade la regla 7 (dato no fiable, `[D#]` solo para lo que el
+  fragmento afirma y nunca para precios, ratios o indicadores, los informes y folletos son declaraciones de la empresa) **solo si se entregaron fragmentos**. Tras el juez,
   `Citations::clean` quita las citas inexistentes o sin relación (nota en `qualityNotes`) y las `[D#]` que sobreviven pasan a
   `Analysis.sources`.
-- **Chat**: `search_knowledge(query, asset?, kind?, since?, limit?)`, solo lectura, `limit` ≤ 8 (def. 5), solo noticias/folletos.
+- **Chat**: `search_knowledge(query, asset?, kind?, since?, limit?)`, solo lectura, `limit` ≤ 8 (def. 5), solo noticias e informes/folletos (10-K/10-Q, 8-K, OPV, ETF; la
+  descripción de la herramienta y `CHAT_RULES` los nombran desde el 13-nov). El chat no excluye nada ni fusiona consultas: una consulta = una búsqueda.
   La numeración `[D#]` continúa entre llamadas del mismo turno; al final se avisa de citas `[D#]` inexistentes.
 - **Pausa por VRAM**: `TrackedAnalyst` cuenta análisis y chats en curso (HTTP, SSE y lista de seguimiento, porque envuelve al analista y
   no a las rutas; los semáforos de `limits` no cubren la lista de seguimiento) y `GatedEmbedder` hace esperar a los embeddings de
@@ -426,10 +435,11 @@ n = 6 + 1, un modelo y un estilo de ataque; que no obedezca puede deberse a que 
   quiere recortar tokens; `RAG_EMBED_KEEP_ALIVE` más alto (p. ej. `10m`) para no pagar 1–2 s de recarga en cada análisis tras una pausa.
 - **No concluyente**: valor de un archivo acumulado durante semanas, de folletos con consultas dirigidas, de modelos mayores (`qwen3.5:9b`, que
   probablemente no deje sitio al embedder en GPU) y calidad es↔en real (recall@5 con los 40 pares, **no medido**; `qwen3-embedding:0.6b` **no probado**).
-- **Qué probaría antes de reconsiderarlo** (propuestas, no implementadas): (1) no pedir `[D#]` en afirmaciones sobre datos de mercado y limitar el
-  bloque a lo que el contexto normal no trae; (2) consulta específica para OPV («use of proceeds, risk factors, lock-up, dilution»); (3) deduplicar los fragmentos
-  frente a las noticias `[N#]` del snapshot (hoy la mayoría son las mismas); (4) repetir esta prueba tras 2–4 semanas de archivo y con ≥ 5 repeticiones por brazo
-  para que el contraste de ⚠ tenga potencia.
+- **Qué probaría antes de reconsiderarlo** (propuestas del 20-oct; **(1) a (3) implementadas el 13-nov**, sin medir aún su efecto sobre la tesis): (1) no pedir `[D#]` en
+  afirmaciones sobre datos de mercado y limitar el bloque a lo que el contexto normal no trae (regla 7); (2) consulta específica para OPV («use of proceeds, risk
+  factors, lock-up, dilution») (hecho a medias: consultas por aspecto según la clase del activo, informes primero; no hay una específica de OPV); (3) deduplicar los
+  fragmentos frente a las noticias `[N#]` del snapshot (`exclude_doc_keys`); (4) repetir esta prueba tras 2–4 semanas de archivo y con ≥ 5 repeticiones por brazo
+  para que el contraste de ⚠ tenga potencia (pendiente).
 
 ## Archivado frente a recuperación (20-oct-2026)
 
@@ -546,8 +556,8 @@ Una descarga extra de red: el folleto resumido de un ETF se pide a EDGAR en segu
    Los scripts de `docs/notes/rag-eval-data/` siguen valiendo; `srv.sh` pasa `RAG_ENABLED=$rag`, que funciona por compatibilidad con un aviso, y admite `VAR=valor` extra para fijar las tres explícitamente.
 3. Para dejarlo encendido en el uso normal: `RAG_ANALYSIS=1` y/o `RAG_CHAT=1` en `.env` y reiniciar; `GET /api/knowledge/stats` debe mostrar `analysis: true` / `chat: true`. Volver a apagarlo es quitar la línea.
 4. Protocolo (de la «Medición real»): ABBA intercalado por activo, **≥ 5 repeticiones por brazo** (con 2 el contraste de ⚠ no tenía potencia), mismos 12 activos, `standard`; métricas: tokens de entrada, duración,
-   ⚠, citas `[D#]` válidas y descartadas, veredicto distinto. Antes de repetirla conviene probar las propuestas pendientes de la recomendación (no pedir `[D#]` en afirmaciones sobre datos de mercado,
-   consulta específica para OPV, deduplicar frente a las `[N#]` del snapshot).
+   ⚠, citas `[D#]` válidas y descartadas, veredicto distinto. Las propuestas de la recomendación ya están implementadas (regla 7 más estricta, consultas por aspecto, deduplicación frente a las `[N#]`, ver
+   «Diagnóstico de recopilación y mejoras (13-nov-2026)»): la repetición medirá ese comportamiento, no el del 20-oct.
 
 ## Para el coordinador (histórico: ya cableado, ver arriba)
 1. **Migración**: `0004_knowledge.sql` ya está en `server/migrations/`. `knowledge::SCHEMA_SQL` la incluye con `include_str!`
@@ -604,3 +614,157 @@ pub struct TeeMarket { inner: Arc<dyn MarketData>, sink: knowledge::NewsSink }
 - Gestión del embedder igual que el resto: la ingesta espera si hay un análisis en curso.
 - Tests: `server/tests/fund_docs.rs` (embedder simulado; 497K real de TLT), `market/tests/fund_prospectus.rs`.
 - No medido: ingesta con Ollama real (no se usó).
+
+## Diagnóstico de recopilación y mejoras (13-nov-2026)
+
+Rama `rag-recopilacion`. Hecho sobre una COPIA del archivo real (3 406 documentos, 3 837 fragmentos; nunca sobre la BD del servicio) con Ollama real
+(`embeddinggemma:300m-qat-q8_0`, búsqueda híbrida FTS5 + vectores).
+
+### Qué había (evidencia)
+- **Contenido**: noticias 3 402 (google_news 1 748 de media 77 caracteres, es decir solo titular; finnhub 1 182 de 274; yahoo 467 de 73; sec 5 de 85, solo el nombre del
+  formulario) y 4 folletos (1 S-1/A y 3 ETF 497K). Las noticias de una línea no dicen nada que el titular del contexto `[N#]` no diga.
+- **Ruido archivado**: páginas de cotización, gráfico, opciones y perfil («Apple Inc. (AAPL) stock price, news, quote and history», «… (TLT) Interactive Stock Chart»,
+  «Rheinmetall AG Estimates – XETR:RHM», «Banco de Sabadell, S.A.: Target Price Consensus and Analysts Recommendations»), avisos de posiciones de gestoras
+  («NVIDIA Corporation $NVDA Stock Sold by Woodstock Corp»), «$100 invested 5 years ago» y deporte: de 15 noticias enlazadas a `stock:SAB.MC`, 9 eran del club de fútbol CE
+  Sabadell. La primera versión del predicado marcaba **262 de 3 402 noticias (7,7 %)**: unas 129 páginas, 115 avisos de posiciones, 9 «si hubieras invertido» y 9 de fútbol
+  (reparto aproximado). La versión **estricta del 14-nov** (ver «Endurecimiento» abajo) marca **231** (84 de los 115 avisos): el resto son las páginas, las 9 y las 9.
+- **Recuperación vieja** (`retrieve_for_analysis`): una consulta `«{nombre} {símbolo} results, outlook, guidance and risks»`, k=6. Como el filtro por activo ya acota, nombre y ticker
+  solo servían para que BM25 premiara los titulares que son «Nombre (TICKER) …», es decir las páginas: TLT 4 de 6 fragmentos eran ruido, NVDA 3, SAB.MC 3 (2 de fútbol).
+  Y los fragmentos eran, en su mayoría, las mismas noticias que el contexto ya entrega como `[N#]` (7 de 36 coincidían con las 10 más recientes).
+- **El modelo**: el 7B pegaba `[D#]` a afirmaciones sobre PER/MACD/RSI (9,2 citas descartadas por análisis, medición del 20-oct).
+
+### Qué se cambió
+1. **Filtro de ruido al archivar** (`knowledge/src/text.rs::is_low_value_news(title)`, usado por `NewDocument::from_news_item`: devuelve `None` = `skipped`). Función pura, sin `regex`
+   (`knowledge` no depende de ella). Cuatro familias, todas **por título** (los agregadores no traen resumen y los de Finnhub no distinguen nada que el título no diga, por eso no hay
+   parámetro `summary`): (a) páginas: marcadores literales («stock price, news,», «interactive stock chart», «seasonal returns chart», «stock options chain», «target price consensus…»,
+   «earnings, actual eps», «) stock price prediction», «… stock price today[: $N]»…) y «Nombre Estimates – BOLSA:TICKER» (solo un nombre delante, ver «Endurecimiento»); (b) avisos de posiciones: un `$TICKER` en el titular **y** la forma real del aviso con un marcador de gestora (LLC, LP, Advisors, Capital, Wealth, Management,
+   Partners, Asset, Investments, Securities, Fund): «Shares/Stock/Holdings… Sold|Bought|Purchased|Acquired|Raised|Cut… by <gestora>», «<gestora> Sells|Buys|Purchases|Acquires [N|New] Shares|Stake|Position|Holdings»,
+   «<gestora> Reduces|Raises|Boosts|Trims|Cuts Stake|Position|Holdings» y «<gestora> Makes New [$X] Investment in» (palabras completas; ver «Endurecimiento»); (c) «If you invested $X … years ago» y «Here's how much $X invested … years ago»; (d) deporte: «hypermotion», «alineaciones
+   confirmadas», «CE Sabadell», «penalti», «resumen LaLiga» y combinaciones («pronóstico» + «vs» + cuota/estadística, «vs» + cadenas de TV…).
+   **Precisión antes que cobertura**: «stake» sola, «13F» sola, «LaLiga» sola, «odds», «en directo», «cuota» o «vs» por separado NO bastan. Los tests incluyen TODOS los títulos de ruido del
+   diagnóstico y las legítimas (BPCE, Berkshire 13F, Ibex 35 en directo, Coca-Cola 52-week high, Leonardo, Exxon MoU, Apple fair value, «Tesla vs BYD: cuota de mercado», «Telefónica pierde
+   derechos de LaLiga», un titular con «estimates (CRWV:NASDAQ)» que el primer borrador filtraba mal…). Revisé a mano los 262 títulos que marcó la primera versión sobre el archivo real: ninguno legítimo. Eso no
+   bastó: la revisión de código y la auditoría encontraron titulares legítimos con `$TICKER` que esa versión descartaba (ver «Endurecimiento»).
+   **Cobertura no completa**: quedan ~34 titulares de flujo de opciones («Options Whale Alert», «Options Spot-On», «Institutional Flow in …») y mensajes de redes tipo `$ETH is back to…`
+   que no se filtran (nadie los pidió y no hay certeza de que carezcan de valor).
+2. **Limpieza de lo archivado**: `purge` (arranque y cada 6 h) borra también las noticias NO fijadas que el predicado marca y no habían caducado; lo cuenta `PurgeReport.documents_noise`.
+   Los fijados, los folletos y los análisis no se tocan. El `tracing::info!` del mantenimiento del servidor lo imprime como `noise`.
+3. **`SearchRequest.exclude_doc_keys`** (campo que añadió el coordinador): se resuelve a ids una vez (`store::ids_by_keys`, 500 claves como máximo) y se aplica en `Filter::accepts`
+   (candidatos vectoriales) y en `lexical_search` (`d.id NOT IN (…)`, antes del `LIMIT`). Test con los tres caminos (híbrida, solo vectores, solo BM25 por embedder caído).
+4. **Recuperación del análisis** (`ai/src/rag.rs`, `retrieve_for_analysis(kb, snap, depth, &registry)`):
+   - Aspectos según `AssetClass` (en inglés; el archivo lo es en su mayoría): acciones «risk factors, competition, regulation and litigation» / «management outlook and guidance…» /
+     «quarterly results, revenue growth and margins»; ETF y fondos: objetivo y estrategia / riesgos principales / comisiones y rotación; cripto: regulación / adopción y actualizaciones de red /
+     incidentes de seguridad y flujos de ETF; el resto de clases, una consulta genérica.
+   - Cada aspecto lanza dos búsquedas (informes y noticias; `kinds` nunca incluye análisis propios), las seis en paralelo, cada una con su propio tope de 20 s (una que se cuelga cuenta como un fallo más y no arrastra a las demás). Se fusionan intercalando aspectos (el mejor de
+     cada uno antes que el segundo de ninguno), sin repetir fragmento ni texto idéntico y con 2 fragmentos por documento como máximo. **Informes primero**: hasta ceil(k/2) huecos (3 de 6, 2 de 3);
+     las noticias rellenan el resto y, si sobran huecos, vuelven los informes. Salen en ese orden (`D1` = el primero).
+   - **Noticias ya entregadas**: la recuperación ocurre DESPUÉS de construir los contextos (etapas y juez), así que se excluyen exactamente las del `NewsRegistry` (`news:<NewsItem.id>`), no
+     todas las de `snapshot.news`: las que el nivel de contexto recortó (`max_news` 10→3 según la ventana) siguen siendo candidatas porque el modelo no las vio.
+     **Límite**: el archivo deduplica entre proveedores por título + día (`Duplicate`), y el documento conserva la `doc_key` del primero; la misma noticia con otro `id` no se excluye. En la medición no
+     apareció, pero no está descartado.
+   - Si fallan (o se cuelgan) todas las búsquedas, el análisis sigue «sin conocimiento» con el aviso de siempre; si falla solo alguna, se usan las que respondieron (`tracing::warn!`).
+   - **Desviación respecto al encargo, con datos**: las consultas llevan el **ticker** (no el nombre de la empresa). Ver la medición: sin él, 15 de 32 fragmentos no nombraban al activo, porque el archivo
+     viejo enlaza al activo noticias que ni lo nombran (355 de 3 449 enlaces; el 60 % de las de NVDA, el 38 % de AAPL). Quitarlo es una línea (`format!("{} {query}", s.symbol)`).
+5. **Prompt**: `ANALYSIS_RULES` (regla 7) limita `[D#]` a lo que el fragmento afirma (declaraciones de la empresa, hechos, riesgos, guía) y lo prohíbe para precios, ratios e indicadores (P/E, RSI, MACD,
+   medias, volumen, capitalización), que vienen de los datos en vivo; nombra 10-K/10-Q/8-K. `CHAT_RULES` y la descripción de `search_knowledge` mencionan informes anuales y trimestrales, notas de
+   resultados (8-K) y folletos de OPV y ETF.
+
+### Medición real, antes y después
+Entorno: copia del archivo del 13-nov, k=6 (`standard`), Ollama real, 6 activos (AAPL, KO, XOM, NVDA, SAB.MC y TLT = 36 fragmentos por brazo). Una pasada (la búsqueda es determinista, no hay varianza que
+promediar). Definiciones: *ruido* = el título lo marca `is_low_value_news` (ojo: es el mismo predicado que filtra y purga, así que mide la exposición, no su precisión); *deporte* = título con burgos,
+hypermotion, ce sabadell, penalti o laliga; *no nombra* = ni título ni texto contienen el nombre ni el ticker del activo (lista propia por activo); *repite `[N#]`* = el fragmento es de una de las 10 noticias más
+recientes del activo en el archivo, que es lo que SIMULO como «ya entregadas» (el snapshot real no está en la copia).
+
+| Brazo | fragmentos | ruido | deporte | no nombra | informes | repite `[N#]` |
+|---|---|---|---|---|---|---|
+| A. ANTES: consulta vieja, archivo sin purgar | 36 | **12** | **2** | 0 | 1 | **7** |
+| B. consulta vieja, archivo purgado | 35 | 0 | 0 | 0 | 2 | 6 |
+| C0. consulta nueva SIN ticker (como pedía el encargo), purgado | 32 | 0 | 0 | **15** | 2 | 0 |
+| **C. DESPUÉS: consulta nueva con ticker, purgado** | 32 | **0** | **0** | **0** | 2 | **0** |
+| E. nueva con ticker, purgado + solo noticias que nombran al activo | 32 | 0 | 0 | 0 | 2 | 0 |
+
+Por activo (ruido / deporte / no nombra / repite, ANTES → DESPUÉS): AAPL 1/0/0/1 → 0/0/0/0; KO 0/0/0/1 → 0/0/0/0; XOM 1/0/0/1 → 0/0/0/0; NVDA 3/0/0/0 → 0/0/0/0; SAB.MC 3/2/0/3 → 0/0/0/0 (2 fragmentos
+en vez de 6, ver abajo); TLT 4/0/0/1 → 0/0/0/0 con **2 fragmentos del folleto 497K** (antes 1).
+- **La purga** sobre la copia (primera versión del predicado): `documents_noise = 262`, 262 fragmentos (3 837 → 3 575, de 3 406 a 3 144 documentos); 0 por antigüedad ni por tope. La segunda pasada no borra nada.
+  Con la versión estricta del 14-nov serían **231** (ver «Endurecimiento»). Las cifras de recuperación de la tabla (ruido 0 en C) son de la primera versión: con la estricta, los avisos sin marcador
+  de gestora quedarían en el archivo y podrían salir en un top-k (no se ha vuelto a medir: la copia ya no existe).
+- **Sin ticker (C0)**: 15 de 32 fragmentos no nombraban al activo (NVDA 5 de 6: «Why Is TSM Stock Rising Overnight?», «This Is SpaceX's Biggest Risk…»; XOM 4 de 6: «TRGP Q3 Earnings Beat…», «Shell to Report Q3
+  Earnings»). Causa: el archivo viejo enlaza al activo noticias que no lo nombran, y sin ticker nada empuja hacia las que sí. El agente del servidor ya hace que `TeeMarket` solo archive las que nombran al activo, de modo que
+  esto solo afecta a lo viejo (la fila E, con el archivo ya «limpio», da 0 con ticker; sin él dio 1 de 32: el ticker deja de hacer falta cuando todo lo enlazado nombra al activo). Con ticker + purga, los mejores fragmentos son los que se esperaban
+  («XOM Q3 deep dive», «What Is Behind the Higher Dividend at XOM…»). El problema que motivó quitar nombre y ticker (BM25 premiando las páginas «Nombre (TICKER)») lo resuelve el filtro, no la consulta.
+- **SAB.MC devuelve 2 fragmentos de 6**: el activo tiene 15 noticias en el archivo, 10 se simulan «entregadas» y 3 eran ruido. Es una limitación de los datos de la copia, no de la recuperación.
+- **Lo que esta medición NO prueba**: (1) la copia no tenía ningún 10-K/10-Q/8-K (los trae otro agente): la reserva de huecos para informes solo se ve en TLT (folleto 497K) y en los tests con archivo simulado;
+  (2) no he medido la tesis ni los ⚠ (haría falta repetir la prueba ABBA del 20-oct con ≥ 5 repeticiones y un archivo con historia); (3) «ya entregadas» está simulado con las 10 más recientes del archivo; en
+  producción es el `NewsRegistry` del contexto; (4) el ruido que sigue llegando por `snapshot.news` al contexto normal (`[N#]`) NO se filtra aquí: el filtro actúa al archivar, no al construir el contexto (área `market`).
+
+### Tests y garantías
+- `rag_off_standard_analysis_matches_golden_transcript`, `rag_off_chat_matches_golden_transcript` y `empty_archive_is_byte_identical_to_rag_off`: sin tocar sus huellas, en verde (con el archivo vacío todas
+  las búsquedas devuelven 0 y no se añade la regla 7).
+- Nuevos: `knowledge` (`text`: `archive_noise_is_recognised`, `legitimate_news_is_never_filtered`, `cashtags_are_tickers_not_amounts`; `model`: `noise_is_skipped_but_legitimate_news_is_kept`; `tests/kb.rs`:
+  `excluded_doc_keys_never_come_out_and_do_not_cost_results`, `purge_removes_archived_noise_but_not_pinned_or_legitimate_news`, `ingesting_news_skips_noise`) y `ai` (7 en `rag.rs`: consulta con ticker sin nombre y con
+  exclusión, aspectos por clase, reserva de huecos para informes, tope por documento y sin repetidos, huecos sobrantes vuelven a los informes, intercalado de aspectos, fallo total frente a parcial;
+  `analysis::tests::rag_on::the_news_the_context_already_delivers_are_not_repeated_and_the_filing_comes_first` con un `KnowledgeBase` real).
+- **Test con RAG encendido que cambió a propósito**: `chat::tests::rag_on::analysis_only_archive_does_not_reach_the_chat_but_does_reach_analyze_asset` contaba 1 búsqueda por análisis; ahora son 6 (3 aspectos × informes y
+  noticias). Sigue comprobando que el análisis lanzado desde el chat usa la búsqueda del análisis y no la del chat. `OneHit` y los tests de `rag_cut_figures` siguen igual: la fusión deduplica por fragmento.
+- Coste: 6 embeddings de consulta por análisis en vez de 1 (~6 ms cada uno con el modelo caliente, medido el 20-oct) y 6 consultas BM25; el tope de 20 s es por búsqueda (van en paralelo).
+
+### Endurecimiento tras la revisión de código y la auditoría (14-nov-2026)
+La purga borra para siempre, así que dos reglas del predicado se estrecharon (precisión antes que cobertura):
+- **Avisos de posiciones** (`is_holdings_notice`): antes bastaba un `$TICKER` más una subcadena («position», «holdings», «stake», «investment in», «acquires», «buys», «newly»…). Daba `true` en «Apple $AAPL
+  announces $500 billion investment in U.S. manufacturing», «Alphabet $GOOGL acquires Wiz in $32 billion deal», «Microsoft $MSFT buys back $60 billion of its shares», «Nvidia $NVDA strengthens position in AI
+  data centers», «Tesla $TSLA letter to stakeholders» (subcadena de «stake»), «Tesla $TSLA cuts stake in Panasonic battery venture»… Ahora exige la forma del aviso **y** un marcador de gestora (lista y
+  formas en el punto 1b), con palabras completas; «holdings», «position», «stake» o «investment in» solos nunca bastan.
+- **«Estimates»** (páginas de MarketScreener): antes bastaba que lo que sigue a «Estimates» fuera un guion y `BOLSA:TICKER`, y «Apple Q4 revenue beats estimates - NASDAQ:AAPL» daba `true`. Ahora lo de
+  delante debe ser un nombre: ≤ 5 palabras y ninguna de beat(s), miss(es), top(s), exceed(s), above, below, meet(s), surpass(es), lag(s), ahead, raise(s), cut(s), lower(s), boost(s), revise(s),
+  analyst(s), Q1–Q4, revenue, earnings, EPS. Las 10 páginas reales de MarketScreener del archivo siguen marcándose.
+- **Qué se pierde** (los 115 avisos de posiciones que marcaba la versión anterior, títulos tomados de la copia del 13-nov): la estricta marca **84 y deja pasar 31 (27 %)**, todos de gestoras sin ninguno de los
+  marcadores: unos 13 de bancos y fiduciarias (First Nebraska Trust Co, Greenleaf Trust, Sumitomo Mitsui Trust, Bank Julius Baer, Ledyard National Bank, Associated Banc Corp, NBT Bank…) y unos 18 de sociedades
+  «Inc/Corp/Ltd/AB» sin más pista (Woodstock Corp, AIA Group Ltd, AMF Tjanstepension AB, Sawyer & Company Inc, Bokf Na, Willis Investment Counsel, Nippon Life Global Investors…). Incluido «NVIDIA Corporation $NVDA Stock Sold
+  by Woodstock Corp», que el encargo original daba por ruido; ya no se filtra (test `holdings_notices_without_a_firm_marker_are_left_alone`). Añadir «bank/banc/trust» recuperaría ~13 más, pero «Trust» y «Bank»
+  también salen en noticias legítimas, así que no se hizo sin decisión explícita.
+- **Cifras de la purga**: 262 → **231** (129 páginas + 84 avisos + 9 «si hubieras invertido» + 9 de fútbol, reparto aproximado). **No se pudo repetir sobre una copia nueva de la BD**: la copia `probe.db` desapareció
+  (el directorio temporal se limpió) y `data/invest-ai.db` es la del servicio en marcha, que no se toca. Lo que sí se hizo: (1) el predicado sobre los 115 títulos de avisos y los 10 de MarketScreener (guardados de la
+  medición) → 84 y 10; (2) el `purge` real (`KnowledgeBase::purge`) sobre un archivo temporal con esos mismos títulos como noticias → `documents_noise = 93` (84 avisos + 9 páginas únicas, una está repetida) y quedan los 31
+  que no se marcan. El resto de familias no cambió, de modo que 262 − 31 = 231 es una derivación, no una nueva medida sobre las 3 402 noticias.
+- **Tope por búsqueda** (`ai/src/rag.rs`): el `timeout` de 20 s abarcaba las seis búsquedas a la vez y una colgada se llevaba por delante a las cinco que habían respondido; ahora cada `kb.search` tiene el suyo (`bounded`),
+  su vencimiento es un `KnowledgeError` más que `lists` trata como fallo parcial y solo si fallan todas el análisis sigue «sin conocimiento».
+- **Tests nuevos**: `knowledge` `text`: `legitimate_news_is_never_filtered` ampliado (las 10 noticias de la revisión, «Apple Q4 revenue beats estimates - NASDAQ:AAPL», «Nvidia earnings top estimates», «Analysts raise Apple
+  estimates», «Tesla $TSLA Shares Sold by Elon Musk», «Slack $CRM stock acquired by Salesforce»…), `archive_noise_is_recognised` con más formas reales de avisos y «Apple Inc. Estimates - NASDAQ:AAPL», y
+  `holdings_notices_without_a_firm_marker_are_left_alone`; `ai` `rag`: `a_hung_search_costs_only_itself_and_all_hung_is_a_failure` (cuelga las 3 de noticias, luego solo una y luego todas).
+
+## Informes de empresa y filtro de entidad (13-nov-2026)
+- **Informes periódicos de las acciones** (`server/src/company_docs.rs`, sobre la maquinaria común `server/src/doc_queue.rs`, que ahora también usa `fund_docs`): al pedir el snapshot de una acción con
+  `RAG_ARCHIVE=1`, `TeeMarket` ofrece su id a una cola acotada (32, `try_send`, nunca retrasa la respuesta) y un trabajador en segundo plano llama a `CompanyDocs::company_reports` (`market`, ver
+  `market.md`: último 10-K o 20-F, último 10-Q si es posterior y nota de resultados del último 8-K con Item 2.02 de ≤ 120 días, `EX-99.1`). Cada informe se archiva como `Filing` (`subtype` = formulario,
+  `source: sec`, `publisher: SEC EDGAR`, `published_at` = fecha de presentación, `assets = [stock:<TICKER>]`) con una sección por clave («Risk Factors», «Management's Discussion and Analysis»,
+  «Quantitative and Qualitative Disclosures About Market Risk», «Business», «Operating and Financial Review and Prospects», «Earnings Release») y `meta {cik, accession, indexUrl, ticker, missing, checkedAt}`.
+  `doc_key = sec:<TICKER>:annual|quarterly|earnings`: el informe nuevo sustituye al anterior de su familia. **Borrado**: nunca por mera ausencia en la respuesta (un `Ok`
+  incompleto, p. ej. XOM, cuyo último 10-K dejó de aparecer al cambiar de CIK en julio, o un JSON de EDGAR degradado, no quita nada; `market` además devuelve `Err` si `submissions` no trae filas o si falla la
+  descarga de un documento ya elegido). Solo se borra con prueba de que lo archivado quedó anticuado: (a) el `quarterly` si la respuesta trae un anual con `filed_on` posterior al `published_at` del 10-Q
+  archivado; (b) el `earnings` si el archivado tiene más de 120 días según su propia fecha y no llega una nota que lo sustituya. El `annual` solo lo sustituye uno nuevo. Un informe descargado sin secciones
+  localizadas (ASML: 20-F sin cabeceras `Item` y de 24,9 MB, por encima del tope de 16 MB) no se archiva ni borra nada. **Refresco por activo**: como mucho una descarga cada 7 días, también entre reinicios,
+  según el documento `sec:*` más reciente enlazado al activo en `document_assets` (máximo de `ingested_at` y `meta.checkedAt`): en las acciones de dos clases (GOOG/GOOGL) el informe de la segunda sale
+  `Duplicate` del de la primera y solo queda enlazado. Reintento en memoria a las 6 h. La descarga va por `Slot::run_background` de `market`: sin el tope de 25 s ni los timeouts que apartan a la SEC del
+  primer plano, con la pausa por 429; el tope es el `FETCH_TIMEOUT` de 150 s del servidor. **Límite**: una empresa sin ningún informe archivado (no está en EDGAR, p. ej. `SAB.MC`, o nada se pudo
+  extraer) no deja marca en disco y se reintenta tras cada reinicio (en ASML, la descarga cortada a 16 MB). Tests: `server/tests/company_docs.rs`.
+- **Filtro de entidad al archivar noticias** (`TeeMarket`, `server/src/knowledge.rs`), **solo en acciones**: antes de ofrecer al archivo las noticias de una acción quedan solo las que la nombran en el
+  título o el resumen (`market::news::Relevance::mentioned`, sin contar la etiqueta del proveedor: Finnhub etiqueta con KO artículos sobre Costco o Kraft Heinz). `news(id, ..)` no trae el nombre: `TeeMarket`
+  recuerda id → nombre de cada `snapshot` (mapa acotado a 2000) y sin nombre conocido enlaza todas, como antes. En materias primas, divisas o índices no se filtra (sus noticias casi nunca nombran «GC=F» o
+  «EUR/USD»). Un nombre igual al símbolo (lo que pone `market` cuando falla la ficha) cuenta como desconocido: no se recuerda y el snapshot filtra con el último nombre bueno recordado (sin él, enlaza
+  todas). `Relevance::mentioned` acepta además el ticker de ≥ 4 letras sin distinguir mayúsculas («Meta beats…» para META); los alias (Google para GOOGL, TSMC para TSM) no se reconocen. El filtro solo afecta a lo que se archiva: `TeeMarket` devuelve al llamador lo mismo que el proveedor. `Relevance` normaliza ahora también el texto (guiones), así que «Coca-Cola» casa con
+  «The Coca-Cola Company»; esto también arregla el feed en vivo, que perdía esos titulares de Google News. Tests: `server/tests/news_entity.rs`.
+- **Lo ya archivado** que no nombra al activo (355 enlaces en la copia del 13-nov) no se limpia: el servidor no guarda el nombre de cada activo en el archivo; caduca con la retención de 90 días.
+
+### Verificación de punta a punta (13-nov-2026)
+Servidor `release` de la rama sobre una copia nueva de la BD del servicio (puerto aparte, `WATCHLIST_ENABLED=0`, `RAG_ARCHIVE=1`, `RAG_ANALYSIS=1`), EDGAR y Ollama reales:
+- Al arrancar, la purga borró **262** noticias de ruido (`noise=262`; era la primera versión del predicado: con la estricta del 14-nov serían unas 231, ver «Endurecimiento»).
+- Snapshots de AAPL, KO, NVDA, SAP, JPM y SAB.MC: en ~25 s se archivaron **11 informes** (AAPL 10-K + 8-K; KO 10-K + 10-Q + 8-K; NVDA 10-K + 10-Q + 8-K; JPM 10-K + 8-K; SAP 20-F), **1 029 fragmentos**, todos con
+  vector a los ~10 s (`pending = 0`). JPM 10-Q sin secciones localizables (no se archivó). SAB.MC: «no figura en la SEC», sin efectos.
+- Análisis `standard` real de KO con `qwen3.5:9b` (modelo activo de la app), con un proxy que registra el prompt: el bloque `<knowledge_base>` del juez llevó **[D1] 10-K Risk Factors, [D2] 10-Q MD&A, [D3] nota de
+  resultados del 8-K** («Raises Full Year Guidance…») y 3 noticias que no estaban entre las `[N#]`. Antes del cambio eran 6 titulares, la mayoría repetidos del contexto. La salida conservó **una cita `[D3]` válida** (caso
+  alcista, sobre la nota de resultados) y `Citations::clean` quitó 2 sin relación. **Es una sola ejecución: anecdótico, no una medida.** [D2] fue el párrafo genérico del calendario fiscal del 10-Q (primer fragmento del MD&A):
+  la consulta de «guidance» casa con «quarter»; mejorable.
+- El modelo veía «folleto 10-K»: `Citations::render` llama ahora «informe» a 10-K/10-Q/20-F/40-F/8-K/6-K y «folleto» al resto.
+- **Sigue sin medirse** el efecto en la calidad de la tesis (protocolo ABBA del 20-oct con ≥ 5 repeticiones). La recuperación sigue APAGADA por defecto (`RAG_ANALYSIS=0`, `RAG_CHAT=0`): esto mejora lo que
+  se archiva y lo que se recuperaría, pero decidir encenderla exige esa medición.
+

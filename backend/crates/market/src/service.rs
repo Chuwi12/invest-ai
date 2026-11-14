@@ -171,17 +171,7 @@ impl Slot {
         F: Fn(Arc<dyn Provider>) -> Fut,
         Fut: Future<Output = PResult<T>>,
     {
-        {
-            let st = self.state();
-            if let Some(until) = st.blocked_until {
-                let now = Instant::now();
-                if until > now {
-                    return Err(ProviderError::RateLimited {
-                        retry_after: Some(until - now),
-                    });
-                }
-            }
-        }
+        self.check_blocked()?;
         if self.limiter.acquire(MAX_LIMITER_WAIT).await.is_err() {
             return Err(ProviderError::RateLimited { retry_after: None });
         }
@@ -192,14 +182,44 @@ impl Slot {
             Err(_) => Err(ProviderError::upstream("timeout")),
         };
         guard.armed = false;
-        let ms = t0.elapsed().as_millis() as u64;
+        self.record(&res, Some(t0.elapsed().as_millis() as u64), true);
+        res
+    }
+
+    /// Operación larga de segundo plano (archivo RAG: varias descargas de MB). Respeta la pausa del
+    /// proveedor y un 429 la fija como siempre, pero no acaba a los `OP_TIMEOUT` ni cuenta timeouts: dos
+    /// seguidos apartarían al proveedor 60 s y en ese minuto fallarían las funciones de primer plano
+    /// (filings, folletos, noticias). Sin límite de ritmo del slot (el cliente `Sec` ya tiene el suyo) ni
+    /// latencia anotada (no es la de una petición). El llamante pone su propio tope de tiempo.
+    async fn run_background<T, F, Fut>(&self, f: &F) -> PResult<T>
+    where
+        F: Fn(Arc<dyn Provider>) -> Fut,
+        Fut: Future<Output = PResult<T>>,
+    {
+        self.check_blocked()?;
+        let res = f(self.provider.clone()).await;
+        self.record(&res, None, false);
+        res
+    }
+
+    /// `RateLimited` si el proveedor está en pausa (tras un 429 o por timeouts seguidos).
+    fn check_blocked(&self) -> PResult<()> {
+        let now = Instant::now();
+        match self.state().blocked_until {
+            Some(until) if until > now => Err(ProviderError::RateLimited { retry_after: Some(until - now) }),
+            _ => Ok(()),
+        }
+    }
+
+    /// Anota el resultado de una operación. `strikes`: un timeout cuenta para apartar al proveedor.
+    fn record<T>(&self, res: &PResult<T>, latency_ms: Option<u64>, strikes: bool) {
         let mut st = self.state();
-        match &res {
+        match res {
             Ok(_) | Err(ProviderError::NotFound(_)) => {
                 st.timeouts_in_a_row = 0;
                 st.last_ok = Some(Utc::now());
                 st.last_error = None;
-                st.last_latency_ms = Some(ms);
+                st.last_latency_ms = latency_ms.or(st.last_latency_ms);
             }
             Err(ProviderError::Unsupported) => {}
             Err(ProviderError::RateLimited { retry_after }) => {
@@ -209,15 +229,16 @@ impl Slot {
             }
             Err(ProviderError::Upstream(m)) => {
                 st.last_error = Some(redact(m, &self.secrets));
-                st.last_latency_ms = Some(ms);
-                if m == "timeout" {
-                    st.strike();
-                } else {
-                    st.timeouts_in_a_row = 0;
+                st.last_latency_ms = latency_ms.or(st.last_latency_ms);
+                if strikes {
+                    if m == "timeout" {
+                        st.strike();
+                    } else {
+                        st.timeouts_in_a_row = 0;
+                    }
                 }
             }
         }
-        res
     }
 }
 
@@ -1110,6 +1131,22 @@ impl Inner {
         Ok((*arc).clone())
     }
 
+    /// Informes periódicos de una empresa (10-K/20-F, 10-Q, nota de resultados). Sin caché: lo llama el
+    /// archivo RAG, que ya espacia las descargas; cada llamada son 3-5 documentos de EDGAR. Va por
+    /// `run_background`: sin tope de 25 s ni strikes (el servidor le pone el suyo), con la pausa por 429.
+    async fn company_reports(&self, id: &AssetId) -> domain::Result<Vec<Prospectus>> {
+        symbol::validate(id)?;
+        if id.class != AssetClass::Stock {
+            return Err(DomainError::InvalidInput("solo acciones".into()));
+        }
+        let slot = self.slot("sec").ok_or_else(|| DomainError::Unavailable("SEC no disponible".into()))?;
+        let sec = self.sec.clone();
+        let id = id.clone();
+        slot.run_background(&|_p: Arc<dyn Provider>| { let s = sec.clone(); let id = id.clone(); async move { s.company_reports(&id, Utc::now()).await } })
+            .await
+            .map_err(|e| self.to_domain("sec", e))
+    }
+
     async fn daily_series(&self, symbol: &str, from: i64, to: i64) -> domain::Result<crate::providers::yahoo::DailySeries> {
         let slot = self.slot("yahoo").ok_or_else(|| DomainError::Unavailable("Yahoo no disponible".into()))?;
         let y = self.yahoo.clone();
@@ -1388,6 +1425,13 @@ impl MarketService {
         self.inner.fund_prospectus(id, max_chars).await
     }
 
+    /// Informes periódicos de una empresa de EE. UU. (último 10-K o 20-F, 10-Q posterior y nota de resultados)
+    /// con sus secciones clave. Contrato de errores en `Sec::company_reports`. Varias peticiones a EDGAR:
+    /// úsalo solo en segundo plano (archivo RAG).
+    pub async fn company_reports(&self, id: &AssetId) -> domain::Result<Vec<Prospectus>> {
+        self.inner.company_reports(id).await
+    }
+
     /// Rentabilidad posterior a la OPV (primer día, 1/3/6/12 meses) frente a `SPY`, `IWM` o `QQQ`.
     /// Sin `offer_price` se toma el del calendario y, si falta, el de la portada del folleto.
     pub async fn ipo_performance(
@@ -1492,6 +1536,13 @@ impl domain::FundDocs for MarketService {
     async fn fund_prospectus(&self, id: &AssetId) -> domain::Result<Prospectus> {
         // 6000 caracteres por sección como máximo: el archivo los trocea de todos modos.
         MarketService::fund_prospectus(self, id, 6000).await
+    }
+}
+
+#[async_trait]
+impl domain::CompanyDocs for MarketService {
+    async fn company_reports(&self, id: &AssetId) -> domain::Result<Vec<Prospectus>> {
+        MarketService::company_reports(self, id).await
     }
 }
 
@@ -2075,6 +2126,58 @@ mod latency_tests {
             })
             .unwrap();
         worker.join().expect("el hilo no debe entrar en pánico");
+    }
+
+    /// La descarga de segundo plano del archivo RAG (`run_background`) no acaba a los 25 s de `OP_TIMEOUT` ni
+    /// suma strikes: dos timeouts seguidos de `run` apartan al proveedor 60 s y rompen el primer plano.
+    #[tokio::test(start_paused = true)]
+    async fn background_run_has_no_op_timeout_and_never_strikes() {
+        let long_ok = |_p: Arc<dyn Provider>| async {
+            tokio::time::sleep(Duration::from_secs(40)).await;
+            Ok::<u8, ProviderError>(7)
+        };
+        let timed_out = |_p: Arc<dyn Provider>| async { Err::<u8, ProviderError>(ProviderError::upstream("timeout")) };
+        let ok = |_p: Arc<dyn Provider>| async { Ok::<u8, ProviderError>(1) };
+        // Contraste: en primer plano la misma operación se corta a los 25 s y cuenta un timeout.
+        let fg = fake_all("sec");
+        assert!(matches!(fg.run(&long_ok).await, Err(ProviderError::Upstream(m)) if m == "timeout"));
+        assert_eq!(fg.state().timeouts_in_a_row, 1);
+        // En segundo plano termina a los 40 s...
+        let bg = fake_all("sec");
+        assert_eq!(bg.run_background(&long_ok).await.unwrap(), 7);
+        // ...y ni los timeouts de red seguidos (reqwest da `Upstream("timeout")`) la apartan.
+        for _ in 0..5 {
+            assert!(bg.run_background(&timed_out).await.is_err());
+        }
+        assert_eq!(bg.state().timeouts_in_a_row, 0);
+        assert!(bg.state().blocked_until.is_none());
+        assert!(bg.state().last_error.is_some());
+        // No anota latencia (la salud del proveedor es la de las peticiones normales)...
+        assert_eq!(bg.state().last_latency_ms, None);
+        // ...y el primer plano sigue funcionando.
+        assert_eq!(bg.run(&ok).await.unwrap(), 1);
+    }
+
+    /// Un 429 en segundo plano sigue pausando el slot, y con el slot en pausa no se llama al proveedor.
+    #[tokio::test(start_paused = true)]
+    async fn background_run_respects_and_sets_the_rate_limit_pause() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let limited = |c: Arc<std::sync::atomic::AtomicUsize>| {
+            move |_p: Arc<dyn Provider>| {
+                let c = c.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err::<u8, ProviderError>(ProviderError::RateLimited { retry_after: Some(Duration::from_secs(10)) })
+                }
+            }
+        };
+        let slot = fake_all("sec");
+        assert!(matches!(slot.run_background(&limited(calls.clone())).await, Err(ProviderError::RateLimited { .. })));
+        assert!(slot.state().blocked_until.is_some());
+        // En pausa: ni el segundo plano ni el primer plano llegan al proveedor.
+        assert!(matches!(slot.run_background(&limited(calls.clone())).await, Err(ProviderError::RateLimited { retry_after: Some(_) })));
+        assert!(matches!(slot.run(&limited(calls.clone())).await, Err(ProviderError::RateLimited { .. })));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     type Fut = std::pin::Pin<Box<dyn Future<Output = (&'static str, PResult<u8>)> + Send>>;
