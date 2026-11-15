@@ -768,3 +768,29 @@ Servidor `release` de la rama sobre una copia nueva de la BD del servicio (puert
 - **Sigue sin medirse** el efecto en la calidad de la tesis (protocolo ABBA del 20-oct con ≥ 5 repeticiones). La recuperación sigue APAGADA por defecto (`RAG_ANALYSIS=0`, `RAG_CHAT=0`): esto mejora lo que
   se archiva y lo que se recuperaría, pero decidir encenderla exige esa medición.
 
+
+## Medición con/sin recuperación tras las mejoras (14-nov-2026)
+Protocolo del apartado «Cómo reactivar la recuperación»: dos servidores `release` (8cd8400) sobre copias de una BD congelada (3 485 documentos, 38 informes/folletos: 10-K/10-Q/8-K de AAPL, AMZN, CAT, JNJ, JPM, KO, MSFT,
+NEE, NVDA, SAP, TSLA, WMT y XOM; 497K de IWM, QQQ y TLT), `RAG_ARCHIVE=0` en los dos, `RAG_ANALYSIS=0` frente a `1`, `qwen3.5:9b`, `standard`, 12 activos (AAPL, NVDA, TSLA, JPM, KO, XOM, SAN.MC, SPY, QQQ,
+BTC, TRXB, IAM), orden ABBA ABBA AB por activo, **5 repeticiones por brazo, 120 análisis, 0 errores**, mercado cerrado (sábado). Datos: `rag-eval-data/metrics-standard-con-sin-rag-2026-11-14.json`.
+
+| Métrica (media por análisis) | Sin | Con |
+| :- | -: | -: |
+| Tokens de entrada | 10 761 | 13 218 (+23 %; sube en 12/12 activos) |
+| Duración | 62,0 s | 63,4 s (+1,5 s; la recuperación tarda ~1,8 s de mediana) |
+| Marcas ⚠ | 0,62 | 0,78 (peor en 5 activos, mejor en 4, igual en 3: signos p = 1,0) |
+| Citas `[D#]` válidas / descartadas | — | 0,47 / 1,67 (el 20-oct: 9,2 descartadas) |
+| Análisis con alguna `[D#]` válida | — | 16 de 60 |
+| Citas `[N#]` | 1,50 | 1,15 (baja en 9/12 activos) |
+| Confianza | 0,591 | 0,586 |
+
+- **Veredicto**: el desacuerdo entre brazos (10 % de los pares) es menor que dentro del mismo brazo (12 %): la recuperación no cambia decisiones más allá del ruido del modelo. Reparto casi idéntico (wait 31/29,
+  accumulate 18/18, hold 11/13).
+- **VRAM**: pico 6,9 GB; el LLM siempre entero en GPU; cuando coincide con el embedder, este queda en un 18 % en GPU y el resto en CPU (no frena al LLM).
+- **Lectura a mano de las `[D#]` que sobrevivieron** (contrastadas con el texto archivado): correctas y sacadas de informes — AAPL ingresos 114,5 MM$ del 4T (8-K), KO orgánico +7 % y margen 33,4 % (8-K),
+  TSLA capex > 20 MM$ en 2026 (10-K), JPM mercados +15 % y depósitos +10 % (8-K); noticias antiguas útiles — IAM (coberturas de BofA y Citi, QIA > 5 %), BTC (salidas de ETF de 1,53 MM$). **Mal leídas**: JPM
+  «ingresos netos −13 %» (el 8-K dice margen de intereses +13 %, beneficio +6 %) y KO «volumen +10 %» (es +5 %); el validador de cifras no las caza porque «13 %» y «10 %» aparecen en el documento. **Mal
+  atribuidas**: TSLA cita `[D3]` en PER y P/S (vienen de fundamentales; la regla 7 no siempre se cumple).
+- **Ruido fuera del RAG**: SAN.MC trae noticias de terremotos en «Santander, Colombia» en los dos brazos (la consulta de Google News por «Santander»); con RAG se suman dos más del archivo.
+- **Conclusión**: coste bajo (+23 % de tokens, +2 % de tiempo) y sin daño medible; ninguna mejora medible en ⚠, veredicto ni confianza. Lo que añade es información trazable a la SEC en ~1 de cada 4
+  análisis, con ~2 de 10 cifras citadas mal leídas en la muestra revisada. Encenderla o no es una decisión de producto; no la apoya ni la descarta la medición.
