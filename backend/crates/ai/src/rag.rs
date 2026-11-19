@@ -10,7 +10,7 @@
 //! `NumberIndex`. No se usan análisis propios pasados como evidencia: el modelo podría citar su
 //! propia alucinación anterior.
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use domain::{AnalysisDepth, AssetClass, AssetSnapshot};
 use futures::future::{join, join_all};
@@ -187,7 +187,32 @@ pub(crate) fn unavailable_warning(lang: Lang) -> String {
     )
 }
 
-/// Nota de calidad si se quitaron citas `[D#]` que el fragmento no respaldaba.
+/// Puntuación semántica de las citas `[D#]` de `texts` (ver `Citations::clean_with`): UNA llamada al embedder para todos
+/// los textos, con tope de [`SEARCH_TIMEOUT`]. Vacío si no hay puntuación (embedder caído, en pausa, tiempo agotado): quien
+/// limpia usa entonces la regla léxica, sin error para el usuario.
+pub(crate) async fn claim_scores(kb: &dyn KnowledgeSearch, citations: &Citations, texts: &[&str]) -> HashMap<(String, String), f32> {
+    claim_scores_within(kb, citations, texts, SEARCH_TIMEOUT).await
+}
+
+async fn claim_scores_within(kb: &dyn KnowledgeSearch, citations: &Citations, texts: &[&str], limit: Duration) -> HashMap<(String, String), f32> {
+    let pairs: Vec<(String, String)> = texts.iter().flat_map(|t| citations.claim_pairs(t)).collect();
+    if pairs.is_empty() {
+        return HashMap::new();
+    }
+    match tokio::time::timeout(limit, kb.similarities(&pairs)).await {
+        Ok(Some(scores)) if scores.len() == pairs.len() => pairs.into_iter().zip(scores).collect(),
+        Ok(_) => {
+            tracing::debug!("sin puntuación semántica de las citas: se usa la regla léxica");
+            HashMap::new()
+        }
+        Err(_) => {
+            tracing::warn!("la puntuación semántica de las citas tardó demasiado: se usa la regla léxica");
+            HashMap::new()
+        }
+    }
+}
+
+/// Nota de calidad si se quitaron citas `[D#]` que el fragmento no respaldaba (análisis).
 pub(crate) fn issues_note(lang: Lang, issues: &[CitationIssue]) -> Option<String> {
     if issues.is_empty() {
         return None;
@@ -202,6 +227,37 @@ pub(crate) fn issues_note(lang: Lang, issues: &[CitationIssue]) -> Option<String
         unknown,
         unsupported
     ))
+}
+
+/// Aviso del chat para las citas dudosas: ahí NO se quitan (el texto ya se emitió), así que no puede decir que se quitaron.
+/// Lista como mucho 6 etiquetas; las inexistentes se cuentan aparte.
+pub(crate) fn chat_issues_note(lang: Lang, issues: &[CitationIssue]) -> Option<String> {
+    let (mut tags, mut unsupported) = (Vec::<String>::new(), 0);
+    for i in issues {
+        if let CitationIssue::Unsupported(t) = i {
+            unsupported += 1;
+            // `d2` y `D02` son la misma cita: se muestra normalizada y una vez.
+            let tag = knowledge::citation::parse_tag(t).map_or_else(|| t.clone(), |n| format!("D{n}"));
+            if tags.len() < 6 && !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+    }
+    let unknown = issues.len() - unsupported;
+    let mut parts = Vec::new();
+    if unsupported > 0 {
+        parts.push(tr!(
+            lang,
+            "{} cita(s) del archivo no parecen respaldadas por el fragmento que citan ({})",
+            "{} archive citation(s) do not seem to be backed by the fragment they cite ({})",
+            unsupported,
+            tags.join(", ")
+        ));
+    }
+    if unknown > 0 {
+        parts.push(tr!(lang, "{} cita(s) a fragmentos inexistentes", "{} citation(s) to nonexistent fragments", unknown));
+    }
+    (!parts.is_empty()).then(|| format!("{}.", parts.join("; ")))
 }
 
 #[cfg(test)]
@@ -450,5 +506,77 @@ mod tests {
         assert_eq!(run(&half, &snap, AnalysisDepth::Standard).await.unwrap().len(), 1);
         // Un archivo sin nada no es un fallo.
         assert!(run(&Canned::new(|_| Ok(vec![])), &snap, AnalysisDepth::Standard).await.unwrap().is_empty());
+    }
+
+    /// Archivo cuyo `similarities` responde lo dado, o se cuelga; cuenta las llamadas.
+    struct Scorer {
+        reply: Option<Vec<f32>>,
+        hang: bool,
+        calls: Mutex<usize>,
+    }
+
+    impl Scorer {
+        fn new(reply: Option<Vec<f32>>, hang: bool) -> Self {
+            Self { reply, hang, calls: Mutex::new(0) }
+        }
+    }
+
+    #[async_trait]
+    impl KnowledgeSearch for Scorer {
+        async fn search(&self, _: &SearchRequest) -> knowledge::Result<SearchResults> {
+            Ok(SearchResults { hits: vec![], scanned: 0, model: "fake".into() })
+        }
+        async fn similarities(&self, _: &[(String, String)]) -> Option<Vec<f32>> {
+            *self.calls.lock().unwrap() += 1;
+            if self.hang {
+                std::future::pending().await
+            }
+            self.reply.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn claim_scores_make_one_call_for_all_the_texts_and_key_each_pair() {
+        let c = Citations::new(vec![hit(1, 1, DocKind::Filing, "Services revenue grew 31.4 percent")]);
+        // La cita [D9] no existe: no genera par. Las otras dos, sí.
+        let texts = ["Los servicios crecieron [D1].", "Otra frase [D1]. Y otra [D9]."];
+        let pairs: Vec<(String, String)> = texts.iter().flat_map(|t| c.claim_pairs(t)).collect();
+        assert_eq!(pairs.len(), 2);
+        let kb = Scorer::new(Some(vec![0.5, 0.25]), false);
+        let scores = claim_scores(&kb, &c, &texts).await;
+        assert_eq!(*kb.calls.lock().unwrap(), 1);
+        assert_eq!((scores.get(&pairs[0]), scores.get(&pairs[1])), (Some(&0.5), Some(&0.25)));
+        // Sin citas que comprobar no se llama a nadie.
+        let none = Scorer::new(Some(vec![]), false);
+        assert!(claim_scores(&none, &Citations::default(), &texts).await.is_empty());
+        assert!(claim_scores(&none, &c, &["sin citas"]).await.is_empty());
+        assert_eq!(*none.calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn claim_scores_are_empty_without_a_usable_answer_or_in_time() {
+        let c = Citations::new(vec![hit(1, 1, DocKind::Filing, "Services revenue grew 31.4 percent")]);
+        let texts = ["Los servicios crecieron [D1]."];
+        assert!(claim_scores(&Scorer::new(None, false), &c, &texts).await.is_empty(), "embedder caído o en pausa");
+        assert!(claim_scores(&Scorer::new(Some(vec![0.9, 0.9]), false), &c, &texts).await.is_empty(), "una puntuación por par: si no cuadra, no se usa ninguna");
+        let started = std::time::Instant::now();
+        assert!(claim_scores_within(&Scorer::new(None, true), &c, &texts, Duration::from_millis(60)).await.is_empty(), "se cuelga: regla léxica");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn the_chat_note_does_not_say_citations_were_removed_and_lists_at_most_six_labels() {
+        let unsupported = |n: usize| CitationIssue::Unsupported(format!("D{n}"));
+        assert_eq!(chat_issues_note(Lang::Es, &[]), None);
+        let es = chat_issues_note(Lang::Es, &[unsupported(2), unsupported(5), CitationIssue::Unknown("D9".into())]).unwrap();
+        assert_eq!(es, "2 cita(s) del archivo no parecen respaldadas por el fragmento que citan (D2, D5); 1 cita(s) a fragmentos inexistentes.");
+        let en = chat_issues_note(Lang::En, &[unsupported(2)]).unwrap();
+        assert_eq!(en, "1 archive citation(s) do not seem to be backed by the fragment they cite (D2).");
+        let many: Vec<_> = [1, 2, 2, 3, 4, 5, 6, 7, 8].into_iter().map(unsupported).collect();
+        let note = chat_issues_note(Lang::Es, &many).unwrap();
+        assert!(note.starts_with("9 cita(s)") && note.contains("(D1, D2, D3, D4, D5, D6)") && !note.contains("D7"), "{note}");
+        let only_unknown = chat_issues_note(Lang::Es, &[CitationIssue::Unknown("D9".into())]).unwrap();
+        assert_eq!(only_unknown, "1 cita(s) a fragmentos inexistentes.");
+        assert!(![&es, &en, &note, &only_unknown].iter().any(|n| n.contains("quitaron") || n.contains("removed")));
     }
 }

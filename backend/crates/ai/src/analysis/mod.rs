@@ -538,9 +538,17 @@ impl AnalysisEngine {
                     quality_notes.push(note);
                 }
                 if !knowledge.is_empty() {
+                    // Una sola llamada al embedder para todas las frases citadas del juez; sin puntuación, regla léxica.
+                    let scores = match &self.knowledge {
+                        Some(kb) => {
+                            let texts: Vec<&str> = judge_texts_mut(&mut j).into_iter().map(|t| t.as_str()).collect();
+                            crate::rag::claim_scores(kb.as_ref(), &knowledge, &texts).await
+                        }
+                        None => Default::default(),
+                    };
                     let mut issues = Vec::new();
                     for t in judge_texts_mut(&mut j) {
-                        let (clean, found) = knowledge.clean(t);
+                        let (clean, found) = knowledge.clean_with(t, &scores);
                         *t = clean;
                         issues.extend(found);
                     }

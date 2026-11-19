@@ -198,8 +198,13 @@ never leave English words in tables or sentences.",
 
             // Citas [D#] a fragmentos del archivo: se comprueban contra lo que el modelo recibió.
             if !runner.citations().is_empty() {
-                let (_, issues) = runner.citations().clean(&answer);
-                if let Some(note) = crate::rag::issues_note(lang, &issues) {
+                // El texto ya se emitió: las citas dudosas no se quitan, solo se avisa de ellas.
+                let scores = match &knowledge {
+                    Some(kb) => crate::rag::claim_scores(kb.as_ref(), runner.citations(), &[&answer]).await,
+                    None => Default::default(),
+                };
+                let (_, issues) = runner.citations().clean_with(&answer, &scores);
+                if let Some(note) = crate::rag::chat_issues_note(lang, &issues) {
                     yield ChatEvent::Token { text: format!("\n\n> ⚠ {note}") };
                 }
             }

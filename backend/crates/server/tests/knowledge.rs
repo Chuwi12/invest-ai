@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::http::StatusCode;
 use common::TestApp;
-use knowledge::{DocKind, EmbedKind, Embedder, FakeEmbedder, KnowledgeConfig, RagModes, SearchRequest};
+use knowledge::{DocKind, EmbedKind, Embedder, FakeEmbedder, KnowledgeConfig, KnowledgeSearch, RagModes, SearchRequest};
 use serde_json::json;
 use server::knowledge::{Activity, GatedEmbedder, Rag, TrackedAnalyst, open_with, run_maintenance};
 use tokio_util::sync::CancellationToken;
@@ -129,6 +129,29 @@ async fn document_embeddings_wait_while_a_generation_is_running_but_queries_do_n
     assert!(!doc.is_finished(), "el documento debe esperar mientras hay una generación");
     drop(guard);
     tokio::time::timeout(Duration::from_secs(2), doc).await.expect("se reanuda al terminar").unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn claim_similarities_do_not_wait_while_an_analysis_or_chat_is_running() {
+    // Las comprobaciones de citas se hacen DENTRO del análisis o del chat: si se embebieran como `Document` se quedarían colgadas.
+    let app = TestApp::new().await;
+    /// Con el identificador del modelo para el que está calibrado el umbral: con otro, `similarities` no llega al embedder.
+    struct Calibrated(FakeEmbedder);
+    #[async_trait::async_trait]
+    impl Embedder for Calibrated {
+        fn model_id(&self) -> String {
+            "embeddinggemma:test|gemma|native".into()
+        }
+        async fn embed(&self, t: &[String], k: EmbedKind) -> Result<Vec<Vec<f32>>, knowledge::EmbedError> {
+            self.0.embed(t, k).await
+        }
+    }
+    let rag = open_with(KnowledgeConfig::default(), app.state.db.clone(), Arc::new(Calibrated(FakeEmbedder::default())), CancellationToken::new()).await.unwrap();
+    let _busy = rag.activity.begin();
+    assert!(rag.activity.busy());
+    let pairs = [("ingresos de servicios".to_string(), "services revenue".to_string())];
+    let s = tokio::time::timeout(Duration::from_secs(2), rag.kb.similarities(&pairs)).await.expect("no espera a que termine la generación");
+    assert_eq!(s.map(|v| v.len()), Some(1));
 }
 
 #[tokio::test]

@@ -17,7 +17,7 @@ use sqlx::SqlitePool;
 use crate::{
     chunk::chunk_sections,
     config::KnowledgeConfig,
-    embed::{EmbedKind, Embedder, normalize_l2},
+    embed::{EmbedKind, Embedder, dot, normalize_l2},
     error::{EmbedError, KnowledgeError, Result},
     index::{DocMeta, Filter, VectorIndex},
     lexical::{fts_query, rrf_max, rrf_term},
@@ -65,6 +65,12 @@ fn checked_vectors(mut vs: Vec<Vec<f32>>, expected: usize) -> std::result::Resul
 #[async_trait]
 pub trait KnowledgeSearch: Send + Sync + 'static {
     async fn search(&self, req: &SearchRequest) -> Result<SearchResults>;
+
+    /// Coseno de cada par (frase, fragmento), en el mismo orden. `None` = no disponible (embedder caído o en
+    /// pausa, o un archivo sin embedder): quien llama usa entonces la regla léxica de `citation::supports`.
+    async fn similarities(&self, _pairs: &[(String, String)]) -> Option<Vec<f32>> {
+        None
+    }
 }
 
 pub struct KnowledgeBase {
@@ -781,16 +787,63 @@ impl KnowledgeBase {
     }
 }
 
+/// Posición de `t` entre los textos distintos vistos hasta ahora (la asigna en la primera aparición).
+fn index_of<'a>(ids: &mut HashMap<&'a str, usize>, t: &'a str) -> usize {
+    let next = ids.len();
+    *ids.entry(t).or_insert(next)
+}
+
+/// ¿Está calibrado `citation::MIN_CLAIM_SIMILARITY` para este espacio vectorial (`modelo|estilo|dimensiones`)? Solo se
+/// midió con embeddinggemma en estilo gemma; con 256 dimensiones ya acepta el doble de relleno. Con cualquier otro, las
+/// citas se validan con la regla léxica en vez de con un umbral que no significa lo mismo.
+fn calibrated_for_claims(model_id: &str) -> bool {
+    let mut parts = model_id.split('|');
+    let (model, style, dims) = (parts.next().unwrap_or(""), parts.next(), parts.next().unwrap_or(""));
+    model.starts_with("embeddinggemma") && style == Some("gemma") && (dims == "native" || dims.parse::<usize>().is_ok_and(|d| d >= 512))
+}
+
 #[async_trait]
 impl KnowledgeSearch for KnowledgeBase {
     async fn search(&self, req: &SearchRequest) -> Result<SearchResults> {
         KnowledgeBase::search(self, req).await
+    }
+
+    /// Los dos textos van como `Query`: el `GatedEmbedder` del servidor hace esperar los `Document` mientras hay un
+    /// análisis o un chat en curso, y esto se llama desde dentro de ellos. El umbral de `citation::MIN_CLAIM_SIMILARITY`
+    /// está calibrado consulta-consulta (los vectores guardados de los chunks llevan «título — sección» delante).
+    async fn similarities(&self, pairs: &[(String, String)]) -> Option<Vec<f32>> {
+        if !calibrated_for_claims(&self.model) {
+            return None;
+        }
+        // Textos únicos: una sola llamada al embedder aunque varias citas compartan fragmento o frase.
+        let mut ids: HashMap<&str, usize> = HashMap::new();
+        let at: Vec<(usize, usize)> = pairs.iter().map(|(claim, fragment)| (index_of(&mut ids, claim), index_of(&mut ids, fragment))).collect();
+        if ids.is_empty() {
+            return Some(Vec::new());
+        }
+        let mut texts = vec![String::new(); ids.len()];
+        for (t, i) in ids {
+            texts[i] = t.to_string();
+        }
+        // El aviso (una vez por caída) y la pausa los gestiona `embed_texts`.
+        let vs = self.embed_texts(&texts, EmbedKind::Query).await.ok()?;
+        Some(at.iter().map(|&(a, b)| dot(&vs[a], &vs[b])).collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_claim_threshold_only_applies_to_the_embedder_it_was_calibrated_with() {
+        for id in ["embeddinggemma:300m-qat-q8_0|gemma|native", "embeddinggemma:300m|gemma|512"] {
+            assert!(calibrated_for_claims(id), "{id}");
+        }
+        for id in ["embeddinggemma:300m|gemma|256", "embeddinggemma:300m|plain|native", "nomic-embed-text|nomic|native", "fake|hash|256", ""] {
+            assert!(!calibrated_for_claims(id), "{id}");
+        }
+    }
 
     #[test]
     fn every_embedder_failure_pauses_it_and_the_permanent_ones_longer() {
