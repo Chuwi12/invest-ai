@@ -120,11 +120,13 @@ funciona sin Ollama. Código: `lexical.rs` (saneado y RRF), `store.rs` (tabla y 
 - `Citations::new(hits)` numera `D1…Dn` por orden de puntuación (por fragmento, no por documento).
 - `render(lang)` produce el bloque para el prompt: `<knowledge_base>` + una entrada por fragmento con tipo, fuente, fecha,
   emisor, sección, URL y el texto en una línea. `source_refs(tags)` da `domain::SourceRef` para `Analysis.sources`.
-- `clean(text)` revisa cada `[D#]` de la salida: etiqueta inexistente → se quita; la frase no comparte **ninguna cifra ni
-  2 palabras de contenido** con el fragmento → se quita (misma heurística que `Verifier::clean_citations` para `[N#]`).
-  Devuelve `CitationIssue::{Unknown, Unsupported}` para `qualityNotes`.
-- Es una heurística léxica: detecta citas inventadas o sin relación, **no** garantiza que la frase sea fiel (una frase
-  que reutiliza dos palabras del fragmento pero afirma otra cosa pasa). Para cifras, lo robusto es que `ai` meta el texto
+- `clean_with(text, puntuaciones)` revisa cada `[D#]` de la salida: etiqueta inexistente → se quita; la frase no se parece al
+  fragmento → se quita. Desde el 19-nov-2026 «se parece» es el coseno frase↔fragmento del embedder (≥ `MIN_CLAIM_SIMILARITY`,
+  ver «Validación semántica de las citas `[D#]`»); sin puntuación (embedder caído, modelo no calibrado, modo demo) queda la regla
+  léxica de `clean(text)`: **alguna cifra o 2 palabras de contenido** en común (misma heurística que `Verifier::clean_citations`
+  para `[N#]`). Devuelve `CitationIssue::{Unknown, Unsupported}` para `qualityNotes`.
+- Detecta citas inventadas o sin relación con la frase, **no** garantiza que la frase sea fiel (misma materia con el signo o la
+  cifra cambiados pasa). Para cifras, lo robusto es que `ai` meta el texto
   de los fragmentos en su `NumberIndex` (ver coordinador).
 
 ## Prompt injection
@@ -794,3 +796,54 @@ BTC, TRXB, IAM), orden ABBA ABBA AB por activo, **5 repeticiones por brazo, 120 
 - **Ruido fuera del RAG**: SAN.MC trae noticias de terremotos en «Santander, Colombia» en los dos brazos (la consulta de Google News por «Santander»); con RAG se suman dos más del archivo.
 - **Conclusión**: coste bajo (+23 % de tokens, +2 % de tiempo) y sin daño medible; ninguna mejora medible en ⚠, veredicto ni confianza. Lo que añade es información trazable a la SEC en ~1 de cada 4
   análisis, con ~2 de 10 cifras citadas mal leídas en la muestra revisada. Encenderla o no es una decisión de producto; no la apoya ni la descarta la medición.
+
+## Validación semántica de las citas `[D#]` (19-nov-2026)
+**Defecto.** `citation::supports` daba una cita por válida si la frase y el fragmento compartían una cifra o dos palabras. La respuesta va en español y los informes de la SEC (y casi todas las noticias) en inglés,
+así que las citas cualitativas (riesgos, estrategia) se daban por «sin relación»: en el análisis se borraban y en el chat aparecía el aviso «Se quitaron N cita(s)…» sin haberlas quitado.
+
+**Datos.** Chat con `RAG_CHAT=1` y `gemma4:12b` sobre una copia de la BD, con un proxy que registra lo que recibe el modelo: 12 preguntas cualitativas sobre informes (KO, TSLA, AAPL, JPM, MSFT, NVDA, AMZN, XOM,
+WMT, JNJ, CAT, NEE) → 146 citas, 128 con frase ≥ 40 caracteres («citas reales»). Como contraste, 600 pares «de relleno»: frases de análisis **sin** RAG (brazo `off` del 14-nov) emparejadas con fragmentos de
+informes de la misma empresa, y 768 pares con fragmentos de otra empresa.
+
+| Regla | Citas reales aceptadas | Relleno aceptado | Otra empresa |
+| :- | -: | -: | -: |
+| Léxica (la anterior) | 39 % | 20,0 % | 6,0 % |
+| Raíz de 5 letras, ≥ 2 comunes (cognados) | 86 % | — | 27,1 % |
+| Coseno con el vector guardado del chunk ≥ 0,35 | 79 % | 10,8 % | 6,8 % |
+| **Coseno frase↔fragmento, las dos como consulta, ≥ 0,36** | **92–93 %** | **3,5–3,7 %** | 10,4 % |
+| Ídem con umbral 0,40 | 85 % | 1,0 % | 5,9 % |
+| Lo anterior **o** cifra compartida | 93 % | 21,5 % | — |
+
+- El vector guardado de un chunk de informe lleva «título — sección» delante: sube el parecido con cualquier frase que nombre la empresa y diluye el contenido. Por eso se embebe el fragmento tal como lo vio el
+  modelo (`rendered_fragment`).
+- Los dos textos van como `EmbedKind::Query`: `GatedEmbedder` hace esperar los embeddings de documento mientras hay un análisis o un chat en curso, y la validación ocurre dentro.
+- Con 0,36 el cruce con otra empresa sube del 6 % al 10 %: se acepta porque la búsqueda ya filtra por activo (ese cruce casi no se da) y el fallo real es el relleno de la misma empresa, que baja del 20 % al
+  3,5 %. Dos pasadas del embedder dan ±1 punto en el borde (los rangos de la tabla).
+- La cifra compartida no rescata ninguna cita real que el coseno no acepte y multiplica por seis el relleno aceptado (años, el «10» de «10-K»): con puntuación semántica decide solo ella; la regla léxica queda
+  de respaldo cuando no hay embedder.
+- Las citas reales que quedan por debajo de 0,36 son en su mayoría frases sin contenido propio (encabezados, «según los informes…») o cifras sueltas frente a una tabla.
+
+**Cambio.** `KnowledgeSearch::similarities` (una llamada al embedder por análisis o por respuesta, con el tope de `SEARCH_TIMEOUT`), `citation::MIN_CLAIM_SIMILARITY = 0.36`, `Citations::clean_with`. La frase de cada
+cita se toma del texto ORIGINAL, sin etiquetas `[D#]`, con espacios simples y acotada a 2 000 caracteres: es la clave de la puntuación, igual en la pasada que reúne los pares y en la que limpia aunque se quiten otras
+citas de la misma frase. El chat ya no dice
+«Se quitaron» (no puede quitar texto ya emitido): avisa de las citas que no parecen respaldadas y las nombra. Fixture con 14 + 14 pares reales en `knowledge/tests/fixtures/claim_pairs.json` y un test en vivo
+`#[ignore]` que comprueba el umbral con el embedder real.
+
+**Chat con el archivo.** Misma pregunta («¿qué riesgos destaca Coca-Cola en su 10-K?») en dos copias: con `RAG_CHAT=0` el chat responde que no tiene acceso al informe; con `RAG_CHAT=1` llama a `search_knowledge`
+y responde con el contenido del 10-K (~50 s). El valor por defecto del código sigue siendo `RAG_CHAT=0`.
+
+**Límites.**
+- Calibrado con un modelo de embeddings (`embeddinggemma:300m-qat-q8_0`), un LLM y respuestas en español sobre texto en inglés. Por eso `similarities` solo puntúa si el espacio vectorial es embeddinggemma en estilo
+  gemma con ≥ 512 dimensiones (`kb::calibrated_for_claims`; medido con el fixture: 512 da lo mismo que nativo, 256 acepta 4/14 de relleno y 128, 5/14). Con otro `RAG_EMBED_MODEL`, estilo o dimensión —y en el modo
+  demo— las citas vuelven a la regla léxica. El test en vivo usa el modelo por defecto, no el configurado: cambiar de embedder exige recalibrar y ampliar esa guarda.
+- Las «citas reales» son las que puso el modelo, no una anotación humana completa: se leyeron a mano las de menor puntuación.
+- Una cita «válida» significa que el fragmento existe y trata de lo mismo que la frase. **No** detecta una cifra mal leída, un signo o una negación invertidos (auditoría: «cayeron un 40 %» frente a un 8-K que dice
+  que subieron da 0,69), ni un documento hostil que repita lo que quiere ver citado; tampoco lo detectaba la regla léxica. Para las cifras, la defensa sigue siendo el `NumberIndex`.
+- Un fallo del embedder al puntuar activa la misma pausa (30 s / 5 min) que un fallo al buscar; un embedder colgado añade hasta 20 s al final del análisis o de la respuesta y se usa la regla léxica.
+- Una cita puesta DESPUÉS del punto se juzga contra la frase siguiente (o contra ninguna): ya pasaba antes y es raro en lo medido (2 de 146).
+
+**Verificación de punta a punta (19-nov-2026).** Binario `release` de la rama sobre una copia de la BD, `gemma4:12b`, embedder real:
+- Chat, «¿qué riesgos destaca Coca-Cola en su 10-K?»: antes «Se quitaron 4 cita(s)…» (las 4 de la respuesta); ahora ninguna cita marcada.
+- Chat, capex de Tesla e ingresos de Apple: antes 11 citas «quitadas»; ahora 1 marcada (`D4`) con el aviso nuevo.
+- Análisis `standard` de TSLA y KO: sobreviven 3 y 4 citas, entre ellas las cualitativas que antes se borraban («el acceso no autorizado a datos personales podría dañar la reputación… [D1]», sobre los Risk Factors
+  del 10-K); 1 cita quitada en cada uno. Ninguna puntuación agotó el tiempo ni cayó a la regla léxica. Son 2 análisis: comprueban que funciona, no miden el tiempo añadido.

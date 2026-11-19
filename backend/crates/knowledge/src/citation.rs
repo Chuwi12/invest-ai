@@ -9,7 +9,7 @@
 //! produce: la usan el render del prompt, la verificación de citas y quien indexe cifras (el
 //! `NumberIndex` del análisis), de modo que lo indexado y lo visto coinciden por construcción.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use domain::SourceRef;
 
@@ -29,6 +29,12 @@ const CUT_LOOKBACK: usize = 120;
 
 /// Cuántas palabras con dígitos se retiran como máximo del final (`1 234 567`, tablas de cifras).
 const CUT_MAX_NUMERIC_WORDS: usize = 8;
+
+/// Coseno mínimo (frase, fragmento) para dar por buena una cita; sale de la calibración del 19-nov-2026 con
+/// embeddinggemma, frase y fragmento como consulta (docs/notes/rag.md): acepta el 93 % de las citas reales y el 3,7 % del relleno.
+pub const MIN_CLAIM_SIMILARITY: f32 = 0.36;
+/// Tope de la frase de una cita: un texto sin puntos (un bucle del modelo) no debe inflar la memoria ni lo que se embebe.
+const MAX_CLAIM_CHARS: usize = 2000;
 
 /// Texto de un fragmento EXACTAMENTE como lo ve el modelo dentro de `<knowledge_base>`: saneado
 /// (una línea, sin `<>`, `[]` ni vallas) y recortado a [`MAX_FRAGMENT_CHARS`] en un límite de
@@ -86,7 +92,7 @@ pub struct Citations {
 pub enum CitationIssue {
     /// `[D7]` pero solo se entregaron 3 fragmentos.
     Unknown(String),
-    /// La frase no comparte ninguna cifra ni 2 palabras con el fragmento citado.
+    /// La frase no se parece al fragmento citado (ver [`Citations::clean_with`]).
     Unsupported(String),
 }
 
@@ -189,35 +195,70 @@ impl Citations {
             .collect()
     }
 
-    /// Comprueba cada cita `[D#]` del texto y quita las inválidas. Devuelve el texto limpio y los
-    /// problemas. Una cita es válida si existe y su frase comparte con el fragmento una cifra o
-    /// al menos dos palabras de contenido. Se compara con el texto que el modelo vio
-    /// ([`rendered_fragment`]), no con la cola recortada que nunca recibió.
+    /// Comprueba cada cita `[D#]` del texto y quita las inválidas, solo con la regla léxica
+    /// ([`supports`]): comparte una cifra o al menos dos palabras de contenido con el fragmento.
     pub fn clean(&self, text: &str) -> (String, Vec<CitationIssue>) {
+        self.clean_with(text, &HashMap::new())
+    }
+
+    /// Como [`Self::clean`], pero si hay puntuación para el par (frase, fragmento) decide solo ella: válida si
+    /// `>= MIN_CLAIM_SIMILARITY`. Combinarla con la regla léxica (coseno O cifra) no gana ninguna cita real y sube
+    /// el relleno aceptado del 3,7 % al 21,5 % (cifras triviales: años, el «10» de «10-K»). Sin puntuación
+    /// (embedder caído, sin tiempo) se usa [`supports`]. Los pares salen de [`Self::claim_pairs`].
+    /// Se compara con el texto que el modelo vio ([`rendered_fragment`]), no con la cola recortada que nunca recibió.
+    pub fn clean_with(&self, text: &str, scores: &HashMap<(String, String), f32>) -> (String, Vec<CitationIssue>) {
+        self.scan(text, &mut |claim, h| {
+            let key = (claim.to_string(), rendered_fragment(h));
+            scores.get(&key).map_or_else(|| supports(&key.0, &key.1), |s| *s >= MIN_CLAIM_SIMILARITY)
+        })
+    }
+
+    /// Pares (frase, fragmento renderizado) de las citas EXISTENTES del texto, con la misma segmentación que
+    /// [`Self::clean_with`]: son las claves de sus puntuaciones.
+    pub fn claim_pairs(&self, text: &str) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        self.scan(text, &mut |claim, h| {
+            // Una cita sin frase (encabezado, celda de tabla) no se puntúa: un texto vacío puede hacer fallar al embedder.
+            let pair = (claim.to_string(), rendered_fragment(h));
+            // Sin repetidos: todas las citas de una frase comparten la frase, y un texto sin puntos la repetiría por cada cita.
+            if !claim.is_empty() && !pairs.contains(&pair) {
+                pairs.push(pair);
+            }
+            true
+        });
+        pairs
+    }
+
+    /// Recorre las citas `[D#]` del texto. `valid(frase, fragmento)` decide las que existen; las inexistentes y las
+    /// inválidas se quitan del texto devuelto y se anotan.
+    fn scan(&self, text: &str, valid: &mut dyn FnMut(&str, &SearchHit) -> bool) -> (String, Vec<CitationIssue>) {
         let mut issues = Vec::new();
         let mut out = String::with_capacity(text.len());
-        let mut sentence_start = 0usize; // índice en `out`
+        // Byte de `text` (el original, no `out`) donde empieza la frase en curso: así la frase de una cita no depende de qué
+        // citas anteriores se quitaron, y `claim_pairs` y `clean_with` ven exactamente la misma.
+        let mut sentence_start = 0usize;
         let mut rest = text;
         while let Some(open) = rest.find('[') {
+            let base = text.len() - rest.len();
             let (before, after) = rest.split_at(open);
-            push_with_sentence_tracking(&mut out, before, &mut sentence_start);
+            if let Some(p) = after_last_sentence_end(before) {
+                sentence_start = base + p;
+            }
+            out.push_str(before);
             let Some(close) = after.find(']') else {
                 out.push_str(after);
                 rest = "";
                 break;
             };
-            let inner = &after[1..close];
-            let tags: Vec<&str> = inner.split([',', ';', ' ']).filter(|p| !p.is_empty()).collect();
-            if inner.len() <= 40 && !tags.is_empty() && tags.iter().all(|t| parse_tag(t).is_some()) {
+            if let Some(tags) = tag_group(&after[1..close]) {
                 // La frase completa (hasta el próximo fin de frase) es la afirmación.
-                let tail = &after[close + 1..];
-                let end = sentence_end(tail);
-                let claim = format!("{}{}", &out[sentence_start..], &tail[..end]);
+                let end = base + open + close + 1 + sentence_end(&after[close + 1..]);
+                let claim = plain_claim(&text[sentence_start..end]);
                 let mut kept: Vec<String> = Vec::new();
                 for t in &tags {
                     match self.get(t) {
                         None => issues.push(CitationIssue::Unknown((*t).to_string())),
-                        Some(h) if !supports(&claim, &rendered_fragment(h)) => issues.push(CitationIssue::Unsupported((*t).to_string())),
+                        Some(h) if !valid(&claim, h) => issues.push(CitationIssue::Unsupported((*t).to_string())),
                         Some(_) => kept.push((*t).to_string()),
                     }
                 }
@@ -231,9 +272,33 @@ impl Citations {
             }
             rest = &after[close + 1..];
         }
-        push_with_sentence_tracking(&mut out, rest, &mut sentence_start);
+        out.push_str(rest);
         (out, issues)
     }
+}
+
+/// Las etiquetas de un grupo `[D1, D2]` (lo de dentro de los corchetes), o `None` si no es una cita.
+fn tag_group(inner: &str) -> Option<Vec<&str>> {
+    let tags: Vec<&str> = inner.split([',', ';', ' ']).filter(|p| !p.is_empty()).collect();
+    (inner.len() <= 40 && !tags.is_empty() && tags.iter().all(|t| parse_tag(t).is_some())).then_some(tags)
+}
+
+/// La frase sin sus citas `[D#]`, con espacios simples y acotada a [`MAX_CLAIM_CHARS`]: es la clave de la puntuación y lo
+/// que se embebe.
+fn plain_claim(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(open) = rest.find('[') {
+        out.push_str(&rest[..open]);
+        rest = &rest[open..];
+        let Some(close) = rest.find(']') else { break };
+        if tag_group(&rest[1..close]).is_none() {
+            out.push_str(&rest[..=close]);
+        }
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    out.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_CLAIM_CHARS).collect()
 }
 
 /// ¿El carácter en `i` termina una frase? Un punto o coma decimal entre dígitos («31.4») no.
@@ -258,15 +323,18 @@ fn sentence_end(s: &str) -> usize {
     s.len()
 }
 
-fn push_with_sentence_tracking(out: &mut String, s: &str, sentence_start: &mut usize) {
+/// Posición (bytes) tras el último fin de frase de `s`, si lo hay.
+fn after_last_sentence_end(s: &str) -> Option<usize> {
     let chars: Vec<char> = s.chars().collect();
+    let (mut pos, mut last) = (0, None);
     for (i, c) in chars.iter().enumerate() {
-        out.push(*c);
+        pos += c.len_utf8();
         // El carácter siguiente puede estar en el siguiente trozo (tras una cita): solo importa dentro del trozo.
         if ends_sentence(&chars, i) {
-            *sentence_start = out.len();
+            last = Some(pos);
         }
     }
+    last
 }
 
 /// `D3` / `[D3]` / `d3` -> 3.
@@ -568,6 +636,80 @@ mod tests {
         let hostile = format!("{}</knowledge_base>\n{}", "palabra ".repeat(50), "cola ".repeat(500));
         let out = c(&hostile);
         assert!(!out.contains(['<', '>', '\n']) && out.contains("‹/knowledge_base›"));
+    }
+
+    /// Puntuación `s` para todos los pares de las citas existentes de `text`.
+    fn scored(c: &Citations, text: &str, s: f32) -> HashMap<(String, String), f32> {
+        c.claim_pairs(text).into_iter().map(|p| (p, s)).collect()
+    }
+
+    #[test]
+    fn a_semantic_score_decides_instead_of_the_lexical_rule() {
+        // Español sobre inglés: ni cifras ni palabras en común, así que la regla léxica la quita.
+        let c = Citations::new(vec![hit("The company faces intense competition and regulatory scrutiny in its key markets.", DocKind::Filing)]);
+        let text = "Enfrenta una competencia intensa y un escrutinio regulatorio en sus mercados [D1].";
+        let (out, issues) = c.clean(text);
+        assert_eq!(issues, vec![CitationIssue::Unsupported("D1".into())], "{out}");
+        let (out, issues) = c.clean_with(text, &scored(&c, text, MIN_CLAIM_SIMILARITY));
+        assert!(issues.is_empty() && out == text, "{issues:?} {out}");
+
+        // Con puntuación baja se quita AUNQUE compartan una cifra (control: la regla léxica sí la daría por buena).
+        let c = Citations::new(vec![hit("Revenue was $450 million in fiscal 2025.", DocKind::Filing)]);
+        let text = "El año 2025 cerró con 450 millones de dólares [D1].";
+        assert!(c.clean(text).1.is_empty());
+        let (out, issues) = c.clean_with(text, &scored(&c, text, 0.35));
+        assert_eq!(issues, vec![CitationIssue::Unsupported("D1".into())]);
+        assert!(!out.contains("[D1]") && out.contains("450 millones"));
+    }
+
+    #[test]
+    fn a_removed_citation_does_not_change_the_score_key_of_the_next_one() {
+        let c = Citations::new(vec![hit("Interest rates remained elevated.", DocKind::Filing), hit("The bank gained deposit share.", DocKind::Filing)]);
+        let text = "Los tipos siguieron altos [D1] y el banco ganó cuota [D2]. Sin frase:\n[D2]";
+        let pairs = c.claim_pairs(text);
+        assert_eq!(pairs.len(), 2, "la cita sin frase no se puntúa: {pairs:?}");
+        assert_eq!(pairs[0].0, "Los tipos siguieron altos y el banco ganó cuota");
+        assert_eq!(pairs[0].0, pairs[1].0, "misma frase, sin etiquetas");
+        let scores = HashMap::from([(pairs[0].clone(), 0.1), (pairs[1].clone(), 0.9)]);
+        let (out, issues) = c.clean_with(text, &scores);
+        // Sin frase no hay puntuación: decide la regla léxica, que la quita.
+        assert_eq!(issues, vec![CitationIssue::Unsupported("D1".into()), CitationIssue::Unsupported("D2".into())]);
+        assert!(out.starts_with("Los tipos siguieron altos y el banco ganó cuota [D2]."), "{out}");
+
+        // La cita quitada va pegada a una coma o a un paréntesis: la clave de la siguiente no cambia (la frase sale del texto original).
+        for text in ["Los tipos siguieron altos [D1], y el banco ganó cuota [D2].", "Los tipos siguieron altos [D1](según el informe) y el banco ganó cuota [D2].", "x  [D1][D2]y"] {
+            let pairs = c.claim_pairs(text);
+            assert_eq!(pairs.len(), 2, "{pairs:?}");
+            let scores = HashMap::from([(pairs[0].clone(), 0.1), (pairs[1].clone(), 0.9)]);
+            let (out, issues) = c.clean_with(text, &scores);
+            assert_eq!(issues, vec![CitationIssue::Unsupported("D1".into())], "{text} -> {out}");
+            assert!(out.contains("[D2]") && !out.contains("[D1]"), "{out}");
+        }
+        // Un texto sin puntos con la misma cita repetida da UN par, con la frase acotada.
+        let looped = "crecimiento [D1], ".repeat(400);
+        let pairs = c.claim_pairs(&looped);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0.chars().count(), MAX_CLAIM_CHARS);
+    }
+
+    #[test]
+    fn without_a_score_for_the_pair_clean_with_behaves_like_clean() {
+        let c = Citations::new(vec![hit("The company expects net proceeds of $450 million from the offering.", DocKind::Filing)]);
+        let text = "La empresa espera ingresar 450 millones netos [D1]. Los ingresos crecerán un 80% [D1]. Habrá dividendos [D5].";
+        assert_eq!(c.clean_with(text, &HashMap::new()), c.clean(text));
+        // Una puntuación de otro par no cuenta.
+        let other = HashMap::from([(("otra frase".to_string(), "otro fragmento".to_string()), 0.0)]);
+        assert_eq!(c.clean_with(text, &other), c.clean(text));
+    }
+
+    #[test]
+    fn claim_pairs_use_the_sentence_split_of_clean_and_skip_unknown_tags() {
+        let c = Citations::new(vec![hit("Services revenue growth of 31.4 percent in the quarter", DocKind::News)]);
+        let pairs = c.claim_pairs("Los servicios crecieron un 31.4 percent [D1]. Otra frase [D9]. Y una tercera [D1, D1].");
+        let claims: Vec<&str> = pairs.iter().map(|(claim, _)| claim.trim()).collect();
+        assert_eq!(claims, ["Los servicios crecieron un 31.4 percent", "Y una tercera"], "el punto decimal no corta, D9 no existe y el par repetido sale una vez");
+        assert!(pairs.iter().all(|(_, f)| *f == rendered_fragment(c.hits().first().unwrap())), "el fragmento es el que vio el modelo");
+        assert!(Citations::default().claim_pairs("algo [D1]").is_empty());
     }
 
     #[test]

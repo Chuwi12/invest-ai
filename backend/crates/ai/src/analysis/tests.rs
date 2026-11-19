@@ -765,6 +765,16 @@ mod rag_on {
         }
     }
 
+    /// El archivo real SIN puntuación semántica: el embedder simulado (palabras en común) no es semántico, así que los tests
+    /// que no tratan de eso juzgan las citas con la regla léxica.
+    struct Lexical(Arc<KnowledgeBase>);
+    #[async_trait]
+    impl KnowledgeSearch for Lexical {
+        async fn search(&self, r: &SearchRequest) -> knowledge::Result<SearchResults> {
+            self.0.search(r).await
+        }
+    }
+
     fn with_kb(e: Env, kb: Arc<dyn KnowledgeSearch>) -> Env {
         Env { engine: e.engine.with_knowledge(Some(kb)), mock: e.mock }
     }
@@ -786,7 +796,7 @@ mod rag_on {
 
     #[tokio::test]
     async fn retrieved_fragments_reach_the_judge_as_untrusted_data_and_become_sources() {
-        let e = with_kb(env().await, kb_with_docs(true).await);
+        let e = with_kb(env().await, Arc::new(Lexical(kb_with_docs(true).await)));
         script(
             &e,
             [
@@ -906,6 +916,37 @@ mod rag_on {
                 },
             };
             Ok(SearchResults { hits: vec![hit], scanned: 1, model: "fake".into() })
+        }
+    }
+
+    /// `OneHit` con puntuación semántica fija para TODOS los pares (frase, fragmento); `None` = no disponible. Cuenta las llamadas.
+    struct Scored(OneHit, Option<f32>, std::sync::atomic::AtomicUsize);
+    #[async_trait]
+    impl KnowledgeSearch for Scored {
+        async fn search(&self, r: &SearchRequest) -> knowledge::Result<SearchResults> {
+            self.0.search(r).await
+        }
+        async fn similarities(&self, pairs: &[(String, String)]) -> Option<Vec<f32>> {
+            self.2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.1.map(|s| vec![s; pairs.len()])
+        }
+    }
+
+    #[tokio::test]
+    async fn a_spanish_claim_on_an_english_fragment_follows_the_semantic_score_and_falls_back_to_the_lexical_rule() {
+        let fragment = "The company faces intense competition and regulatory scrutiny in its key markets.";
+        let claim = "Enfrenta una competencia intensa y un escrutinio regulatorio en sus mercados [D1]";
+        // Sin cifras ni palabras en común: solo la puntuación puede salvarla. 0,36 (el umbral) ya vale.
+        for (score, kept) in [(Some(0.5), true), (Some(0.36), true), (Some(0.2), false), (None, false)] {
+            let kb = Arc::new(Scored(OneHit(fragment.into()), score, Default::default()));
+            let e = with_kb(env().await, kb.clone());
+            script(&e, [claim, "x", "Los riesgos regulatorios y la competencia presionan los márgenes de sus mercados [D1]"]);
+            let a = e.engine.analyze(&fixture::stock_snapshot(), Some(AnalysisDepth::Standard)).await.unwrap();
+            let (bull, bear) = (a.bull_case.join("\n"), a.bear_case.join("\n"));
+            let notes = a.quality_notes.unwrap_or_default().join("\n");
+            assert_eq!((bull.contains("[D1]"), bear.contains("[D1]")), (kept, kept), "{score:?}: {bull} | {bear}");
+            assert_eq!(notes.contains("Se quitaron 2 cita(s)"), !kept, "{score:?}: {notes}");
+            assert_eq!(kb.2.load(std::sync::atomic::Ordering::SeqCst), 1, "{score:?}: una sola llamada para todas las frases del análisis");
         }
     }
 

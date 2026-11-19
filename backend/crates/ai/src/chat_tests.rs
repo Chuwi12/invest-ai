@@ -441,7 +441,8 @@ mod rag_on {
     async fn tool_is_offered_only_with_archive_and_returns_numbered_fragments() {
         let e = env_kb(kb().await).await;
         e.mock.push_chat(vec![tool_call_line("search_knowledge", json!({"query": "ingresos de servicios", "asset": "stock:AAPL", "kind": "news", "since": "2026-10-01", "limit": 50})), done_line()]);
-        e.mock.push_chat(reply("Según el archivo, los servicios crecieron 31.4 percent [D1]."));
+        // El embedder simulado puntúa por palabras compartidas (no es semántico): la frase repite las del fragmento.
+        e.mock.push_chat(reply("Según el archivo, Apple services revenue grew 31.4 percent [D1]."));
         let ev = collect(&e, request(&e, "¿qué dicen las noticias?", &[])).await;
         let reqs = e.mock.chat_requests();
         let tools = reqs[0]["tools"].as_array().unwrap();
@@ -529,9 +530,44 @@ mod rag_on {
     }
 
     #[tokio::test]
-    async fn chat_citation_resting_only_on_the_cut_tail_is_removed() {
+    async fn chat_citation_resting_only_on_the_cut_tail_is_flagged_not_removed() {
         let (_, text) = answer_with_long_fragment("El precio objetivo del folleto es 987.65 dólares [D1].").await;
-        assert!(text.contains("Se quitaron 1 cita"), "la cita solo se apoyaba en la cola recortada: {text}");
+        assert!(text.contains("1 cita(s) del archivo no parecen respaldadas por el fragmento que citan (D1)"), "la cita solo se apoyaba en la cola recortada: {text}");
+        // En el chat el texto ya se emitió: la cita sigue ahí y el aviso no puede decir que se quitó.
+        assert!(text.contains("dólares [D1]") && !text.contains("Se quitaron"), "{text}");
+    }
+
+    /// `OneHit` con puntuación semántica fija para todos los pares; `None` = no disponible. Cuenta las llamadas.
+    struct Scored(OneHit, Option<f32>, std::sync::atomic::AtomicUsize);
+    #[async_trait::async_trait]
+    impl knowledge::KnowledgeSearch for Scored {
+        async fn search(&self, r: &knowledge::SearchRequest) -> knowledge::Result<SearchResults> {
+            self.0.search(r).await
+        }
+        async fn similarities(&self, pairs: &[(String, String)]) -> Option<Vec<f32>> {
+            self.2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.1.map(|s| vec![s; pairs.len()])
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_judges_a_spanish_claim_on_an_english_fragment_by_the_semantic_score() {
+        let fragment = "The company faces intense competition and regulatory scrutiny in its key markets.";
+        let answer = "Enfrenta una competencia intensa y un escrutinio regulatorio en sus mercados [D1]. Y lo repite en otra frase igual [D1].";
+        for (score, kept) in [(Some(0.5), true), (Some(0.2), false), (None, false)] {
+            let kb = Arc::new(Scored(OneHit(fragment.into()), score, Default::default()));
+            let e = env_kb(kb.clone()).await;
+            e.mock.push_chat(vec![tool_call_line("search_knowledge", json!({"query": "competencia"})), done_line()]);
+            e.mock.push_chat(reply(answer));
+            let text = text_of(&collect(&e, request(&e, "¿qué riesgos hay?", &[])).await);
+            assert!(text.contains("mercados [D1]"), "las citas nunca se quitan en el chat: {text}");
+            assert_eq!(text.contains('⚠'), !kept, "{score:?}: {text}");
+            assert!(!text.contains("Se quitaron"), "{score:?}: {text}");
+            if !kept {
+                assert!(text.contains("2 cita(s) del archivo no parecen respaldadas por el fragmento que citan (D1)."), "{score:?}: {text}");
+            }
+            assert_eq!(kb.2.load(std::sync::atomic::Ordering::SeqCst), 1, "{score:?}: una sola llamada por respuesta");
+        }
     }
 
     #[tokio::test]

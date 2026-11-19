@@ -1,7 +1,7 @@
 //! Tests de integración: SQLite en memoria/fichero + embedder falso. Sin red ni Ollama.
 
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use domain::{AssetId, NewsItem};
 use knowledge::{
-    Citations, DocKind, EmbedError, EmbedKind, Embedder, FakeEmbedder, IngestOutcome, KnowledgeBase, KnowledgeConfig, NewDocument, SearchRequest, Section,
-    spawn_news_worker, testutil,
+    Citations, DocKind, EmbedError, EmbedKind, Embedder, FakeEmbedder, IngestOutcome, KnowledgeBase, KnowledgeConfig, KnowledgeSearch, NewDocument, SearchRequest,
+    Section, spawn_news_worker, testutil,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -58,6 +58,35 @@ impl Embedder for Counting {
     async fn embed(&self, t: &[String], k: EmbedKind) -> Result<Vec<Vec<f32>>, EmbedError> {
         self.1.fetch_add(t.len(), Ordering::SeqCst);
         self.0.embed(t, k).await
+    }
+}
+
+/// El mismo embedder con el identificador del modelo con el que se calibró el umbral de las citas: con otro,
+/// `similarities` no puntúa.
+struct Calibrated<E>(E);
+#[async_trait]
+impl<E: Embedder> Embedder for Calibrated<E> {
+    fn model_id(&self) -> String {
+        "embeddinggemma:test|gemma|native".into()
+    }
+    async fn embed(&self, t: &[String], k: EmbedKind) -> Result<Vec<Vec<f32>>, EmbedError> {
+        self.0.embed(t, k).await
+    }
+}
+
+/// Textos y tipo de cada llamada al embedder.
+type Calls = Arc<Mutex<Vec<(Vec<String>, EmbedKind)>>>;
+
+/// Anota cada llamada para comprobar cuántas se hacen y como qué.
+struct Recording(Calls);
+#[async_trait]
+impl Embedder for Recording {
+    fn model_id(&self) -> String {
+        FakeEmbedder::default().model_id()
+    }
+    async fn embed(&self, t: &[String], k: EmbedKind) -> Result<Vec<Vec<f32>>, EmbedError> {
+        self.0.lock().unwrap().push((t.to_vec(), k));
+        FakeEmbedder::default().embed(t, k).await
     }
 }
 
@@ -410,4 +439,34 @@ async fn ingesting_news_skips_noise() {
         )
         .await;
     assert_eq!((rep.added, rep.skipped), (1, 1), "{rep:?}");
+}
+
+#[tokio::test]
+async fn similarities_make_one_query_call_with_the_unique_texts_and_nothing_for_no_pairs() {
+    let calls = Calls::default();
+    // Con un embedder para el que el umbral no está calibrado no se puntúa (ni se le llama): decide la regla léxica.
+    let other = kb_with(Arc::new(Recording(Arc::clone(&calls)))).await;
+    assert_eq!(other.similarities(&[("a b".to_string(), "a b".to_string())]).await, None);
+    assert!(calls.lock().unwrap().is_empty());
+
+    let kb = kb_with(Arc::new(Calibrated(Recording(Arc::clone(&calls))))).await;
+    assert_eq!(kb.similarities(&[]).await, Some(vec![]));
+    assert!(calls.lock().unwrap().is_empty(), "sin pares no se llama al embedder");
+    let (a, b) = ("apple services revenue growth".to_string(), "gold mining output decline".to_string());
+    let s = kb.similarities(&[(a.clone(), a.clone()), (a.clone(), b.clone()), (b.clone(), b.clone()), (a.clone(), b.clone())]).await.unwrap();
+    assert_eq!(s.len(), 4);
+    assert!((s[0] - 1.0).abs() < 1e-4 && (s[2] - 1.0).abs() < 1e-4, "textos idénticos: {s:?}");
+    assert!(s[1] < 0.5 && s[1] == s[3], "textos sin palabras en común: {s:?}");
+    let calls = calls.lock().unwrap();
+    assert_eq!(*calls, vec![(vec![a, b], EmbedKind::Query)], "una sola llamada, sin repetir textos y como consulta (los Document esperan en el servidor)");
+}
+
+#[tokio::test]
+async fn similarities_are_none_when_the_embedder_fails_or_is_paused() {
+    let kb = kb_with(Arc::new(Calibrated(Down))).await;
+    let pairs = [("apple services".to_string(), "apple services revenue".to_string())];
+    assert_eq!(kb.similarities(&pairs).await, None);
+    // Tras el fallo el embedder queda en pausa: tampoco se le vuelve a llamar.
+    assert_eq!(kb.similarities(&pairs).await, None);
+    assert_eq!(kb.similarities(&[]).await, Some(vec![]), "sin pares no hay nada que fallar");
 }
